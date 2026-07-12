@@ -31,8 +31,8 @@ async fn help_subcommand_prints_about_text() {
     let output = env.dv().arg("help").output().expect("failed to spawn dv");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("drovr"),
-        "`dv help` stdout should contain 'drovr'; got:\n{stdout}"
+        stdout.contains("agent multiplexer"),
+        "`dv help` stdout should contain 'agent multiplexer'; got:\n{stdout}"
     );
 }
 
