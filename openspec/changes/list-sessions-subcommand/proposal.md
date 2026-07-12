@@ -7,22 +7,22 @@ operators instant visibility without manually querying tmux.
 
 ## What Changes
 
-- Add a `list` subcommand to `dv` that queries a tmux server for running
-  sessions.
-- Filter and display sessions whose names match known agent harness prefixes:
-  `claude` and `pi`.
-- For each matching session, list every window with its index and name — one
-  window per output line.
-- Output is columnar plain text: session name, window index, window name (no
-  deeper status metadata in this iteration).
+- Add a `list` subcommand to `dv` that queries every pane across all tmux
+  sessions via `tmux list-panes -a`.
+- Identify agent harness panes by their running process name
+  (`#{pane_current_command}`), matching exactly `claude` or `pi` — no assumption
+  is made about session naming.
+- Output is columnar plain text with three left-aligned columns:
+  `<agent-name>  <session-name>  <window-index>.<pane-index>`.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `list-sessions`: Discover and display agent harness sessions running on a tmux
-  server, filtered by known harness names (`claude`, `pi`), with per-window
-  detail (index and name) for each session.
+- `list-sessions`: Discover and display panes running known agent harness
+  processes (`claude`, `pi`) across all tmux sessions, identified by
+  `pane_current_command`, showing agent name, session name, and `window.pane`
+  identifier per result.
 
 ### Modified Capabilities
 
@@ -35,5 +35,5 @@ operators instant visibility without manually querying tmux.
 - New source file(s) for the list subcommand implementation (tmux session
   querying logic).
 - New dependency on a tmux interaction mechanism (shell-out to
-  `tmux list-sessions` or a tmux crate).
+  `tmux list-panes -a`).
 - No breaking changes to existing `help` subcommand or CLI surface.

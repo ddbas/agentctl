@@ -1,26 +1,28 @@
 ## Context
 
 `dv` is the drovr developer CLI built with Rust and `clap`. Currently it has
-only a `help` subcommand. Developers frequently run multiple AI agent harness
-sessions (`claude`, `pi`) inside tmux and need a fast way to enumerate what is
-live. The tmux CLI (`tmux list-sessions`) is the canonical source of truth for
-running sessions on a given server.
+only a `help` subcommand. Developers frequently run AI agent harness processes
+(`claude`, `pi`) inside tmux panes — in any session, with any session name — and
+need a fast way to enumerate what is live. The tmux CLI (`tmux list-panes -a`)
+is the canonical source of truth: it exposes `#{pane_current_command}`, the
+basename of the foreground process in every pane across every session.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Add a `dv list` subcommand that prints all windows belonging to tmux sessions
-  whose names match known agent harnesses (`claude`, `pi`).
-- Each output line shows: session name, window index, and window name — in a
-  readable columnar format.
+- Add a `dv list` subcommand that prints one line per pane whose
+  `pane_current_command` exactly matches a known agent harness name (`claude` or
+  `pi`).
+- Each output line shows three columns: agent name, session name, and
+  `window_index.pane_index` identifier — all left-aligned.
 - Accept an optional `--server` / `-s` flag so callers can point at a specific
   tmux socket/server file (falls back to the default tmux server when omitted).
 
 **Non-Goals:**
 
-- Showing session status, pane-level detail, or richer metadata (deferred to a
-  future iteration).
+- Showing session status, pane titles, or richer metadata (deferred to a future
+  iteration).
 - Supporting harness types beyond `claude` and `pi` without a code change (the
   list is hard-coded for now).
 - Interactive or TUI output.
@@ -28,40 +30,35 @@ running sessions on a given server.
 
 ## Decisions
 
-### Shell-out to `tmux list-windows -a` rather than a tmux crate
+### Shell-out to `tmux list-panes -a` rather than a tmux crate
 
 **Decision**: Invoke
-`tmux list-windows -a -F '#{session_name}\t#{window_index}\t#{window_name}'` via
-`std::process::Command`.
+`tmux list-panes -a -F '#{pane_current_command}\t#{session_name}\t#{window_index}\t#{pane_index}'`
+via `std::process::Command`.
 
-**Rationale**: The `tmux` binary is already a hard runtime dependency of any
-workflow that creates tmux sessions, so it will always be present. A pure-Rust
-tmux library (e.g., `tmux_interface`) adds a compile-time dependency and
-maintenance surface for no practical benefit at this stage. Shell-out keeps the
-code small and directly testable against real tmux behaviour.
-
-`list-windows -a` is preferred over two-step `list-sessions` + per-session
-`list-windows` because it returns all windows in a single subprocess call and
-the output is easily tab-split into (session, index, name) tuples.
+**Rationale**: `list-panes -a` returns every pane across every session in a
+single subprocess call and surfaces `pane_current_command` — the foreground
+process basename — which is the authoritative signal for which agent is running.
+This avoids any dependency on session naming conventions.
 
 **Alternatives considered**:
 
-- `tmux_interface` crate — more type-safe but heavy dependency for a simple
-  listing operation; ruled out.
-- `tmux list-sessions` + per-session `list-windows` — two-step, higher overhead,
-  ruled out.
-- Parse `/tmp/tmux-*/` socket directory directly — too fragile and
-  platform-specific; ruled out.
+- `tmux_interface` crate — more type-safe but heavy dependency; ruled out.
+- `tmux list-sessions` + per-session `list-windows` — two-step, relies on
+  session name heuristics; ruled out.
+- `tmux list-windows -a` with `#{window_name}` — window name is often
+  auto-renamed and unreliable as a process identifier; ruled out.
 
-### Filter by prefix match
+### Filter by exact match on `pane_current_command`
 
-**Decision**: A session is included in the output if its name starts with
-`claude` or `pi` (case-sensitive).
+**Decision**: A pane is included in the output if its `pane_current_command`
+exactly equals `claude` or `pi` (case-sensitive).
 
-**Rationale**: Agent harness sessions are typically named `claude`, `claude-1`,
-`pi`, `pi-work`, etc. A prefix match captures all variants without requiring an
-exact name list. If the tmux session naming convention changes, only the filter
-list needs updating.
+**Rationale**: `pane_current_command` is the basename of the foreground process
+as reported by tmux — it is already the agent name, not a session label chosen
+by the user. Exact match avoids false positives (e.g. a pane running `pilot`
+would not match `pi`). If the agent binary is renamed, only the allow-list needs
+updating.
 
 ### Module layout
 
@@ -73,23 +70,21 @@ logic independently testable.
 
 ### Output format
 
-**Decision**: Print one window per line, with columns left-aligned and
-space-padded:
+**Decision**: Print one pane per line with three space-padded columns:
 
 ```
-claude          0  zsh
-claude          1  nvim
-pi-work         0  bash
+claude  my-session    0.0
+pi      work-session  1.0
+pi      work-session  2.3
 ```
 
-Column widths: session name padded to the longest session name + 2 spaces;
-window index right-aligned in a fixed-width field (e.g. 2 chars); window name
-unpadded.
+Column order: `agent`, `session`, `window_index.pane_index`. All three columns
+are left-aligned; each is padded to the longest value in that column + 2 spaces.
 
-**Rationale**: Tab-separated would be simpler but looks ragged in terminals.
-Fixed-width column padding is easy to implement with Rust's `format!` width
-specifiers and makes the output scannable at a glance. A future `--json` flag
-can be added when richer metadata is introduced.
+**Rationale**: Putting agent name first makes it easiest to scan when multiple
+harness types are interleaved. The `window.pane` notation follows standard tmux
+convention and is directly usable in `tmux select-pane -t session:window.pane`.
+Tab-separated would be simpler but looks ragged in terminals.
 
 ## Risks / Trade-offs
 
@@ -97,10 +92,11 @@ can be added when richer metadata is introduced.
   environments. Mitigation: surface a clear error message
   (`tmux not found — is tmux installed and on PATH?`) rather than a raw
   `No such file or directory` OS error.
-- **No running tmux server** → `tmux list-sessions` exits non-zero and prints an
-  error when no server is running. Mitigation: treat a non-zero exit from
-  `tmux list-sessions` as "no sessions" and return an empty list (with an
-  optional debug message) rather than propagating an error.
-- **Prefix false-positives** → A non-harness session named `pilot` would match
-  the `pi` prefix. Mitigation: acceptable trade-off for now; can be tightened to
-  exact-match or configurable patterns in a later change.
+- **No running tmux server** → `tmux list-panes -a` exits non-zero when no
+  server is running. Mitigation: treat a non-zero exit as "no panes" and return
+  an empty list rather than propagating an error.
+- **Process name reliability** → `pane_current_command` reflects the current
+  foreground process. If the agent spawns a subprocess (e.g. a shell) and that
+  becomes the foreground, the pane may not be detected. Mitigation: acceptable
+  limitation for the initial iteration; can be addressed with
+  `pane_current_path` or `pane_title` heuristics later.
