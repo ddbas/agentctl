@@ -5,6 +5,7 @@
 //! `pi`).  Output is columnar plain text with three left-aligned columns:
 //! `<agent-name>  <session-name>  <window-index>.<pane-index>`.
 
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::process::Command;
 
@@ -22,6 +23,8 @@ const KNOWN_AGENTS: &[&str] = &["claude", "pi"];
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaneEntry {
     /// Foreground process name as reported by `#{pane_current_command}`.
+    /// For `pi` panes this is initially `"node"` and is resolved to `"pi"`
+    /// by [`resolve_node_agents`] after querying the process table.
     pub agent: String,
     /// Tmux session name.
     pub session: String,
@@ -29,6 +32,8 @@ pub struct PaneEntry {
     pub window_index: u32,
     /// Pane index within the window.
     pub pane_index: u32,
+    /// PID of the pane's shell process (used to resolve `node` → `pi`).
+    pub pane_pid: u32,
 }
 
 // ── tmux interaction ──────────────────────────────────────────────────────────
@@ -55,7 +60,7 @@ pub fn tmux_panes(server: Option<&str>) -> Result<Vec<PaneEntry>> {
         "list-panes",
         "-a",
         "-F",
-        "#{pane_current_command}\t#{session_name}\t#{window_index}\t#{pane_index}",
+        "#{pane_current_command}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_pid}",
     ]);
 
     let output = cmd.output().map_err(|e| {
@@ -76,21 +81,94 @@ pub fn tmux_panes(server: Option<&str>) -> Result<Vec<PaneEntry>> {
     let mut panes = Vec::new();
 
     for line in stdout.lines() {
-        let parts: Vec<&str> = line.splitn(4, '\t').collect();
-        if parts.len() < 4 {
+        let parts: Vec<&str> = line.splitn(5, '\t').collect();
+        if parts.len() < 5 {
             continue;
         }
         let window_index = parts[2].parse::<u32>().unwrap_or(0);
         let pane_index = parts[3].parse::<u32>().unwrap_or(0);
+        let pane_pid = parts[4].parse::<u32>().unwrap_or(0);
         panes.push(PaneEntry {
             agent: parts[0].to_owned(),
             session: parts[1].to_owned(),
             window_index,
             pane_index,
+            pane_pid,
         });
     }
 
+    resolve_node_agents(&mut panes);
+
     Ok(panes)
+}
+
+// ── node → pi resolution ─────────────────────────────────────────────────────
+
+/// Build a map of parent-PID → argv[0] basenames of its direct children by
+/// running `ps -A -o pid=,ppid=,args=` once.
+///
+/// Returns an empty map if `ps` cannot be run or exits non-zero (best-effort;
+/// `node` panes simply remain unresolved in that case).
+// Task 6.2
+pub fn build_process_table() -> HashMap<u32, Vec<String>> {
+    let output = Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid=,args="])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return HashMap::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut table: HashMap<u32, Vec<String>> = HashMap::new();
+
+    for line in stdout.lines() {
+        let mut tokens = line.split_whitespace();
+        let pid = tokens.next().and_then(|s| s.parse::<u32>().ok());
+        let ppid = tokens.next().and_then(|s| s.parse::<u32>().ok());
+        // argv[0] is the next token; rest are additional args we don't need.
+        let argv0 = tokens.next().unwrap_or("");
+        let basename = argv0.rsplit('/').next().unwrap_or(argv0);
+
+        if let (Some(_pid), Some(ppid)) = (pid, ppid) {
+            table.entry(ppid).or_default().push(basename.to_owned());
+        }
+    }
+
+    table
+}
+
+/// Mutate any `PaneEntry` whose `agent == "node"` to the resolved agent name
+/// when the pane's shell PID has a direct child whose argv[0] basename matches
+/// a known agent (`pi`).
+///
+/// This is a pure function over a pre-built `table`; use
+/// [`resolve_node_agents`] for the full workflow.
+// Task 6.3
+pub fn resolve_from_process_table(panes: &mut [PaneEntry], table: &HashMap<u32, Vec<String>>) {
+    for pane in panes.iter_mut() {
+        if pane.agent != "node" {
+            continue;
+        }
+        if let Some(children) = table.get(&pane.pane_pid)
+            && children.iter().any(|a| a == "pi")
+        {
+            pane.agent = "pi".to_owned();
+        }
+    }
+}
+
+/// Resolve `node` panes to their real agent name.
+///
+/// Skips the `ps` call entirely when no `node` panes are present.
+// Task 6.4
+fn resolve_node_agents(panes: &mut [PaneEntry]) {
+    if !panes.iter().any(|p| p.agent == "node") {
+        return;
+    }
+    let table = build_process_table();
+    resolve_from_process_table(panes, &table);
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────
@@ -174,6 +252,7 @@ mod tests {
             session: session.to_owned(),
             window_index: window,
             pane_index: pane,
+            pane_pid: 0,
         }
     }
 
@@ -254,5 +333,64 @@ mod tests {
     fn format_panes_empty_returns_empty_string() {
         let output = format_panes(&[]);
         assert_eq!(output, "");
+    }
+
+    // ── resolve_from_process_table (tasks 6.6 – 6.8) ──────────────────────
+
+    fn make_table(entries: &[(u32, &str)]) -> HashMap<u32, Vec<String>> {
+        let mut map: HashMap<u32, Vec<String>> = HashMap::new();
+        for (ppid, argv0) in entries {
+            map.entry(*ppid).or_default().push(argv0.to_string());
+        }
+        map
+    }
+
+    // Task 6.6 — a node pane whose shell PID has a child with argv0 "pi" is
+    // resolved to "pi".
+    #[test]
+    fn resolve_node_pane_with_pi_child_becomes_pi() {
+        let mut panes = vec![PaneEntry {
+            agent: "node".to_owned(),
+            session: "dev".to_owned(),
+            window_index: 0,
+            pane_index: 0,
+            pane_pid: 100,
+        }];
+        // pid 200 is a child of shell 100, argv0 basename = "pi"
+        let table = make_table(&[(100, "pi")]);
+        resolve_from_process_table(&mut panes, &table);
+        assert_eq!(panes[0].agent, "pi");
+    }
+
+    // Task 6.7 — a node pane with no matching child stays as "node".
+    #[test]
+    fn resolve_node_pane_with_no_pi_child_stays_node() {
+        let mut panes = vec![PaneEntry {
+            agent: "node".to_owned(),
+            session: "dev".to_owned(),
+            window_index: 0,
+            pane_index: 0,
+            pane_pid: 100,
+        }];
+        // child is some other node process, not pi
+        let table = make_table(&[(100, "webpack")]);
+        resolve_from_process_table(&mut panes, &table);
+        assert_eq!(panes[0].agent, "node");
+    }
+
+    // Task 6.8 — claude panes are untouched by resolution.
+    #[test]
+    fn resolve_leaves_claude_panes_unchanged() {
+        let mut panes = vec![PaneEntry {
+            agent: "claude".to_owned(),
+            session: "dev".to_owned(),
+            window_index: 0,
+            pane_index: 0,
+            pane_pid: 200,
+        }];
+        // even if there's a pi child, claude pane must not change
+        let table = make_table(&[(200, "pi")]);
+        resolve_from_process_table(&mut panes, &table);
+        assert_eq!(panes[0].agent, "claude");
     }
 }

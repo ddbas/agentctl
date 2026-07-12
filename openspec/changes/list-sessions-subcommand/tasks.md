@@ -53,3 +53,23 @@
 - [x] 5.2 Run `mise run test` and confirm all tests pass
 - [ ] 5.3 Manual smoke-test: `dv list` against a live tmux server with at least
       one `pi` or `claude` pane running
+
+## 6. `pi`-via-`node` Detection
+
+- [x] 6.1 Add `pane_pid: u32` field to `PaneEntry` and extend the tmux format
+      string to include `#{pane_pid}` as the fifth tab-delimited field
+- [x] 6.2 Implement `build_process_table() -> HashMap<u32, Vec<String>>` that
+      runs `ps -A -o pid=,ppid=,args=` and returns a map of ppid → vec of
+      argv[0] basenames of direct children
+- [x] 6.3 Implement pure `resolve_from_process_table(panes, table)` that mutates
+      any `PaneEntry` whose `agent == "node"` to `"pi"` when the pane's shell
+      PID has a direct child with argv[0] basename `== "pi"`
+- [x] 6.4 Implement `resolve_node_agents(panes)` that skips the `ps` call when
+      no `node` panes exist, otherwise calls 6.2 then 6.3
+- [x] 6.5 Call `resolve_node_agents` inside `tmux_panes` after parsing output
+- [x] 6.6 Unit test `resolve_from_process_table`: a `node` pane whose shell PID
+      has a child with argv0 `pi` is resolved to `pi`
+- [x] 6.7 Unit test `resolve_from_process_table`: a `node` pane with no matching
+      child is left as `node`
+- [x] 6.8 Unit test `resolve_from_process_table`: `claude` panes are unchanged
+- [x] 6.9 Run `mise run build` and `mise run test` and confirm all pass

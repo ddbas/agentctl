@@ -9,9 +9,14 @@ operators instant visibility without manually querying tmux.
 
 - Add a `list` subcommand to `dv` that queries every pane across all tmux
   sessions via `tmux list-panes -a`.
-- Identify agent harness panes by their running process name
-  (`#{pane_current_command}`), matching exactly `claude` or `pi` — no assumption
-  is made about session naming.
+- Identify agent harness panes by a two-step process:
+  1. `#{pane_current_command}` is checked first — a value of `claude` is a
+     direct match.
+  2. Because `pi` is a Node.js application, tmux reports its foreground process
+     as `node`. For any pane where `pane_current_command == "node"`, `dv` walks
+     the child processes of `#{pane_pid}` (the pane's shell) using
+     `ps -A -o pid=,ppid=,args=` and checks whether the argv\[0\] basename of
+     any direct child equals `pi`. If so, the pane is reported as a `pi` pane.
 - Output is columnar plain text with three left-aligned columns:
   `<agent-name>  <session-name>  <window-index>.<pane-index>`.
 
@@ -20,9 +25,11 @@ operators instant visibility without manually querying tmux.
 ### New Capabilities
 
 - `list-sessions`: Discover and display panes running known agent harness
-  processes (`claude`, `pi`) across all tmux sessions, identified by
-  `pane_current_command`, showing agent name, session name, and `window.pane`
-  identifier per result.
+  processes (`claude`, `pi`) across all tmux sessions. `claude` is identified
+  directly via `pane_current_command`; `pi` is identified by inspecting the
+  argv\[0\] of the pane shell's child processes (since `pi` runs under `node`).
+  Output shows agent name, session name, and `window.pane` identifier per
+  result.
 
 ### Modified Capabilities
 
@@ -36,4 +43,6 @@ operators instant visibility without manually querying tmux.
   querying logic).
 - New dependency on a tmux interaction mechanism (shell-out to
   `tmux list-panes -a`).
+- New dependency on `ps -A -o pid=,ppid=,args=` to resolve `node` panes to `pi`
+  by inspecting process argv.
 - No breaking changes to existing `help` subcommand or CLI surface.

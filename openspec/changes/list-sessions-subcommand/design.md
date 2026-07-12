@@ -49,16 +49,41 @@ This avoids any dependency on session naming conventions.
 - `tmux list-windows -a` with `#{window_name}` — window name is often
   auto-renamed and unreliable as a process identifier; ruled out.
 
-### Filter by exact match on `pane_current_command`
+### Filter by exact match on `pane_current_command`, with a process-argv fallback for `node`
 
-**Decision**: A pane is included in the output if its `pane_current_command`
-exactly equals `claude` or `pi` (case-sensitive).
+**Decision**: A pane is included in the output if:
 
-**Rationale**: `pane_current_command` is the basename of the foreground process
-as reported by tmux — it is already the agent name, not a session label chosen
-by the user. Exact match avoids false positives (e.g. a pane running `pilot`
-would not match `pi`). If the agent binary is renamed, only the allow-list needs
-updating.
+1. Its `pane_current_command` exactly equals `claude` (direct match), **or**
+2. Its `pane_current_command` is `node` **and** the argv[0] basename of at least
+   one direct child process of `#{pane_pid}` equals `pi`.
+
+**Rationale**: `pi` is a Node.js application. Its launcher script
+(`/opt/homebrew/bin/pi`) does `exec node …` with the pi script path as argv[1],
+but argv[0] is preserved as `pi` via the shebang mechanism. tmux's
+`pane_current_command` reflects the actual binary name (`node`), not argv[0].
+Running `ps -A -o pid=,ppid=,args=` once and checking `args` (argv[0]) of direct
+children of the pane's shell PID lets `dv` correctly identify those panes
+without false-positives (an unrelated `node` process running something other
+than `pi` would not match).
+
+### Two-step pane resolution: `pane_current_command` then process-argv
+
+**Decision**: When `pane_current_command == "node"`, issue one
+`ps -A -o pid=,ppid=,args=` call (shared across all `node` panes in the current
+query), build a ppid→argv0-basenames map, and check whether the pane shell's PID
+has a direct child whose argv[0] basename is `pi`.
+
+**Rationale**: A single `ps -A` call returns every process on the system in one
+shot; building a PPID-keyed map makes the per-pane lookup O(1). This avoids one
+subprocess per pane. The `ps` call is skipped entirely if no pane in the current
+result reports `node`, keeping the fast path fast.
+
+**Alternatives considered**:
+
+- `pgrep -P <pane_pid>` per node pane — requires N subprocesses; ruled out.
+- Read `/proc/<pid>/cmdline` — Linux-only; ruled out.
+- Match `#{pane_title}` — user-controlled, fragile; ruled out.
+- Have pi call `exec -a pi node …` — requires changing pi; ruled out for now.
 
 ### Module layout
 
