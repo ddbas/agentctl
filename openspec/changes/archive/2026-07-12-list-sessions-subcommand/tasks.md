@@ -51,7 +51,7 @@
 
 - [x] 5.1 Run `mise run build` and confirm zero compile errors
 - [x] 5.2 Run `mise run test` and confirm all tests pass
-- [ ] 5.3 Manual smoke-test: `dv list` against a live tmux server with at least
+- [x] 5.3 Manual smoke-test: `dv list` against a live tmux server with at least
       one `pi` or `claude` pane running
 
 ## 6. `pi`-via-`node` Detection
