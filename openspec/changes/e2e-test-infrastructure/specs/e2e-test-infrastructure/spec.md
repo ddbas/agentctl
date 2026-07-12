@@ -18,85 +18,88 @@ binaries isolated from production code.
 
 ### Requirement: Shared test helper module
 
-The project SHALL provide a `tests/common/mod.rs` module that exports
-container-startup helpers and shared fixtures usable by all integration test
-files.
+The project SHALL provide a `tests/common/mod.rs` module that exports `TmuxEnv`
+and a Docker canary helper usable by all integration test files.
 
 #### Scenario: Common module is importable
 
 - **WHEN** an integration test file declares `mod common;`
-- **THEN** it can call helper functions from `tests/common/mod.rs` without
+- **THEN** it can use `TmuxEnv` and `start_generic_container` without
   compilation errors
 
-### Requirement: Async container-backed tests with Tokio runtime
+### Requirement: TmuxEnv isolates each test from the host tmux server
 
-Every E2E test function that interacts with a testcontainer SHALL be annotated
-with `#[tokio::test]`. Each test MUST start its own container instance and stop
-it automatically when the test completes (via Drop or explicit cleanup).
+`TmuxEnv` SHALL point `TMUX_TMPDIR` at a per-test `TempDir` so that every `tmux`
+invocation uses a fresh socket file completely separate from the developer's
+running sessions.
 
-#### Scenario: Container starts and is accessible
+#### Scenario: dv does not see the host tmux session
 
-- **WHEN** a test function annotated with `#[tokio::test]` calls the container
-  startup helper
-- **THEN** a Docker container is running and the test can communicate with it
+- **WHEN** a test runs inside an active tmux session (i.e. `TMUX` is set in the
+  environment)
+- **THEN** `TmuxEnv::dv()` clears `TMUX` and `TMUX_PANE` so `dv` behaves as if
+  it is not inside tmux
 
-#### Scenario: Container stops after test ends
+#### Scenario: Isolated tmux socket is removed after test
 
 - **WHEN** a test function completes (success or failure)
-- **THEN** the container is removed and no orphaned containers remain on the
-  host
+- **THEN** the `TempDir` holding `TMUX_TMPDIR` is dropped and all socket files
+  are removed from the host
 
-#### Scenario: Container startup failure surfaces clearly
+#### Scenario: Concurrent tests do not share sessions
 
-- **WHEN** Docker is unavailable or the image cannot be pulled
-- **THEN** the test fails with a descriptive panic message identifying the cause
+- **WHEN** two `TmuxEnv` instances exist simultaneously
+- **THEN** each uses a distinct `TMUX_TMPDIR` and tmux sockets do not overlap
 
-### Requirement: Parallel test execution by default
+### Requirement: dv binary runner strips tmux environment contamination
 
-Integration tests SHALL run in parallel. No test SHALL hold a process-wide lock
-or use `#[serial]` unless a documented resource conflict requires it.
-
-#### Scenario: Two independent tests run concurrently
-
-- **WHEN** two E2E test functions are present in the suite
-- **THEN** Cargo's test harness executes them in parallel threads without
-  deadlocks or data races
-
-### Requirement: Bootstrap example test
-
-The scaffold SHALL include at least one working example E2E test that starts a
-container, performs a trivial assertion, and stops the container. This validates
-the entire infrastructure end-to-end and runs as part of `mise run test`.
-
-#### Scenario: Example test passes with Docker available
-
-- **WHEN** `mise run test` is invoked with Docker running
-- **THEN** the example test starts a container, asserts the expected condition,
-  and reports success
-
-#### Scenario: Example test failure is descriptive when Docker is absent
-
-- **WHEN** `mise run test` is invoked without Docker
-- **THEN** the test fails with a message indicating Docker is unavailable, not a
-  cryptic panic
-
-### Requirement: DvEnv helper isolates dv binary execution
-
-The `DvEnv` struct SHALL provide a method that returns a `std::process::Command`
-pre-configured with `CARGO_BIN_EXE_dv` pointing at the compiled binary and with
-host git environment variables (`GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE`,
-`GIT_PREFIX`, `GIT_COMMON_DIR`) cleared.
+`TmuxEnv::dv()` SHALL return a `std::process::Command` using `CARGO_BIN_EXE_dv`
+with `TMUX`, `TMUX_PANE` removed and `TMUX_TMPDIR` set to the isolated temp
+directory.
 
 #### Scenario: dv binary is invocable from tests
 
 - **WHEN** a test calls `env.dv()` and appends arguments
 - **THEN** the returned `Command` runs the `dv` binary built by `cargo test`
 
-#### Scenario: Host git env vars do not leak into dv invocations
+#### Scenario: TMUX_TMPDIR is set to the isolated directory
 
-- **WHEN** a test is executed inside a git-hook context where `GIT_DIR` is set
-- **THEN** the `dv()` command builder strips `GIT_DIR` so `dv` operates on the
-  correct repository
+- **WHEN** `dv` shells out to `tmux`
+- **THEN** tmux uses the per-test socket path, not the system default under
+  `/tmp/tmux-<uid>/`
+
+### Requirement: Async Docker canary test with Tokio runtime
+
+The scaffold SHALL include a test that starts a Docker container via
+testcontainers to validate the async runner infrastructure. The test MUST be
+annotated with `#[tokio::test]` and the container MUST be removed automatically
+on drop.
+
+#### Scenario: Container starts and is accessible
+
+- **WHEN** a `#[tokio::test]` calls `start_generic_container()`
+- **THEN** a Docker container is running and the container ID is non-empty
+
+#### Scenario: Container stops after test ends
+
+- **WHEN** the test function completes
+- **THEN** the container handle is dropped and no orphaned containers remain
+
+#### Scenario: Container startup failure surfaces clearly
+
+- **WHEN** Docker is unavailable
+- **THEN** the test panics with a descriptive message, not a cryptic error
+
+### Requirement: Parallel test execution by default
+
+Integration tests SHALL run in parallel. No test SHALL hold a process-wide lock
+or use `#[serial]` unless a documented resource conflict requires it.
+
+#### Scenario: Two independent TmuxEnv tests run concurrently
+
+- **WHEN** two test functions each create a `TmuxEnv`
+- **THEN** they execute in parallel without interfering with each other's tmux
+  sockets
 
 ### Requirement: Help command integration tests
 
@@ -105,15 +108,15 @@ and `dv` (no arguments) produce expected output and exit successfully.
 
 #### Scenario: dv help exits zero
 
-- **WHEN** `dv help` is invoked
+- **WHEN** `dv help` is invoked via `TmuxEnv::dv()`
 - **THEN** the process exits with status 0
 
 #### Scenario: dv --help prints usage
 
-- **WHEN** `dv --help` is invoked
+- **WHEN** `dv --help` is invoked via `TmuxEnv::dv()`
 - **THEN** stdout contains "Usage" (case-insensitive)
 
 #### Scenario: dv with no args exits zero
 
-- **WHEN** `dv` is invoked with no arguments
+- **WHEN** `dv` is invoked with no arguments via `TmuxEnv::dv()`
 - **THEN** the process exits with status 0
