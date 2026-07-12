@@ -1,19 +1,20 @@
 ## Why
 
-The `dv` CLI manages tmux sessions. Without test isolation, any test that shells
-out to `tmux` will attach to or interfere with the developer's own running tmux
-sessions, be affected by the `TMUX`/`TMUX_PANE` env vars injected when running
-inside an existing session, and leave orphaned sessions on the host. We need a
-lightweight, reproducible test harness that gives every test its own isolated
-tmux socket before we add meaningful CLI coverage.
+The `dv` CLI manages tmux sessions. Without container isolation, any test that
+invokes `tmux` will interact with the developer's live sessions, be affected by
+`TMUX`/`TMUX_PANE` env vars set when running inside an existing session, and
+leave orphaned sessions on the host. We need a reproducible, host-safe test
+harness that gives every test its own isolated tmux server before we add
+meaningful CLI coverage.
 
 ## What Changes
 
 - Add a `tests/` directory at the repository root for Cargo integration test
   binaries.
 - Add a `tests/common/mod.rs` shared helper module that exports a `TmuxEnv`
-  struct providing fully isolated tmux sessions via a per-test `TempDir` used as
-  `TMUX_TMPDIR`, plus a `dv` binary runner that strips tmux-injected env vars.
+  struct: it starts an `alpine`-based Docker container with tmux installed,
+  starts an isolated tmux server inside that container on a bind-mounted socket
+  path, and exposes a `dv` binary runner that points at that socket.
 - Add an example E2E test (`tests/e2e_example.rs`) that starts a `hello-world`
   Docker container via testcontainers as a canary for the async runner
   infrastructure.
@@ -26,9 +27,9 @@ tmux socket before we add meaningful CLI coverage.
 
 ### New Capabilities
 
-- `e2e-test-infrastructure`: E2E/integration test scaffold — shared `TmuxEnv`
-  helper providing tmux socket isolation, testcontainers-backed Docker canary,
-  async Tokio test support, parallel execution, and working example tests.
+- `e2e-test-infrastructure`: E2E/integration test scaffold — `TmuxEnv` helper
+  with a container-backed tmux server, testcontainers async runner, parallel
+  execution, canary test, and help command integration tests.
 
 ### Modified Capabilities
 
@@ -40,6 +41,5 @@ tmux socket before we add meaningful CLI coverage.
   (verify versions already present).
 - New files under `tests/`: `common/mod.rs`, `e2e_example.rs`,
   `help_command.rs`.
-- `mise run test` runs all integration tests; Docker must be available in CI for
-  the canary test.
+- `mise run test` runs all integration tests; Docker must be available in CI.
 - No changes to production `src/` code.

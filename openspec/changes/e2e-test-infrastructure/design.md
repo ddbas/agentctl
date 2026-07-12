@@ -4,14 +4,14 @@ The `dv` CLI manages tmux sessions. Currently it only has a `help` command, but
 future subcommands will shell out to `tmux` to create, list, attach to, and kill
 sessions. Without test isolation, tests that invoke `tmux` will interact with
 the developer's live sessions, be affected by `TMUX`/`TMUX_PANE` env vars set
-when running inside an existing tmux session, and leave orphaned sessions on the
+when running inside an existing session, and leave orphaned sessions on the
 host.
 
-The bonsai project (`~/repos/bonsai`) solved an analogous problem for git using
-a `GitEnv` helper backed by a Docker container. The core pattern transfers here
-— a per-test `TmuxEnv` helper — but the isolation mechanism is simpler: tmux
-isolation is achieved by pointing `TMUX_TMPDIR` at a throwaway `TempDir`, no
-container required for most tests.
+The bonsai project (`~/repos/bonsai`) solves an analogous problem for git using
+a `GitEnv` backed by an `alpine/git` container. We apply the same pattern here:
+a `TmuxEnv` backed by a container that has tmux installed and runs an isolated
+tmux server. The host `dv` binary communicates with the container's tmux server
+via a Unix socket on a bind-mounted `TempDir`.
 
 ## Goals / Non-Goals
 
@@ -19,103 +19,117 @@ container required for most tests.
 
 - Establish a `tests/` directory with Cargo integration test support.
 - Provide a `tests/common/mod.rs` module with:
-  - `TmuxEnv`: a per-test isolation helper that sets `TMUX_TMPDIR` to a fresh
-    `TempDir`, clears `TMUX` and `TMUX_PANE`, and exposes a `dv()` command
-    builder.
-  - `start_generic_container()`: a testcontainers canary helper that starts
-    `hello-world:latest` to validate Docker + async runner infrastructure.
+  - `TmuxEnv`: starts a Docker container with tmux, starts an isolated tmux
+    server inside the container on a socket within a bind-mounted `TempDir`, and
+    exposes a `dv()` command builder pre-configured with the socket path and
+    with `TMUX`/`TMUX_PANE` cleared.
+  - `start_generic_container()`: canary helper that starts `hello-world:latest`.
 - Ship `tests/e2e_example.rs` — Docker canary test.
-- Ship `tests/help_command.rs` — `dv help`, `dv --help`, `dv` (no args) tests
-  using `TmuxEnv`.
+- Ship `tests/help_command.rs` — integration tests for `dv help`, `dv --help`,
+  and `dv` (no args).
 - All tests async with `#[tokio::test]`; no process-wide serial locks.
 - `mise run test` runs all integration tests.
 
 **Non-Goals:**
 
-- Starting a tmux server inside a Docker container — tmux socket isolation via
-  `TMUX_TMPDIR` is sufficient and avoids cross-boundary complexity (the `dv`
-  host binary cannot exec into a container).
-- Testing any `dv` subcommand beyond `help` in this change — this lays the
-  scaffold; feature tests follow.
+- Implementing `DV_TMUX_SOCKET` support in `dv` itself in this change — the env
+  var is wired into the `dv()` command builder now; `dv` will read it when the
+  first tmux-calling subcommand is added.
 - CI/CD pipeline configuration — separate concern.
-- Pinning the Docker image to a digest — deferred.
+- Pinning the container image to a digest — deferred.
 
 ## Decisions
 
-### D1: tmux isolation via TMUX_TMPDIR, not a container
+### D1: Run tmux inside a Docker container, share socket via bind-mount
 
-**Decision**: `TmuxEnv` sets `TMUX_TMPDIR` to a `TempDir` path rather than
-running tmux inside a Docker container.
+**Decision**: `TmuxEnv` starts an `alpine`-based container with `tmux`
+installed, starts `tmux -S /workspace/tmux.sock start-server -d` inside it, and
+bind-mounts the host `TempDir` to `/workspace`. The socket is accessible on the
+host at `workspace_path/tmux.sock`.
 
-**Rationale**: tmux uses a per-user socket directory (`/tmp/tmux-<uid>/` by
-default). Setting `TMUX_TMPDIR` redirects the socket to an isolated path — this
-is the official tmux mechanism for exactly this purpose. Since `dv` is a host
-binary that shells out to the host `tmux`, running tmux inside a container would
-require socket forwarding or a separate tmux socket mount, adding significant
-complexity for no benefit. Each `TmuxEnv` gets its own `TempDir` so concurrent
-tests never share sockets.
+**Rationale**: This mirrors the bonsai `GitEnv` pattern exactly — the container
+provides a clean, version-pinned environment; the bind-mount bridges host and
+container. Every test gets a completely independent tmux server with no shared
+state. When `dv` gains tmux subcommands, pointing them at this socket is the
+single change needed to make all existing tests exercise real tmux behaviour.
 
 **Alternatives considered**:
 
-- _alpine/git-style container with tmux_: Requires bind-mounting the tmux socket
-  into the container or running `dv` inside the container — neither is practical
-  for a host binary.
-- _Global test mutex + shared socket_: Serialises tests and doesn't clean up
-  properly on failure.
+- _`TMUX_TMPDIR` isolation on host (no container)_: Simpler and avoids Docker
+  but uses the host's tmux installation. Different developers may have different
+  tmux versions; CI may have none. A container gives a consistent, pinned
+  runtime.
+- _Shared tmux server with session namespacing_: Fragile — session names could
+  still collide, and cleanup after a panicking test is unreliable.
 
-### D2: Keep testcontainers for a Docker canary only
+### D2: Container image — alpine with tmux installed at startup
 
-**Decision**: testcontainers is used solely in `e2e_example.rs` to prove the
-Docker + async runner plumbing works. It is not used for every test.
+**Decision**: Use `alpine:latest` as the base image. After the container starts
+(entrypoint: `sh -c "tail -f /dev/null"`), exec `apk add --no-cache tmux` once
+during `TmuxEnv::new()`, then start the tmux server.
 
-**Rationale**: Requiring Docker for every test would slow down the suite and
-block contributors without Docker installed from running basic tests. The tmux
-isolation story doesn't need a container. The canary test is a lightweight
-gatekeeper: if Docker is available, it passes; if not, it fails with a clear
-message.
+**Rationale**: `alpine` is tiny and pulls fast. There is no widely-used official
+`alpine+tmux` image worth pinning to, so installing at test startup is
+acceptable. The install is fast (~2s) and is cached by Docker layer caching in
+CI after the first pull.
 
-### D3: TmuxEnv is a plain struct, not async
+**Alternatives considered**:
 
-**Decision**: `TmuxEnv::new()` is a synchronous constructor (no `async`).
+- _Custom Docker image with tmux pre-installed_: Cleaner at runtime but requires
+  maintaining a `Dockerfile` and a registry. Deferred.
+- _`ubuntu` base_: Much larger image; slower pull. No benefit for a single
+  package.
 
-**Rationale**: Creating a `TempDir` is synchronous. No container needs to be
-started or waited on. Test functions still use `#[tokio::test]` for consistency
-and forward-compatibility (future tests may need async when `dv` subcommands are
-async), but `TmuxEnv` itself has no async surface.
+### D3: Socket path — explicit `-S /workspace/tmux.sock`
 
-### D4: Strip TMUX and TMUX_PANE from dv invocations
+**Decision**: Both the container tmux server and the host `dv()` invocations use
+an explicit `-S /workspace/tmux.sock` socket path rather than relying on
+`TMUX_TMPDIR`.
 
-**Decision**: `TmuxEnv::dv()` removes `TMUX` and `TMUX_PANE` from the child
-process environment.
+**Rationale**: `TMUX_TMPDIR` creates sockets under `TMPDIR/tmux-<uid>/`, where
+`<uid>` is the process UID. The container runs as root (uid 0); the host user
+has a different UID. Using `-S` with an absolute path sidesteps the UID mismatch
+entirely and is unambiguous.
 
-**Rationale**: When `mise run test` (or `cargo test`) is run from inside an
-active tmux session, these vars are set. Future `dv` subcommands may branch on
-whether they're inside tmux. Tests must run in a clean, non-tmux context to be
-deterministic.
+### D4: DV_TMUX_SOCKET env var as the test injection point
 
-### D5: Canary uses hello-world image
+**Decision**: `TmuxEnv::dv()` sets `DV_TMUX_SOCKET` to the host path of the
+container's socket. `dv` will read this env var and pass `-S <path>` to every
+tmux invocation when it is set.
 
-**Decision**: `e2e_example.rs` uses `hello-world:latest`.
+**Rationale**: This is a clean, zero-magic injection point. Tests set the env
+var; production runs without it use the default tmux socket. Implementing
+`DV_TMUX_SOCKET` support is deferred to the first subcommand that calls tmux;
+the infrastructure is wired now.
 
-**Rationale**: Minimal image — no tmux, no git, no OS. Validates Docker +
-testcontainers async runner in isolation from the rest of the test suite.
+### D5: Help command tests use TmuxEnv despite not needing tmux yet
+
+**Decision**: `help_command.rs` tests create a `TmuxEnv` even though `dv help`
+doesn't call tmux.
+
+**Rationale**: Establishes the pattern all future tests will follow. Ensures the
+helper compiles and works end-to-end. Overhead is minimal — the container starts
+in ~2s and runs in parallel with other tests.
 
 ## Risks / Trade-offs
 
-- **tmux not installed on host** → Tests that shell out to `tmux` will fail if
-  tmux is absent. Mitigation: tmux is a declared runtime dependency of `dv`;
-  document it in README. This is no different from any CLI that depends on an
-  external binary.
-- **Docker unavailability** → Canary test panics with a descriptive message.
-  Non-Docker tests are unaffected. Mitigation: note Docker requirement in README
-  and CI config.
-- **TMUX_TMPDIR not honoured by all tmux builds** → Rare but possible with very
-  old tmux versions. Mitigation: target tmux ≥ 2.x (universally available);
-  document minimum version requirement.
-- **TempDir cleanup on test panic** → Rust drops `TempDir` even on panics
-  (unless the process aborts). Orphaned socket files are unlikely but possible
-  if the OS kills the process mid-test. Mitigation: accepted; temp dirs under
-  `/tmp` are cleaned by the OS on reboot.
+- **Docker unavailability** → All tests that use `TmuxEnv` fail with a
+  descriptive panic. Mitigation: document Docker as a test dependency in the
+  README.
+- **Unix socket bind-mounts on macOS Docker Desktop** → Newer Docker Desktop
+  versions support Unix socket bind-mounts. If a version is encountered that
+  does not, `TMUX_TMPDIR` isolation is a straightforward fallback. Mitigation:
+  note minimum Docker Desktop version requirement once confirmed during
+  implementation.
+- **apk install latency** → ~2s per test container on first run; subsequent runs
+  benefit from Docker layer caching. Mitigation: acceptable; a custom pre-built
+  image can replace this later if it becomes a bottleneck.
+- **Root UID in container vs. host UID** → Handled by D3 (explicit `-S` socket
+  path). No `chmod` dance needed since socket ownership is irrelevant when using
+  `-S` directly.
+- **tmux server not yet used by dv** → `TmuxEnv` starts a server that `dv help`
+  never touches. This is intentional scaffolding; the server is ready for the
+  first real tmux subcommand.
 
 ## Migration Plan
 
@@ -125,14 +139,15 @@ testcontainers async runner in isolation from the rest of the test suite.
 2. Create `tests/common/mod.rs` with `TmuxEnv` and `start_generic_container`.
 3. Create `tests/e2e_example.rs` Docker canary.
 4. Create `tests/help_command.rs` integration tests.
-5. Run `mise run test` locally to confirm all tests pass.
+5. Run `mise run test` locally with Docker running to confirm all tests pass.
 
 No rollback needed — all changes are additive.
 
 ## Open Questions
 
-- Should `TmuxEnv` also start a background `tmux` server in the isolated socket
-  dir (via `tmux -L <socket> start-server`) so tests that need a running server
-  don't have to do it themselves? Deferred until a subcommand requires it.
-- Should the canary test be skipped (not failed) when Docker is unavailable?
-  Deferred — fail-loud is safer for CI.
+- Should we build and publish a custom `drovr-test:latest` image with tmux
+  pre-installed to eliminate the `apk add` step? Deferred — do it if `apk add`
+  latency becomes a problem.
+- Should `DV_TMUX_SOCKET` be the env var name, or something like
+  `TMUX_SOCKET_PATH`? Decided at implementation time when the first tmux
+  subcommand is added.

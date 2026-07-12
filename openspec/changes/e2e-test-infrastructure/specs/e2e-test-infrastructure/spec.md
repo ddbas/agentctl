@@ -27,68 +27,69 @@ and a Docker canary helper usable by all integration test files.
 - **THEN** it can use `TmuxEnv` and `start_generic_container` without
   compilation errors
 
-### Requirement: TmuxEnv isolates each test from the host tmux server
+### Requirement: TmuxEnv provides a container-backed isolated tmux server
 
-`TmuxEnv` SHALL point `TMUX_TMPDIR` at a per-test `TempDir` so that every `tmux`
-invocation uses a fresh socket file completely separate from the developer's
-running sessions.
+`TmuxEnv` SHALL start a Docker container with tmux installed, start a tmux
+server inside that container on a Unix socket within the bind-mounted workspace,
+and expose the socket path so the host `dv` binary can be directed at it.
 
-#### Scenario: dv does not see the host tmux session
+#### Scenario: Container starts with tmux server running
 
-- **WHEN** a test runs inside an active tmux session (i.e. `TMUX` is set in the
-  environment)
-- **THEN** `TmuxEnv::dv()` clears `TMUX` and `TMUX_PANE` so `dv` behaves as if
-  it is not inside tmux
+- **WHEN** `TmuxEnv::new().await` is called
+- **THEN** a Docker container is running with a tmux server accessible at a
+  known socket path within the bind-mounted workspace
 
-#### Scenario: Isolated tmux socket is removed after test
-
-- **WHEN** a test function completes (success or failure)
-- **THEN** the `TempDir` holding `TMUX_TMPDIR` is dropped and all socket files
-  are removed from the host
-
-#### Scenario: Concurrent tests do not share sessions
+#### Scenario: Each test gets an independent tmux server
 
 - **WHEN** two `TmuxEnv` instances exist simultaneously
-- **THEN** each uses a distinct `TMUX_TMPDIR` and tmux sockets do not overlap
+- **THEN** each container has its own tmux server on a distinct socket; sessions
+  in one are invisible to the other
 
-### Requirement: dv binary runner strips tmux environment contamination
+#### Scenario: Container and socket are removed after test ends
+
+- **WHEN** a test function completes (success or failure)
+- **THEN** the container is stopped, the bind-mounted `TempDir` is dropped, and
+  the socket file is removed from the host
+
+#### Scenario: Container startup failure surfaces clearly
+
+- **WHEN** Docker is unavailable or the image cannot be pulled
+- **THEN** the test panics with a descriptive message identifying the cause
+
+### Requirement: dv binary runner targets the isolated tmux socket
 
 `TmuxEnv::dv()` SHALL return a `std::process::Command` using `CARGO_BIN_EXE_dv`
-with `TMUX`, `TMUX_PANE` removed and `TMUX_TMPDIR` set to the isolated temp
-directory.
+with `TMUX` and `TMUX_PANE` removed and a socket-targeting env var
+(`DV_TMUX_SOCKET`) set to the container's socket path so that `dv` subcommands
+use the isolated server.
 
 #### Scenario: dv binary is invocable from tests
 
 - **WHEN** a test calls `env.dv()` and appends arguments
 - **THEN** the returned `Command` runs the `dv` binary built by `cargo test`
 
-#### Scenario: TMUX_TMPDIR is set to the isolated directory
+#### Scenario: TMUX and TMUX_PANE are absent from dv invocations
+
+- **WHEN** tests run inside an active tmux session on the developer's machine
+- **THEN** `dv()` strips `TMUX` and `TMUX_PANE` so `dv` does not behave as if it
+  is inside a session
+
+#### Scenario: dv is directed at the container tmux socket
 
 - **WHEN** `dv` shells out to `tmux`
-- **THEN** tmux uses the per-test socket path, not the system default under
-  `/tmp/tmux-<uid>/`
+- **THEN** `DV_TMUX_SOCKET` is set to the bind-mounted socket path so tmux
+  connects to the container server, not the host server
 
-### Requirement: Async Docker canary test with Tokio runtime
+### Requirement: Async container-backed tests with Tokio runtime
 
-The scaffold SHALL include a test that starts a Docker container via
-testcontainers to validate the async runner infrastructure. The test MUST be
-annotated with `#[tokio::test]` and the container MUST be removed automatically
-on drop.
+Every test that interacts with a `TmuxEnv` or a testcontainer SHALL be annotated
+with `#[tokio::test]`.
 
-#### Scenario: Container starts and is accessible
+#### Scenario: Async test runs successfully
 
-- **WHEN** a `#[tokio::test]` calls `start_generic_container()`
-- **THEN** a Docker container is running and the container ID is non-empty
-
-#### Scenario: Container stops after test ends
-
-- **WHEN** the test function completes
-- **THEN** the container handle is dropped and no orphaned containers remain
-
-#### Scenario: Container startup failure surfaces clearly
-
-- **WHEN** Docker is unavailable
-- **THEN** the test panics with a descriptive message, not a cryptic error
+- **WHEN** a `#[tokio::test]` function calls `TmuxEnv::new().await`
+- **THEN** the container starts and the test can proceed without blocking the
+  thread
 
 ### Requirement: Parallel test execution by default
 
@@ -99,7 +100,23 @@ or use `#[serial]` unless a documented resource conflict requires it.
 
 - **WHEN** two test functions each create a `TmuxEnv`
 - **THEN** they execute in parallel without interfering with each other's tmux
-  sockets
+  servers
+
+### Requirement: Bootstrap canary test
+
+The scaffold SHALL include a `hello-world` container test that validates the
+Docker and testcontainers infrastructure independently of the tmux helper.
+
+#### Scenario: Canary test passes with Docker available
+
+- **WHEN** `mise run test` is invoked with Docker running
+- **THEN** the canary starts a container, asserts a non-empty container ID, and
+  reports success
+
+#### Scenario: Canary test failure is descriptive when Docker is absent
+
+- **WHEN** Docker is unavailable
+- **THEN** the test panics with a message indicating Docker is unavailable
 
 ### Requirement: Help command integration tests
 
@@ -114,7 +131,7 @@ and `dv` (no arguments) produce expected output and exit successfully.
 #### Scenario: dv --help prints usage
 
 - **WHEN** `dv --help` is invoked via `TmuxEnv::dv()`
-- **THEN** stdout contains "Usage" (case-insensitive)
+- **THEN** stdout contains "usage" (case-insensitive)
 
 #### Scenario: dv with no args exits zero
 

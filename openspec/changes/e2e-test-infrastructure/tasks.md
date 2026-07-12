@@ -7,17 +7,29 @@
 ## 2. Shared Test Helper (`tests/common/mod.rs`)
 
 - [ ] 2.1 Create `tests/common/mod.rs` with a module-level doc comment
-      explaining the tmux isolation requirement and usage pattern
+      explaining the tmux container isolation requirement and usage pattern
 - [ ] 2.2 Implement `start_generic_container()` — starts `hello-world:latest`,
       waits for `WaitFor::message_on_stdout("Hello from Docker!")`, panics with
       a descriptive message if Docker is unavailable
-- [ ] 2.3 Define `TmuxEnv` struct holding `_tmpdir: TempDir` and
-      `tmux_tmpdir: PathBuf`
-- [ ] 2.4 Implement `TmuxEnv::new()` — creates a `TempDir`, canonicalises its
-      path into `tmux_tmpdir`
-- [ ] 2.5 Implement `TmuxEnv::dv()` — returns
-      `Command::new(env!("CARGO_BIN_EXE_dv"))` with `TMUX_TMPDIR` set to
-      `self.tmux_tmpdir` and `TMUX`/`TMUX_PANE` removed from the environment
+- [ ] 2.3 Define `TmuxEnv` struct holding
+      `_container: ContainerAsync<GenericImage>`, `_workspace: TempDir`,
+      `workspace_path: PathBuf`, and `socket_path: PathBuf`
+- [ ] 2.4 Implement `TmuxEnv::new()` — creates a canonicalized `TempDir`, starts
+      an `alpine:latest` container with entrypoint `sh -c "tail -f /dev/null"`
+      and the workspace bind-mounted to `/workspace`
+- [ ] 2.5 In `TmuxEnv::new()`, exec `apk add --no-cache tmux` inside the
+      container using `CmdWaitFor::exit_code(0)`, capturing stderr for panic
+      messages on failure
+- [ ] 2.6 In `TmuxEnv::new()`, exec
+      `tmux -S /workspace/tmux.sock start-server -d` inside the container to
+      start the isolated tmux server; set `socket_path` to
+      `workspace_path.join("tmux.sock")`
+- [ ] 2.7 Implement `TmuxEnv::dv()` — returns
+      `Command::new(env!("CARGO_BIN_EXE_dv"))` with `TMUX` and `TMUX_PANE`
+      removed, and `DV_TMUX_SOCKET` set to `self.socket_path`
+- [ ] 2.8 Implement a `TmuxEnv::exec()` helper that runs arbitrary commands
+      inside the container via `ExecCommand` with `CmdWaitFor::exit_code(0)`,
+      for use in future tests that need to inspect tmux state
 
 ## 3. Canary E2E Test (`tests/e2e_example.rs`)
 
@@ -29,8 +41,8 @@
 ## 4. Help Command Integration Tests (`tests/help_command.rs`)
 
 - [ ] 4.1 Create `tests/help_command.rs` with `mod common;`
-- [ ] 4.2 Write `#[tokio::test] async fn help_subcommand_exits_zero()` — creates
-      `TmuxEnv::new()`, calls `env.dv().arg("help").status()`, asserts success
+- [ ] 4.2 Write `#[tokio::test] async fn help_subcommand_exits_zero()` —
+      `TmuxEnv::new().await`, `env.dv().arg("help").status()`, assert success
 - [ ] 4.3 Write `#[tokio::test] async fn help_subcommand_prints_program_name()`
       — assert stdout contains `"dv"`
 - [ ] 4.4 Write `#[tokio::test] async fn help_subcommand_prints_about_text()` —
@@ -50,6 +62,6 @@
       tests)
 - [ ] 5.3 Run `mise run test` with Docker running and confirm all tests pass
 - [ ] 5.4 Confirm no orphaned Docker containers remain after the run
-      (`docker ps -a | grep hello-world`)
-- [ ] 5.5 Confirm no tmux socket files remain under any test temp dirs after the
-      run
+      (`docker ps -a | grep -E 'alpine|hello-world'`)
+- [ ] 5.5 Confirm the tmux socket file is removed from the host after each test
+      (`ls /tmp` and the test TempDir paths)
