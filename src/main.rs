@@ -1,3 +1,5 @@
+mod commands;
+
 use clap::{CommandFactory, Parser, Subcommand};
 
 /// dv — the drovr developer CLI
@@ -20,6 +22,13 @@ struct Cli {
 enum Commands {
     /// Show usage information.
     Help,
+
+    /// List tmux panes running agent harness processes (claude, pi).
+    List {
+        /// Target a specific tmux server socket file (passed as `tmux -S <path>`).
+        #[arg(short, long)]
+        server: Option<String>,
+    },
 }
 
 fn main() {
@@ -35,6 +44,9 @@ fn run() -> anyhow::Result<()> {
     match cli.command {
         None | Some(Commands::Help) => {
             Cli::command().print_long_help()?;
+        }
+        Some(Commands::List { server }) => {
+            commands::list::run(server)?;
         }
     }
 
