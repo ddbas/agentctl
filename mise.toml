@@ -30,6 +30,10 @@ complete "change-id" run="openspec list --json | jq -r '.changes[].name'"
 '''
 run = "scripts/view-proposal.sh ${usage_change_id?}"
 
+[tasks."test:build-image"]
+description = "Build the Docker image used by TmuxEnv in integration tests"
+run = "docker build -t am-tmux-test:latest tests/"
+
 [tasks.test]
 description = "Run the cargo test suite"
 run = "rtk cargo test"

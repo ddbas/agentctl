@@ -8,7 +8,8 @@
 //! server: no shared sessions, no interference with the developer's running
 //! tmux, and automatic cleanup on drop.
 //!
-//! The container runs `alpine:latest` with `tmux` installed. A tmux server is
+//! The container uses the `am-tmux-test:latest` local image (Alpine + tmux
+//! pre-installed; build with `mise run test:build-image`). A tmux server is
 //! started inside the container on a Unix socket at `/workspace/tmux.sock`,
 //! which lives on a bind-mounted host `TempDir`. The host `dv` binary is
 //! directed at the container's socket via the `DV_TMUX_SOCKET` env var.
@@ -63,18 +64,25 @@ pub async fn start_generic_container() -> ContainerAsync<GenericImage> {
 
 // ── TmuxEnv ───────────────────────────────────────────────────────────────────
 
-const ALPINE_IMAGE: &str = "alpine";
-const ALPINE_TAG: &str = "latest";
+/// Pre-built image with tmux installed (see `tests/Dockerfile`).
+/// Build with `mise run test:build-image`.
+///
+/// Using a pre-built image avoids running `apk add` at test time, which
+/// requires container internet access and is unreliable on macOS Docker
+/// Desktop (DNS/network issues cause it to hang indefinitely).
+const TMUX_IMAGE: &str = "am-tmux-test";
+const TMUX_TAG: &str = "latest";
 
 /// A fully isolated tmux test environment backed by a Docker container.
 ///
-/// - An `alpine` container is started with `tmux` installed inside it.
-///   The container's entrypoint is overridden to `sh -c "tail -f /dev/null"`
-///   so that `exec` commands can be issued at any point.
-/// - A tmux server is started inside the container on a Unix socket at
-///   `/workspace/tmux.sock`.  The `/workspace` directory is bind-mounted
-///   from a host `TempDir`, making the socket accessible on the host at
-///   `workspace_path/tmux.sock`.
+/// - An `am-tmux-test` container is started (Alpine + tmux pre-installed;
+///   build with `mise run test:build-image`). The container's CMD starts a
+///   tmux server on the shared workspace socket and prints `"tmux-ready"`
+///   to stdout once the server is accepting connections.  testcontainers
+///   blocks until that message appears before returning from `.start()`.
+/// - The tmux server runs on a Unix socket at `/workspace/tmux.sock`.
+///   `/workspace` is bind-mounted from a host `TempDir`, making the socket
+///   accessible on the host at `workspace_path/tmux.sock`.
 /// - The host `dv` binary is directed at this socket via `DV_TMUX_SOCKET`.
 ///   `TMUX` and `TMUX_PANE` are cleared so `dv` does not think it is
 ///   running inside an existing tmux session.
@@ -91,12 +99,16 @@ pub struct TmuxEnv {
 }
 
 impl TmuxEnv {
-    /// Start the container, install tmux, and start an isolated tmux server.
+    /// Start the container and wait for the tmux server to be ready.
+    ///
+    /// The container CMD installs nothing at startup (tmux is pre-installed in
+    /// the image) and prints `"tmux-ready"` once the server is up.
+    /// testcontainers waits for that message before returning.
     ///
     /// # Panics
     ///
-    /// Panics if Docker is unavailable, the image cannot be pulled, `apk`
-    /// fails, or the tmux server cannot be started.
+    /// Panics if Docker is unavailable, the image is missing (run
+    /// `mise run test:build-image`), or the tmux server fails to start.
     pub async fn new() -> Self {
         // Canonicalise so Docker Desktop's bind-mount path resolution works
         // on macOS (/var/folders symlink -> /private/var/folders).
@@ -106,10 +118,18 @@ impl TmuxEnv {
             .canonicalize()
             .expect("canonicalize workspace");
 
-        let container = GenericImage::new(ALPINE_IMAGE, ALPINE_TAG)
+        // The CMD starts tmux on the workspace socket and prints "tmux-ready"
+        // once the server is up.  testcontainers waits for that message before
+        // returning, so by the time `new()` returns the socket is ready.
+        let container = GenericImage::new(TMUX_IMAGE, TMUX_TAG)
             .with_entrypoint("sh")
-            .with_wait_for(WaitFor::Nothing)
-            .with_cmd(["-c", "tail -f /dev/null"])
+            .with_wait_for(WaitFor::message_on_stdout("tmux-ready"))
+            .with_cmd([
+                "-c",
+                "tmux -S /workspace/tmux.sock new-session -d -s _init \
+                 && echo 'tmux-ready' \
+                 && tail -f /dev/null",
+            ])
             .with_mount(Mount::bind_mount(
                 workspace_path
                     .to_str()
@@ -119,26 +139,16 @@ impl TmuxEnv {
             .start()
             .await
             .expect(
-                "failed to start alpine container — is Docker running? \
-                 Does Docker Desktop have file sharing enabled for this path?",
+                "failed to start tmux container — is Docker running? \
+                 Is `am-tmux-test:latest` built? Run `mise run test:build-image`.",
             );
 
-        let env = TmuxEnv {
+        TmuxEnv {
             _container: container,
             socket_path: workspace_path.join("tmux.sock"),
             _workspace: workspace_tmp,
             workspace_path,
-        };
-
-        // Install tmux inside the container.
-        env.exec(&["apk", "add", "--no-cache", "tmux"]).await;
-
-        // Start the tmux server on the shared socket path.
-        // `-d` starts the server in the background without attaching.
-        env.exec(&["tmux", "-S", "/workspace/tmux.sock", "start-server"])
-            .await;
-
-        env
+        }
     }
 
     /// Returns a `Command` builder for the `dv` binary with:
