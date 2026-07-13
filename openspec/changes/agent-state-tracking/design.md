@@ -107,35 +107,122 @@ log would require parsing and is over-engineering for this iteration.
 
 ### D4 — Claude hook mapping
 
-Claude Code fires these hooks (passed as JSON on stdin):
+Claude Code fires these hooks (passed as JSON on stdin). All handlers are
+registered as `async: true` so they never block Claude's operation.
 
-| Hook event    | Maps to state |
-| ------------- | ------------- |
-| `PreToolUse`  | `working`     |
-| `PostToolUse` | `working`     |
-| `Stop`        | `done`        |
+| Hook event         | Matcher             | Maps to state |
+| ------------------ | ------------------- | ------------- |
+| `SessionStart`     | `startup`           | `idle`        |
+| `UserPromptSubmit` | _(no matcher)_      | `working`     |
+| `PreToolUse`       | `*`                 | `working`     |
+| `Stop`             | _(no matcher)_      | `done`        |
+| `Notification`     | `permission_prompt` | `blocked`     |
 
-`idle` is the initial state written when `DROVR_AGENT_ID` is first set (by the
-CLI at spawn time). `unknown` is returned by the CLI when no state file exists
-for a listed agent.
+This covers all five `AgentState` variants. `unknown` is the implicit fallback
+returned by the CLI when no state file exists for a listed pane.
 
-`blocked` is not mapped because Claude provides no official hook for it.
-
----
-
-### D5 — Hook script delivery: shell scripts committed to the repo
-
-**Decision**: Hook scripts live at `hooks/claude/<event>.sh` in the repo. Users
-register them in their Claude Code config (`~/.claude/settings.json`) pointing
-at the absolute path or via a `dv hooks install` helper (future work). For now,
-the scripts are documented and must be manually registered.
-
-**Why shell scripts?** They have zero build dependencies and can be installed
-without compiling the Rust binary first.
+`PreToolUse` is retained alongside `UserPromptSubmit` as a belt-and-suspenders
+signal: it fires on every tool call and keeps the state as `working` throughout
+a multi-tool turn. `PostToolUse` is not used — it is redundant with `PreToolUse`
+and fires at a point where Claude is still working.
 
 ---
 
-### D6 — Harness abstraction in Rust
+### D5 — Hook handlers: internal `dv hook <event>` subcommands
+
+**Decision**: Hook logic is implemented as internal subcommands of the `dv`
+binary. Each handler (`dv hook session-start`, `dv hook user-prompt-submit`,
+`dv hook pre-tool-use`, `dv hook stop`, `dv hook notification`) reads Claude's
+JSON event payload from stdin, extracts `$DROVR_AGENT_ID`, and calls
+`write_state`.
+
+**Why internal subcommands over shell scripts?** Hook logic (UUID lookup, JSON
+deserialisation, atomic file write) maps naturally to Rust and benefits from the
+same error handling and XDG resolution already in the binary. Shell scripts
+would duplicate that logic and introduce a second artefact to distribute.
+
+**Why not a separate binary?** `dv` is already on PATH; a second binary adds
+complexity with no benefit.
+
+---
+
+### D6 — Hook registration: `dv hooks install`
+
+**Decision**: A new `dv hooks install` subcommand patches
+`~/.claude/settings.json` to register the five hook handlers. The command merges
+its entries into any existing hook configuration and is **idempotent**. Example
+of what it writes:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dv hook session-start",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dv hook user-prompt-submit",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dv hook pre-tool-use",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "dv hook stop", "async": true }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dv hook notification",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Why `~/.claude/settings.json` (user scope)?** The hooks must fire for all
+projects, not just the drovr repo. User-scope settings apply globally.
+
+**Why not auto-install on first run?** Modifying the user's Claude config
+without explicit consent is surprising. An explicit install command is
+transparent and reversible.
+
+---
+
+### D7 — Harness abstraction in Rust
 
 A `StateStore` trait (or simple free functions) in the `dv` codebase handles:
 
@@ -177,10 +264,11 @@ The `list-sessions` command:
 ## Migration Plan
 
 1. Add `AgentState` enum and `StateStore` to the Rust codebase.
-2. Ship hook scripts under `hooks/claude/`.
-3. Update `dv list` to read state.
-4. Document manual hook registration in the README.
-5. Add `dv hooks install` in a follow-up change.
+2. Implement `dv hook <event>` internal subcommands.
+3. Implement `dv hooks install` to register them in `~/.claude/settings.json`.
+4. Update `dv list` to read state and run stale cleanup.
+5. Document `dv hooks install` in the README as the required one-time setup
+   step.
 
 No breaking changes to existing commands. State files are additive; absence of a
 file is handled gracefully (`unknown`).
