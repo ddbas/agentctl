@@ -122,14 +122,14 @@ are `async: true` so they never block Claude's operation. Lifecycle hooks
 (`SessionStart`, `SessionEnd`) are synchronous to ensure the state file is
 established before any other hook fires and cleaned up before the session exits.
 
-| Hook event         | Matcher             | Action                        |
-| ------------------ | ------------------- | ----------------------------- |
-| `SessionStart`     | `startup`           | Write `idle` state            |
-| `UserPromptSubmit` | _(no matcher)_      | Write `working` state (async) |
-| `PreToolUse`       | `*`                 | Write `working` state (async) |
-| `Stop`             | _(no matcher)_      | Write `done` state (async)    |
-| `Notification`     | `permission_prompt` | Write `blocked` state (async) |
-| `SessionEnd`       | _(no matcher)_      | Delete state file             |
+| Hook event         | Matcher             | Action                               |
+| ------------------ | ------------------- | ------------------------------------ |
+| `SessionStart`     | `startup`           | `dv set-state idle`                  |
+| `UserPromptSubmit` | _(no matcher)_      | `dv set-state working` (async)       |
+| `PreToolUse`       | `*`                 | `dv set-state working` (async)       |
+| `Stop`             | _(no matcher)_      | `dv set-state done` (async)          |
+| `Notification`     | `permission_prompt` | `dv set-state blocked` (async)       |
+| `SessionEnd`       | _(no matcher)_      | `dv clear-state` (delete state file) |
 
 `unknown` is the implicit fallback returned by the CLI when no state file exists
 for a listed pane.
@@ -140,17 +140,38 @@ a multi-tool turn.
 
 ---
 
-### D5 — Hook handlers: internal `dv hook <event>` subcommands
+### D5 — Hook handlers: single `dv set-state <state>` subcommand
 
-**Decision**: Hook logic is implemented as internal subcommands of the `dv`
-binary. Each handler reads `$TMUX_PANE` from the environment and exits 0
-silently if it is not set. State-updating handlers also read any needed fields
-from Claude's JSON payload on stdin.
+**Decision**: State-writing logic is exposed through a single
+`dv set-state <state>` subcommand that any harness can call from its hooks.
+Accepted states: `idle`, `working`, `done`, `blocked`. The command reads
+`$TMUX_PANE` from the environment, resolves the XDG data directory, and
+atomically overwrites `state.json`. It exits 0 silently when `$TMUX_PANE` is not
+set.
 
-**Why internal subcommands over shell scripts?** Hook logic (UUID lookup, JSON
-deserialisation, atomic file write) maps naturally to Rust and benefits from the
-same error handling and XDG resolution already in the binary. Shell scripts
-would duplicate that logic and introduce a second artefact to distribute.
+Optional flags:
+
+- `--harness <harness_id>` — overrides the `harness` field written to
+  `state.json`. Defaults to `"unknown"` when omitted.
+- `--pane <pane_id>` — overrides the pane ID instead of reading `$TMUX_PANE`.
+  Useful for scripted or testing scenarios.
+
+For session cleanup a companion `dv clear-state` subcommand removes the state
+file and its parent directory for the current pane (`$TMUX_PANE`). It is a no-op
+when the file does not exist and exits 0 silently outside tmux.
+
+**Why a single set-state command over per-event handlers?** Per-event
+subcommands (`dv hook session-start`, `dv hook user-prompt-submit`, …) lock the
+state-writing logic to Claude Code's specific event vocabulary. Adding a second
+harness (e.g. pi, aider) would require implementing matching per-event
+subcommands — effectively re-coupling the CLI to each harness's lifecycle
+events.
+
+`dv set-state` inverts the dependency: harness authors install hooks that emit
+one of the four canonical states directly. `dv` has no knowledge of
+harness-specific event names. XDG resolution and atomic file-write logic are
+centralised in one place, and any new harness gains first-class support by
+installing hooks that call `dv set-state` — nothing else required.
 
 **Why not a separate binary?** `dv` is already on PATH; a second binary adds
 complexity with no benefit.
@@ -170,7 +191,9 @@ of what it writes:
     "SessionStart": [
       {
         "matcher": "startup",
-        "hooks": [{ "type": "command", "command": "dv hook session-start" }]
+        "hooks": [
+          { "type": "command", "command": "dv set-state idle --harness claude" }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -178,7 +201,7 @@ of what it writes:
         "hooks": [
           {
             "type": "command",
-            "command": "dv hook user-prompt-submit",
+            "command": "dv set-state working --harness claude",
             "async": true
           }
         ]
@@ -189,7 +212,7 @@ of what it writes:
         "hooks": [
           {
             "type": "command",
-            "command": "dv hook pre-tool-use",
+            "command": "dv set-state working --harness claude",
             "async": true
           }
         ]
@@ -198,7 +221,11 @@ of what it writes:
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "dv hook stop", "async": true }
+          {
+            "type": "command",
+            "command": "dv set-state done --harness claude",
+            "async": true
+          }
         ]
       }
     ],
@@ -208,7 +235,7 @@ of what it writes:
         "hooks": [
           {
             "type": "command",
-            "command": "dv hook notification",
+            "command": "dv set-state blocked --harness claude",
             "async": true
           }
         ]
@@ -216,7 +243,7 @@ of what it writes:
     ],
     "SessionEnd": [
       {
-        "hooks": [{ "type": "command", "command": "dv hook session-end" }]
+        "hooks": [{ "type": "command", "command": "dv clear-state" }]
       }
     ]
   }
@@ -239,7 +266,7 @@ A `StateStore` trait (or simple free functions) in the `dv` codebase handles:
 - `write_state(pane_id, harness, state)` — serialises and atomically writes
   `state.json` to `$XDG_DATA_HOME/drovr/agents/<pane-id>/`.
 - `delete_state(pane_id)` — removes the state file and its parent directory.
-  Called by `dv hook session-end`.
+  Called by `dv clear-state`.
 - `read_state(pane_id) -> AgentState` — reads `state.json`, returns `Unknown` on
   any error.
 - `list_agents() -> Vec<AgentInfo>` — globs the data directory and returns all
@@ -278,7 +305,7 @@ The `list-sessions` command:
 ## Migration Plan
 
 1. Add `AgentState` enum and `StateStore` to the Rust codebase.
-2. Implement `dv hook <event>` internal subcommands.
+2. Implement `dv set-state <state>` and `dv clear-state` subcommands.
 3. Implement `dv hooks install` to register them in `~/.claude/settings.json`.
 4. Update `dv list` to read state and run stale cleanup.
 5. Document `dv hooks install` in the README as the required one-time setup

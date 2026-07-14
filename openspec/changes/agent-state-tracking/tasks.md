@@ -46,30 +46,32 @@
 - [ ] 3.10 Add integration test: state file whose harness doesn't match
       pane_current_command → deleted after `dv list` runs
 
-## 4. dv hook Subcommands (Claude Hook Handlers)
+## 4. dv set-state and dv clear-state Subcommands
 
-- [ ] 4.1 Add a `dv hook <event>` subcommand dispatcher to the CLI; all handlers
-      exit 0 silently if `$TMUX_PANE` is not set
-- [ ] 4.2 Implement `dv hook session-start` — writes `Idle` state; overwrites
-      any existing state file for that pane
-- [ ] 4.3 Implement `dv hook user-prompt-submit` — writes `Working` state
-- [ ] 4.4 Implement `dv hook pre-tool-use` — writes `Working` state
-- [ ] 4.5 Implement `dv hook stop` — writes `Done` state
-- [ ] 4.6 Implement `dv hook notification` — reads `notification_type` from
-      stdin JSON; writes `Blocked` only when
-      `notification_type == "permission_prompt"`; exits 0 silently for all other
-      types
-- [ ] 4.7 Implement `dv hook session-end` — calls `delete_state($TMUX_PANE)`
-- [ ] 4.8 Write unit tests for each handler: `$TMUX_PANE` set → correct state
-      written or file deleted; `$TMUX_PANE` unset → exits 0, no changes;
-      `notification` with non-permission type → no state change
+- [ ] 4.1 Add a `dv set-state <state>` subcommand to the CLI; accepted values
+      are `idle`, `working`, `done`, `blocked`; exits 0 silently when
+      `$TMUX_PANE` is unset and `--pane` is not supplied
+- [ ] 4.2 Add `--harness <harness_id>` optional flag to `dv set-state`; written
+      to the `harness` field in `state.json`; defaults to `"unknown"` when
+      omitted
+- [ ] 4.3 Add `--pane <pane_id>` optional flag to `dv set-state` to override
+      `$TMUX_PANE` (useful for scripting and tests)
+- [ ] 4.4 Implement the write path: resolve pane ID (flag → env var → silent
+      exit), call `write_state(pane_id, harness, state)`
+- [ ] 4.5 Add a `dv clear-state` subcommand that calls
+      `delete_state($TMUX_PANE)`; exits 0 silently when `$TMUX_PANE` is unset or
+      when no state file exists; accept an optional `--pane` flag
+- [ ] 4.6 Write unit tests: `$TMUX_PANE` set → correct state written;
+      `$TMUX_PANE` unset → exits 0, no changes; `--harness` flag → harness field
+      populated correctly; `dv clear-state` present and absent state file
 
 ## 5. dv hooks install
 
 - [ ] 5.1 Implement `dv hooks install` — reads `~/.claude/settings.json`
-      (creates if absent), merges the six drovr hook entries, writes the file
-      back atomically; `SessionStart` and `SessionEnd` are registered without
-      `async`, all others with `async: true`
+      (creates if absent), merges the six drovr hook entries using
+      `dv set-state <state> --harness claude` and `dv clear-state`, writes the
+      file back atomically; `SessionStart` and `SessionEnd` are registered
+      without `async`, all others with `async: true`
 - [ ] 5.2 Ensure idempotency: if a drovr entry already exists, do not duplicate
       it
 - [ ] 5.3 Preserve all existing non-drovr hook entries in the file
