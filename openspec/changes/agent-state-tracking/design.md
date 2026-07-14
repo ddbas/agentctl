@@ -18,14 +18,17 @@ hooks write state, CLI reads state.
   `blocked`, `unknown`) used everywhere in the codebase.
 - Define a file-based state store so hooks can persist state updates without the
   CLI being present.
-- Implement Claude-specific hook adapters that write state updates via the
-  agreed schema.
+- Expose `dv set-state <state>` and `dv clear-state` for any harness to call
+  from its hooks.
+- Provide a `dv hooks install <harness>` skeleton for harness-specific
+  registration; no concrete harness is supported in this iteration.
 - Surface the state in `dv list` output (no new subcommand required).
 
 **Non-Goals:**
 
 - Real-time push/streaming of state changes to the CLI.
-- Support for harnesses other than Claude in this iteration.
+- Concrete harness support in this iteration (Claude integration lives in the
+  `claude-harness-hooks` change that depends on this one).
 - Centralised state server or IPC.
 
 ## Decisions
@@ -115,32 +118,7 @@ correlate the state to.
 
 ---
 
-### D4 — Claude hook mapping
-
-Claude Code fires these hooks (passed as JSON on stdin). State-updating hooks
-are `async: true` so they never block Claude's operation. Lifecycle hooks
-(`SessionStart`, `SessionEnd`) are synchronous to ensure the state file is
-established before any other hook fires and cleaned up before the session exits.
-
-| Hook event         | Matcher             | Action                               |
-| ------------------ | ------------------- | ------------------------------------ |
-| `SessionStart`     | `startup`           | `dv set-state idle`                  |
-| `UserPromptSubmit` | _(no matcher)_      | `dv set-state working` (async)       |
-| `PreToolUse`       | `*`                 | `dv set-state working` (async)       |
-| `Stop`             | _(no matcher)_      | `dv set-state done` (async)          |
-| `Notification`     | `permission_prompt` | `dv set-state blocked` (async)       |
-| `SessionEnd`       | _(no matcher)_      | `dv clear-state` (delete state file) |
-
-`unknown` is the implicit fallback returned by the CLI when no state file exists
-for a listed pane.
-
-`PreToolUse` is retained alongside `UserPromptSubmit` as a belt-and-suspenders
-signal: it fires on every tool call and keeps the state as `working` throughout
-a multi-tool turn.
-
----
-
-### D5 — Hook handlers: single `dv set-state <state>` subcommand
+### D4 — Hook handlers: single `dv set-state <state>` subcommand
 
 **Decision**: State-writing logic is exposed through a single
 `dv set-state <state>` subcommand that any harness can call from its hooks.
@@ -178,91 +156,26 @@ complexity with no benefit.
 
 ---
 
-### D6 — Hook registration: `dv hooks install <harness>`
+### D5 — Hook registration: `dv hooks install <harness>` placeholder
 
-**Decision**: A new `dv hooks install <harness>` subcommand patches the
-harness-specific settings file to register the hook handlers for the given
-harness. Currently the only supported value is `claude`, which patches
-`~/.claude/settings.json`. The command merges its entries into any existing hook
-configuration and is **idempotent**. Example of what `dv hooks install claude`
-writes:
+**Decision**: A new `dv hooks install <harness>` subcommand is introduced as a
+dispatch skeleton. In this iteration **no harness values are supported**; the
+command exits 1 with a clear error message (e.g.
+`"unknown harness '<harness>'; no harnesses are currently supported"`) for any
+input, including `claude`.
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [
-          { "type": "command", "command": "dv set-state idle --harness claude" }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dv set-state working --harness claude",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dv set-state working --harness claude",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dv set-state done --harness claude",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dv set-state blocked --harness claude",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [{ "type": "command", "command": "dv clear-state" }]
-      }
-    ]
-  }
-}
-```
+Concrete harness support (starting with `claude`) is delivered by the
+`claude-harness-hooks` change, which depends on this one and fills in the
+`claude` branch of the dispatcher.
 
-**Why `~/.claude/settings.json` (user scope) for the `claude` harness?** The
-hooks must fire for all projects, not just the drovr repo. User-scope settings
-apply globally.
-
-**Why not auto-install on first run?** Modifying the user's Claude config
-without explicit consent is surprising. An explicit install command is
-transparent and reversible.
+**Why introduce the command now with no implementation?** Establishing the
+subcommand name and argument shape in the CLI allows the `claude-harness-hooks`
+change to extend it without touching the CLI argument parser, and signals the
+intended extension point to future harness authors.
 
 ---
 
-### D7 — Harness abstraction in Rust
+### D6 — Harness abstraction in Rust
 
 A `StateStore` trait (or simple free functions) in the `dv` codebase handles:
 
@@ -283,10 +196,12 @@ The `list-sessions` command:
 3. For each state file, validates it as a last resort:
    - If the state file's `pane_id` is not in the live pane set → delete it (pane
      no longer exists).
-   - If the pane exists but its `pane_current_command` does not match the
-     `harness` field in the state file → delete it (different process running in
-     that pane now). This validation only runs when tmux is reachable; skip
-     entirely on tmux errors to avoid deleting valid state.
+   - If the pane exists **and** the state file's `harness` field is not
+     `"unknown"`, and `pane_current_command` does not match `harness` → delete
+     it (different process running in that pane now). When `harness` is
+     `"unknown"` this check is skipped — we cannot validate what we do not know.
+   - This validation only runs when tmux is reachable; skip entirely on tmux
+     errors to avoid deleting valid state.
 4. For each live pane, calls `read_state` to populate the state column. Displays
    `unknown` when no state file exists for that pane.
 
@@ -309,11 +224,9 @@ The `list-sessions` command:
 
 1. Add `AgentState` enum and `StateStore` to the Rust codebase.
 2. Implement `dv set-state <state>` and `dv clear-state` subcommands.
-3. Implement `dv hooks install <harness>` to register them in the
-   harness-specific settings file.
+3. Implement `dv hooks install <harness>` skeleton (exits 1 for all harnesses).
 4. Update `dv list` to read state and run stale cleanup.
-5. Document `dv hooks install claude` in the README as the required one-time
-   setup step.
+5. Document the state model and XDG file layout in the README.
 
 No breaking changes to existing commands. State files are additive; absence of a
 file is handled gracefully (`unknown`).

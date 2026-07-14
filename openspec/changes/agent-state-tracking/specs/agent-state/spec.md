@@ -73,7 +73,9 @@ reachable. A state file SHALL be deleted if either of the following is true:
 
 - Its `pane_id` does not correspond to any currently live tmux pane.
 - The live pane with that `pane_id` has a `pane_current_command` that does not
-  match the `harness` field in the state file.
+  match the `harness` field in the state file, **and** `harness` is not
+  `"unknown"` (when `harness` is `"unknown"` the command-match check is skipped
+  since there is no harness to validate against).
 
 If the tmux query fails, validation SHALL be skipped entirely to avoid deleting
 valid state due to a transient error.
@@ -95,6 +97,13 @@ valid state due to a transient error.
 - **WHEN** `dv list` runs and a state file's `pane_id` exists and its
   `pane_current_command` matches `harness`
 - **THEN** the state file is not deleted
+
+#### Scenario: State file preserved when harness is unknown
+
+- **WHEN** `dv list` runs and a state file's `harness` field is `"unknown"`
+  (regardless of what the pane's current command is)
+- **THEN** the state file is not deleted on account of the harness check (only
+  the pane-existence check still applies)
 
 #### Scenario: Validation skipped when tmux is unreachable
 

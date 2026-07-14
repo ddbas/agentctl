@@ -31,8 +31,8 @@
 - [ ] 3.2 Load all state files and build a `pane_id → AgentInfo` lookup map
 - [ ] 3.3 Validate each state file as a last resort (only when tmux is
       reachable): delete if `pane_id` not in live pane set, or if live pane's
-      `pane_current_command` doesn't match `harness`; skip all validation if
-      tmux query failed
+      `pane_current_command` doesn't match `harness` **and** `harness` is not
+      `"unknown"`; skip all validation if tmux query failed
 - [ ] 3.4 Add a fourth `state` column to the output, resolved from the lookup
       map; show `unknown` when no matching state file exists
 - [ ] 3.5 Update column padding logic to account for the new state column
@@ -61,31 +61,24 @@
 - [ ] 4.5 Add a `dv clear-state` subcommand that calls
       `delete_state($TMUX_PANE)`; exits 0 silently when `$TMUX_PANE` is unset or
       when no state file exists; accept an optional `--pane` flag
-- [ ] 4.6 Write unit tests: `$TMUX_PANE` set → correct state written;
+- [ ] 4.6 Add integration test: state file with harness `"unknown"` → not
+      deleted by `dv list` (harness-match check skipped)
+- [ ] 4.7 Write unit tests: `$TMUX_PANE` set → correct state written;
       `$TMUX_PANE` unset → exits 0, no changes; `--harness` flag → harness field
-      populated correctly; `dv clear-state` present and absent state file
+      populated correctly; `--harness` omitted → `"unknown"` written to harness
+      field; `dv clear-state` present and absent state file
 
-## 5. dv hooks install
+## 5. dv hooks install (placeholder)
 
-- [ ] 5.1 Implement `dv hooks install <harness>` — dispatch on the harness
-      argument; return a clear error for unrecognised values
-- [ ] 5.2 Implement the `claude` handler — reads `~/.claude/settings.json`
-      (creates if absent), merges the six drovr hook entries using
-      `dv set-state <state> --harness claude` and `dv clear-state`, writes the
-      file back atomically; `SessionStart` and `SessionEnd` are registered
-      without `async`, all others with `async: true`
-- [ ] 5.3 Ensure idempotency: if a drovr entry already exists, do not duplicate
-      it
-- [ ] 5.4 Preserve all existing non-drovr hook entries in the file
-- [ ] 5.5 Print a confirmation message listing which hooks were added vs.
-      already present
-- [ ] 5.6 Write unit tests for install: clean file, idempotent re-run, merge
-      with existing hooks, unrecognised harness argument returns error
+- [ ] 5.1 Implement `dv hooks install <harness>` — exit 1 with the message
+      `"unknown harness '<harness>'; no harnesses are currently supported"` for
+      all inputs; the command exists solely to establish the subcommand name and
+      argument shape for future harness changes
+- [ ] 5.2 Write a unit test confirming `dv hooks install <anything>` exits 1
+      with the expected error message
 
 ## 6. Documentation
 
 - [ ] 6.1 Update the project README with an "Agent state tracking" section
-      covering the state model, `dv hooks install claude` as the one-time setup
-      step, and the XDG file layout
-- [ ] 6.2 Ensure `AGENTS.md` references `dv hooks install claude` as required
-      setup
+      covering the state model, `dv set-state` / `dv clear-state` usage, and the
+      XDG file layout
