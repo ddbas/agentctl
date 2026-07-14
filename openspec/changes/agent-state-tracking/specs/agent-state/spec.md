@@ -15,10 +15,12 @@ the canonical representation of agent state throughout the codebase.
 ### Requirement: State file schema
 
 The system SHALL persist agent state as a JSON file at
-`$XDG_DATA_HOME/drovr/agents/<agent-id>/state.json` (where `XDG_DATA_HOME`
-defaults to `~/.local/share`). The file SHALL contain the fields `agent_id`
-(string UUID), `harness` (string), `state` (string matching an `AgentState`
-variant in snake_case), and `updated_at` (RFC 3339 timestamp).
+`$XDG_DATA_HOME/drovr/agents/<session-id>/state.json` (where `XDG_DATA_HOME`
+defaults to `~/.local/share`). The file SHALL contain the fields `session_id`
+(string, from the Claude hook payload), `pane_id` (string, from `$TMUX_PANE`,
+omitted if not running inside tmux), `harness` (string), `state` (string
+matching an `AgentState` variant in snake_case), and `updated_at` (RFC 3339
+timestamp).
 
 #### Scenario: State file written on state change
 
@@ -32,69 +34,47 @@ variant in snake_case), and `updated_at` (RFC 3339 timestamp).
 - **THEN** the file is replaced atomically (write to a `.tmp` sibling then
   rename) so a concurrent reader never sees a partial write
 
-### Requirement: Unique agent identifier via DROVR_AGENT_ID
+#### Scenario: State file written without pane_id outside tmux
 
-The system SHALL assign each agent pane a UUID v4 stored in the tmux environment
-variable `DROVR_AGENT_ID` when the pane is created by `dv`. Hook scripts SHALL
-read `$DROVR_AGENT_ID` to determine the target state file path.
-
-#### Scenario: Identifier set at pane creation
-
-- **WHEN** `dv` creates a new tmux pane for an agent
-- **THEN** `tmux show-environment -t <pane> DROVR_AGENT_ID` returns a valid UUID
-  v4
-
-#### Scenario: Hook script silently exits when identifier is absent
-
-- **WHEN** a hook script fires in a pane where `DROVR_AGENT_ID` is not set
-- **THEN** the script exits with code 0 and writes nothing
-
-### Requirement: Initial idle state written at spawn
-
-The system SHALL write an initial state of `Idle` for a new agent immediately
-after setting `DROVR_AGENT_ID` in the pane's environment.
-
-#### Scenario: New agent starts in idle state
-
-- **WHEN** `dv` has just created a new agent pane
-- **THEN** the state file for that agent contains `"state": "idle"`
+- **WHEN** a hook fires in an environment where `$TMUX_PANE` is not set
+- **THEN** the state file is written without a `pane_id` field and the command
+  exits 0
 
 ### Requirement: State read by CLI
 
-The system SHALL provide a `read_state(agent_id)` function that returns the
+The system SHALL provide a `read_state(session_id)` function that returns the
 current `AgentState` for an agent. If the state file is absent, unreadable, or
 contains an unrecognised value, the function SHALL return `Unknown`.
 
 #### Scenario: State file exists and is valid
 
-- **WHEN** a valid state file exists for the given agent ID
+- **WHEN** a valid state file exists for the given session ID
 - **THEN** `read_state` returns the state recorded in the file
 
 #### Scenario: State file is missing
 
-- **WHEN** no state file exists for the given agent ID
+- **WHEN** no state file exists for the given session ID
 - **THEN** `read_state` returns `Unknown`
 
 ### Requirement: Stale state cleanup
 
-The system SHALL provide a `cleanup_stale(live_ids)` function that deletes every
-state file whose `agent_id` is not present in the provided set of live agent
-IDs. This function SHALL only be called when tmux is reachable; if the tmux
+The system SHALL provide a `cleanup_stale(live_pane_ids)` function that deletes
+every state file whose `pane_id` is not present in the provided set of live tmux
+pane IDs. This function SHALL only be called when tmux is reachable; if the tmux
 query fails, the cleanup step SHALL be skipped entirely to avoid deleting valid
 state due to a transient error.
 
 #### Scenario: Stale state file is removed
 
-- **WHEN** `cleanup_stale` is called with a set of live IDs that does not
-  include agent ID `abc-123`
-- **THEN** the state file at `$XDG_DATA_HOME/drovr/agents/abc-123/state.json` is
-  deleted
+- **WHEN** `cleanup_stale` is called with a set of live pane IDs that does not
+  include the pane ID stored in a given state file
+- **THEN** that state file is deleted
 
 #### Scenario: Live state file is preserved
 
-- **WHEN** `cleanup_stale` is called with a set of live IDs that includes agent
-  ID `abc-123`
-- **THEN** the state file for `abc-123` is not deleted
+- **WHEN** `cleanup_stale` is called with a set of live pane IDs that includes
+  the pane ID stored in a given state file
+- **THEN** that state file is not deleted
 
 #### Scenario: Cleanup skipped when tmux is unreachable
 
