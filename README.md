@@ -69,9 +69,53 @@ Exits 0 silently when `$TMUX_PANE` is not set, or when no state file exists.
 
 ### `dv hooks install <harness>`
 
-Placeholder for harness-specific hook registration. No harnesses are supported
-in the current release; the command exits 1 with a clear message for all inputs.
-Concrete harness support (e.g. `claude`) will be added in a subsequent release.
+Installs hooks for the specified agent harness.
+
+Supported harnesses:
+
+#### `pi`
+
+Writes a TypeScript extension to `~/.pi/agent/extensions/drovr.ts` that
+subscribes to pi lifecycle events and calls `dv set-state` / `dv clear-state`.
+The command is idempotent: re-running when the file is already up to date
+reports no change.
+
+```bash
+dv hooks install pi
+```
+
+Example output (first install):
+
+```
+Installed drovr extension for pi:
+  + ~/.pi/agent/extensions/drovr.ts
+    session_start        → dv set-state idle --harness pi
+    before_agent_start   → dv set-state working --harness pi
+    agent_settled        → dv set-state done --harness pi
+    session_shutdown     → dv clear-state
+```
+
+On a subsequent run (file already up to date):
+
+```
+Installed drovr extension for pi:
+  = ~/.pi/agent/extensions/drovr.ts (already up to date)
+```
+
+The `~` prefix is used when the file existed but had outdated content and was
+overwritten.
+
+**Pi lifecycle event → state mapping:**
+
+| Pi event             | Command                             |
+| -------------------- | ----------------------------------- |
+| `session_start`      | `dv set-state idle --harness pi`    |
+| `before_agent_start` | `dv set-state working --harness pi` |
+| `agent_settled`      | `dv set-state done --harness pi`    |
+| `session_shutdown`   | `dv clear-state`                    |
+
+Note: the `blocked` state is not mapped — pi does not expose a native
+permission-prompt lifecycle event.
 
 ## Agent State Tracking
 
