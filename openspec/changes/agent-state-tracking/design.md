@@ -70,7 +70,7 @@ harness-agnostic meaning.
 **Decision**: State files are stored at:
 
 ```
-$XDG_DATA_HOME/drovr/agents/<agent-id>/state.json
+$XDG_DATA_HOME/drovr/agents/<pane-id>/state.json
 ```
 
 (`XDG_DATA_HOME` defaults to `~/.local/share`.)
