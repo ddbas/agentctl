@@ -30,32 +30,38 @@ hooks write state, CLI reads state.
 
 ## Decisions
 
-### D1 — Agent identifier: Claude's `session_id`
+### D1 — Agent identifier: `$TMUX_PANE`
 
-**Decision**: Each hook handler reads the `session_id` field from the JSON
-payload that Claude passes on stdin. This value is the agent identifier used as
-the state file directory name. No UUID generation, no env var injection, and no
-coordination with `dv` is required — the identifier is already there in every
-hook invocation.
+**Decision**: The tmux pane ID — available as the `$TMUX_PANE` environment
+variable (e.g. `%12`) inside any process running in a tmux pane — is the agent
+identifier. It is used as the state file directory name. Every hook subprocess
+inherits it from the shell; `dv list` reads it via `#{pane_id}` in tmux format
+strings. No injection, no coordination, no UUID generation required.
 
 The state file for each agent is stored at:
 
 ```
-$XDG_DATA_HOME/drovr/agents/<session-id>/state.json
+$XDG_DATA_HOME/drovr/agents/<pane-id>/state.json
 ```
 
-**Why `session_id` over a self-generated UUID?** `session_id` is already a
-stable, unique identifier provided by Claude for free on every hook event.
-Generating our own UUID would require persisting it somewhere (an env var or a
-temp file) so subsequent hooks can reuse it — unnecessary complexity.
+(e.g. `~/.local/share/drovr/agents/%12/state.json`)
 
-**Why not `$TMUX_PANE`?** Pane IDs (e.g. `%12`) can be reused after a pane exits
-and the tmux server is long-running. `session_id` is tied to a specific Claude
-session and is never reused.
+**Pane ID reuse is acceptable.** A pane ID can technically be reused after a
+pane exits and a new one is created. This is fine because:
 
-**Why not process PID?** PIDs are recycled by the OS. A stale state file keyed
-on a PID could be mistaken for a live agent if a different process later gets
-the same PID.
+1. At most one agent harness runs in a given pane at a time — that is an
+   explicit assumption of this design.
+2. `SessionStart` overwrites any existing state file when a new session begins
+   in the same pane, so stale data from a prior session is replaced immediately.
+3. `dv list` validates state files as a last resort (see D7).
+
+**Why not a harness-specific ID (e.g. Claude's `session_id`)?** Harness IDs are
+not a guaranteed concept across all agent harnesses. `$TMUX_PANE` is a
+harness-agnostic, universally available identifier for any process running in
+tmux — making the state file schema and the `dv` CLI fully harness-agnostic.
+
+**Why not process PID?** PIDs are recycled frequently by the OS and carry no
+harness-agnostic meaning.
 
 ---
 
@@ -87,7 +93,6 @@ it is volatile across reboots.
 
 ```json
 {
-  "session_id": "<claude-session-id>",
   "pane_id": "%12",
   "harness": "claude",
   "state": "working",
@@ -95,55 +100,52 @@ it is volatile across reboots.
 }
 ```
 
-The `session_id` is read from the hook's stdin JSON and used as the directory
-name. The `pane_id` is read from the `$TMUX_PANE` environment variable, which
-tmux sets automatically in every pane — no injection by `dv` required. It is
-stored so that `dv list` can correlate each state file back to a live tmux pane
-without querying Claude.
+`pane_id` is read from `$TMUX_PANE` and doubles as both the directory name and
+the field used by `dv list` for correlation and stale validation.
 
 The file is atomically overwritten (write to a `.tmp` sibling, then `mv`) on
-every state change.
+every state change, and deleted by the `SessionEnd` hook when the session exits
+normally.
 
-**Why not append-only event log?** The CLI only needs current state. Keeping a
-log would require parsing and is over-engineering for this iteration.
+**Why not append-only event log?** The CLI only needs current state.
 
-**What if `$TMUX_PANE` is not set?** The hook is running outside of tmux.
-`pane_id` is omitted from the file and the agent will not appear in `dv list`
-output (which is tmux-based), but the state file is still written for potential
-future consumers.
+**What if `$TMUX_PANE` is not set?** The hook is running outside of tmux. It
+exits 0 silently and writes nothing — `dv` is tmux-oriented and has no pane to
+correlate the state to.
 
 ---
 
 ### D4 — Claude hook mapping
 
-Claude Code fires these hooks (passed as JSON on stdin). All handlers are
-registered as `async: true` so they never block Claude's operation.
+Claude Code fires these hooks (passed as JSON on stdin). State-updating hooks
+are `async: true` so they never block Claude's operation. Lifecycle hooks
+(`SessionStart`, `SessionEnd`) are synchronous to ensure the state file is
+established before any other hook fires and cleaned up before the session exits.
 
-| Hook event         | Matcher             | Maps to state |
-| ------------------ | ------------------- | ------------- |
-| `SessionStart`     | `startup`           | `idle`        |
-| `UserPromptSubmit` | _(no matcher)_      | `working`     |
-| `PreToolUse`       | `*`                 | `working`     |
-| `Stop`             | _(no matcher)_      | `done`        |
-| `Notification`     | `permission_prompt` | `blocked`     |
+| Hook event         | Matcher             | Action                        |
+| ------------------ | ------------------- | ----------------------------- |
+| `SessionStart`     | `startup`           | Write `idle` state            |
+| `UserPromptSubmit` | _(no matcher)_      | Write `working` state (async) |
+| `PreToolUse`       | `*`                 | Write `working` state (async) |
+| `Stop`             | _(no matcher)_      | Write `done` state (async)    |
+| `Notification`     | `permission_prompt` | Write `blocked` state (async) |
+| `SessionEnd`       | _(no matcher)_      | Delete state file             |
 
-This covers all five `AgentState` variants. `unknown` is the implicit fallback
-returned by the CLI when no state file exists for a listed pane.
+`unknown` is the implicit fallback returned by the CLI when no state file exists
+for a listed pane.
 
 `PreToolUse` is retained alongside `UserPromptSubmit` as a belt-and-suspenders
 signal: it fires on every tool call and keeps the state as `working` throughout
-a multi-tool turn. `PostToolUse` is not used — it is redundant with `PreToolUse`
-and fires at a point where Claude is still working.
+a multi-tool turn.
 
 ---
 
 ### D5 — Hook handlers: internal `dv hook <event>` subcommands
 
 **Decision**: Hook logic is implemented as internal subcommands of the `dv`
-binary. Each handler (`dv hook session-start`, `dv hook user-prompt-submit`,
-`dv hook pre-tool-use`, `dv hook stop`, `dv hook notification`) reads Claude's
-JSON event payload from stdin, extracts `session_id` and `$TMUX_PANE`, and calls
-`write_state`.
+binary. Each handler reads `$TMUX_PANE` from the environment and exits 0
+silently if it is not set. State-updating handlers also read any needed fields
+from Claude's JSON payload on stdin.
 
 **Why internal subcommands over shell scripts?** Hook logic (UUID lookup, JSON
 deserialisation, atomic file write) maps naturally to Rust and benefits from the
@@ -168,13 +170,7 @@ of what it writes:
     "SessionStart": [
       {
         "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dv hook session-start",
-            "async": true
-          }
-        ]
+        "hooks": [{ "type": "command", "command": "dv hook session-start" }]
       }
     ],
     "UserPromptSubmit": [
@@ -217,6 +213,11 @@ of what it writes:
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "dv hook session-end" }]
+      }
     ]
   }
 }
@@ -235,43 +236,44 @@ transparent and reversible.
 
 A `StateStore` trait (or simple free functions) in the `dv` codebase handles:
 
-- `write_state(session_id, pane_id, harness, state)` — serialises and atomically
-  writes `state.json`.
-- `read_state(session_id) -> AgentState` — reads `state.json`, returns `Unknown`
-  on any error.
+- `write_state(pane_id, harness, state)` — serialises and atomically writes
+  `state.json` to `$XDG_DATA_HOME/drovr/agents/<pane-id>/`.
+- `delete_state(pane_id)` — removes the state file and its parent directory.
+  Called by `dv hook session-end`.
+- `read_state(pane_id) -> AgentState` — reads `state.json`, returns `Unknown` on
+  any error.
 - `list_agents() -> Vec<AgentInfo>` — globs the data directory and returns all
   known agents.
-- `cleanup_stale(live_pane_ids: &[&str])` — deletes every state file whose
-  `pane_id` is not present in `live_pane_ids`. Called by `dv list` after
-  collecting the set of `#{pane_id}` values from all currently running harness
-  panes. Only invoked when tmux is reachable; if the tmux query fails the
-  cleanup step is skipped entirely to avoid wiping valid state due to a
-  transient error.
 
 The `list-sessions` command:
 
 1. Queries tmux for all panes whose `pane_current_command` matches a known
-   harness, collecting `#{pane_id}` for each.
-2. Calls `cleanup_stale` with the collected live pane IDs.
-3. For each live pane, finds the state file whose `pane_id` matches and calls
-   `read_state` to populate the state column. Displays `unknown` when no
-   matching state file exists.
+   harness, collecting `#{pane_id}` and `#{pane_current_command}` for each.
+2. Reads all state files from the data directory.
+3. For each state file, validates it as a last resort:
+   - If the state file's `pane_id` is not in the live pane set → delete it (pane
+     no longer exists).
+   - If the pane exists but its `pane_current_command` does not match the
+     `harness` field in the state file → delete it (different process running in
+     that pane now). This validation only runs when tmux is reachable; skip
+     entirely on tmux errors to avoid deleting valid state.
+4. For each live pane, calls `read_state` to populate the state column. Displays
+   `unknown` when no state file exists for that pane.
 
 ## Risks / Trade-offs
 
 - **Race condition on fast successive hook fires** → mitigated by atomic rename
   (`mv`); concurrent writers for the same file are inherently serial on POSIX.
-- **State goes stale** (agent process killed without firing Stop hook) → on
-  every `dv list` run, `cleanup_stale` removes state files for agents whose
-  `pane_id` is no longer in the live pane set. The worst-case window is the time
-  between two `dv list` invocations; no background daemon is required.
-- **Hook fires outside tmux** (e.g. Claude running in a plain terminal) →
-  `$TMUX_PANE` is unset; the hook writes the state file without a `pane_id` and
-  the agent does not appear in `dv list` output. This is acceptable: `dv` is
-  tmux-oriented.
-- **Multiple Claude sessions in the same pane** → not a supported use-case;
-  `SessionStart` with `startup` fires once per new session, so the state file is
-  correctly initialised each time.
+- **Unclean shutdown** (agent process killed without firing `SessionEnd`) →
+  `dv list` validates each state file as a last resort: deletes it if the pane
+  no longer exists or if `pane_current_command` no longer matches the `harness`
+  field. The worst-case window is the time between two `dv list` invocations.
+- **Pane ID reuse** (new session starts in a pane whose old state file was not
+  cleaned up) → the new `SessionStart` hook unconditionally overwrites the state
+  file, so stale data is replaced immediately.
+- **Hook fires outside tmux** (`$TMUX_PANE` unset) → hook exits 0 silently; no
+  state file is written. `dv` is tmux-oriented and has no pane to correlate
+  state to.
 
 ## Migration Plan
 

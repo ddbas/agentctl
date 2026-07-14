@@ -8,7 +8,7 @@ tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
 `pi`). Each line SHALL contain four left-aligned columns:
 `<agent-name>  <session-name>  <window-index>.<pane-index>  <state>`. The state
 column SHALL display the current `AgentState` for the agent (as lowercase
-string), or `unknown` if no state file exists for that pane's `DROVR_AGENT_ID`.
+string), or `unknown` if no state file exists for that pane's `#{pane_id}`.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -47,17 +47,30 @@ string), or `unknown` if no state file exists for that pane's `DROVR_AGENT_ID`.
 
 #### Scenario: Agent has no state file
 
-- **WHEN** the user runs `dv list` and a matching pane has no `DROVR_AGENT_ID`
-  set or has no corresponding state file
+- **WHEN** the user runs `dv list` and a matching pane has no corresponding
+  state file
 - **THEN** the state column for that pane shows `unknown`
 
-#### Scenario: Stale state files are cleaned up on list
+#### Scenario: Agent state is reflected in list output
 
-- **WHEN** the user runs `dv list` and a state file exists for an agent ID that
-  is not present in any live tmux pane's `DROVR_AGENT_ID`
+- **WHEN** the user runs `dv list` and a matching pane has a valid state file
+  with `"state": "working"`
+- **THEN** the state column for that pane shows `working`
+
+#### Scenario: Stale state file deleted when pane no longer exists
+
+- **WHEN** the user runs `dv list` and a state file exists whose `pane_id` does
+  not correspond to any live tmux pane
 - **THEN** that state file is deleted before the output is printed
 
-#### Scenario: Cleanup skipped when tmux is unreachable
+#### Scenario: Stale state file deleted when harness no longer matches
+
+- **WHEN** the user runs `dv list` and a state file exists whose `pane_id`
+  corresponds to a live pane but the pane's current command does not match the
+  `harness` field in the state file
+- **THEN** that state file is deleted before the output is printed
+
+#### Scenario: Stale validation skipped when tmux is unreachable
 
 - **WHEN** the user runs `dv list` and the tmux query fails
 - **THEN** no state files are deleted and the command exits with code 0 and no
