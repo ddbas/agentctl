@@ -188,22 +188,27 @@ A `StateStore` trait (or simple free functions) in the `dv` codebase handles:
 - `list_agents() -> Vec<AgentInfo>` — globs the data directory and returns all
   known agents.
 
-The `list-sessions` command:
+The `list-sessions` command is the single reconciliation point between live tmux
+sessions and persisted state files. It proceeds as follows:
 
-1. Queries tmux for all panes whose `pane_current_command` matches a known
-   harness, collecting `#{pane_id}` and `#{pane_current_command}` for each.
-2. Reads all state files from the data directory.
-3. For each state file, validates it as a last resort:
-   - If the state file's `pane_id` is not in the live pane set → delete it (pane
-     no longer exists).
-   - If the pane exists **and** the state file's `harness` field is not
-     `"unknown"`, and `pane_current_command` does not match `harness` → delete
-     it (different process running in that pane now). When `harness` is
-     `"unknown"` this check is skipped — we cannot validate what we do not know.
-   - This validation only runs when tmux is reachable; skip entirely on tmux
-     errors to avoid deleting valid state.
-4. For each live pane, calls `read_state` to populate the state column. Displays
-   `unknown` when no state file exists for that pane.
+1. **Discover live sessions** — query tmux for all panes whose
+   `pane_current_command` matches a known harness, collecting `#{pane_id}` and
+   `#{pane_current_command}` for each. If tmux is unreachable, skip all
+   remaining steps and exit 0 with no output (never mutate state files when tmux
+   cannot be queried).
+2. **Load state files** — read every `state.json` found under
+   `$XDG_DATA_HOME/drovr/agents/` and index them by `pane_id`.
+3. **Clean up orphaned state files** — for each state file whose `pane_id` is
+   not present in the live pane set, delete the file and its parent directory
+   (the session is gone and the file is stale).
+4. **Render output** — for each live pane:
+   - Look up the state file by `pane_id`.
+   - If no state file exists → display `unknown`.
+   - If a state file exists but its `harness` field (when not `"unknown"`) does
+     not match `pane_current_command` → display `unknown` (contradictory state;
+     do **not** delete the file — it may belong to a harness that will reclaim
+     the pane).
+   - Otherwise → display the `state` field from the file.
 
 ## Risks / Trade-offs
 
@@ -211,8 +216,10 @@ The `list-sessions` command:
   (`mv`); concurrent writers for the same file are inherently serial on POSIX.
 - **Unclean shutdown** (agent process killed without firing `SessionEnd`) →
   `dv list` validates each state file as a last resort: deletes it if the pane
-  no longer exists or if `pane_current_command` no longer matches the `harness`
-  field. The worst-case window is the time between two `dv list` invocations.
+  no longer exists. If a different harness is now running in the same pane the
+  state is shown as `unknown` (the file is kept, not deleted, because the
+  original harness may still reclaim the pane). The worst-case window is the
+  time between two `dv list` invocations.
 - **Pane ID reuse** (new session starts in a pane whose old state file was not
   cleaned up) → the new `SessionStart` hook unconditionally overwrites the state
   file, so stale data is replaced immediately.

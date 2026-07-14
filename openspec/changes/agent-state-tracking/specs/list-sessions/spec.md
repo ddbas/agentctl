@@ -2,13 +2,34 @@
 
 ### Requirement: List agent harness panes by running process
 
-The CLI SHALL provide a `list` subcommand that queries every pane across all
-tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
-`pane_current_command` exactly matches a known agent harness name (`claude` or
-`pi`). Each line SHALL contain four left-aligned columns:
+The CLI SHALL provide a `list` subcommand that is the single point responsible
+for reconciling live tmux agent sessions with persisted state files. It performs
+the following steps in order:
+
+1. **Discover live sessions** — query every pane across all tmux sessions via
+   `tmux list-panes -a` and collect all panes whose `pane_current_command`
+   exactly matches a known agent harness name (`claude` or `pi`).
+2. **Load state files** — read every `state.json` found under the XDG data
+   directory and index them by `pane_id`.
+3. **Clean up orphaned state files** — for each state file whose `pane_id` does
+   not correspond to any live pane in the set discovered above, delete that
+   state file (the session is gone).
+4. **Reconcile contradictory state** — for each live pane, if a state file
+   exists for that pane's `pane_id` but its `harness` field does not match the
+   pane's `pane_current_command`, treat the pane's state as `unknown` (the state
+   file belongs to a different harness that previously ran in that pane; do
+   **not** delete it).
+5. **Render output** — print one line per live agent pane. A pane with no
+   matching state file, or whose state file is contradictory (step 4), displays
+   `unknown` in the state column.
+
+If tmux is unreachable the reconciliation steps above are skipped entirely (no
+state files are deleted) and the command exits 0 with no output.
+
+Each output line SHALL contain four left-aligned columns:
 `<agent-name>  <session-name>  <window-index>.<pane-index>  <state>`. The state
 column SHALL display the current `AgentState` for the agent (as lowercase
-string), or `unknown` if no state file exists for that pane's `#{pane_id}`.
+string), or `unknown` if the pane has no state file or a contradictory one.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -63,12 +84,13 @@ string), or `unknown` if no state file exists for that pane's `#{pane_id}`.
   not correspond to any live tmux pane
 - **THEN** that state file is deleted before the output is printed
 
-#### Scenario: Stale state file deleted when harness no longer matches
+#### Scenario: Contradictory state file results in unknown state (not deleted)
 
 - **WHEN** the user runs `dv list` and a state file exists whose `pane_id`
   corresponds to a live pane but the pane's current command does not match the
   `harness` field in the state file
-- **THEN** that state file is deleted before the output is printed
+- **THEN** the state column for that pane shows `unknown` and the state file is
+  **not** deleted
 
 #### Scenario: Stale validation skipped when tmux is unreachable
 
