@@ -89,13 +89,20 @@ enum Commands {
 enum HooksSubcommand {
     /// Install hooks for a harness.
     ///
-    /// No harnesses are currently supported; this command exits 1 with an
-    /// explanatory message for any input.
+    /// Writes the necessary hook files for the chosen harness so that
+    /// `dv list` shows real-time agent state without polling.
     Install {
-        /// Harness name (e.g. `claude`).
+        /// Harness to install hooks for.
         #[arg(value_name = "HARNESS")]
-        harness: String,
+        harness: Harness,
     },
+}
+
+/// Harnesses supported by `dv hooks install`.
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum Harness {
+    /// Pi coding agent — writes `~/.pi/agent/extensions/drovr.ts`.
+    Pi,
 }
 
 fn main() {
@@ -128,7 +135,7 @@ fn run() -> anyhow::Result<()> {
         Some(Commands::Hooks {
             subcommand: HooksSubcommand::Install { harness },
         }) => {
-            commands::hooks::run_install(&harness)?;
+            commands::hooks::run_install(harness)?;
         }
     }
 
