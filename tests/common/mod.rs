@@ -86,6 +86,9 @@ const TMUX_TAG: &str = "latest";
 /// - The host `dv` binary is directed at this socket via `DV_TMUX_SOCKET`.
 ///   `TMUX` and `TMUX_PANE` are cleared so `dv` does not think it is
 ///   running inside an existing tmux session.
+/// - A per-test XDG data directory at `workspace_path/xdg` is used for all
+///   state files.  `XDG_DATA_HOME` is set on every `dv()` invocation so state
+///   operations are fully isolated from the developer's host environment.
 pub struct TmuxEnv {
     /// Keeps the container alive until the test ends.
     _container: ContainerAsync<GenericImage>,
@@ -96,6 +99,9 @@ pub struct TmuxEnv {
     pub workspace_path: PathBuf,
     /// Host path of the tmux server socket (`workspace_path/tmux.sock`).
     pub socket_path: PathBuf,
+    /// Isolated XDG data home for this test (`workspace_path/xdg`).
+    /// All `dv` state files are written here; never touches the real user dir.
+    pub xdg_path: PathBuf,
 }
 
 impl TmuxEnv {
@@ -143,9 +149,13 @@ impl TmuxEnv {
                  Is `am-tmux-test:latest` built? Run `mise run test:build-image`.",
             );
 
+        let xdg_path = workspace_path.join("xdg");
+        std::fs::create_dir_all(&xdg_path).expect("create xdg dir");
+
         TmuxEnv {
             _container: container,
             socket_path: workspace_path.join("tmux.sock"),
+            xdg_path,
             _workspace: workspace_tmp,
             workspace_path,
         }
@@ -153,6 +163,7 @@ impl TmuxEnv {
 
     /// Returns a `Command` builder for the `dv` binary with:
     /// - `DV_TMUX_SOCKET` = path to the container's tmux socket
+    /// - `XDG_DATA_HOME` = isolated per-test state directory
     /// - `TMUX` and `TMUX_PANE` removed (prevent session contamination)
     pub fn dv(&self) -> Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_dv"));
@@ -161,6 +172,10 @@ impl TmuxEnv {
             self.socket_path
                 .to_str()
                 .expect("socket path is valid utf-8"),
+        )
+        .env(
+            "XDG_DATA_HOME",
+            self.xdg_path.to_str().expect("xdg path is valid utf-8"),
         )
         .env_remove("TMUX")
         .env_remove("TMUX_PANE");
@@ -201,5 +216,102 @@ impl TmuxEnv {
             "command {args:?} exited with status {exit}:\n{}",
             String::from_utf8_lossy(&stderr_bytes)
         );
+    }
+
+    /// Create a fake agent pane in the container tmux server and return its
+    /// pane ID (e.g. `%3`).
+    ///
+    /// Copies `/bin/sleep` to `/tmp/<agent>` inside the container and opens a
+    /// new tmux window running it so `#{pane_current_command}` reports the
+    /// given agent name. The pane ID is written to the bind-mounted workspace
+    /// directory so the host can read it without needing a local tmux.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any setup step fails.
+    pub async fn create_fake_agent_pane(&self, agent: &str) -> String {
+        // 1. Copy /bin/sleep as /tmp/<agent> so the executable name is <agent>.
+        self.exec(&[
+            "sh",
+            "-c",
+            &format!("cp /bin/sleep /tmp/{agent} && chmod +x /tmp/{agent}"),
+        ])
+        .await;
+
+        // 2. Open a new tmux window named after the agent (no command — opens
+        //    the default shell so the window stays alive).
+        self.exec(&[
+            "tmux",
+            "-S",
+            "/workspace/tmux.sock",
+            "new-window",
+            "-n",
+            agent,
+        ])
+        .await;
+
+        // 3. Query the pane ID by looking up the window we just named.
+        //    Write to the bind-mount so the host can read it.
+        let pane_id_file = format!("pane_id_{agent}.txt");
+        self.exec(&[
+            "sh",
+            "-c",
+            &format!(
+                "tmux -S /workspace/tmux.sock \
+                 list-panes -t '_init:{agent}' \
+                 -F '#{{pane_id}}' \
+                 > /workspace/{pane_id_file}"
+            ),
+        ])
+        .await;
+
+        let host_pane_id_path = self.workspace_path.join(&pane_id_file);
+        let pane_id = std::fs::read_to_string(&host_pane_id_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", host_pane_id_path.display()))
+            .trim()
+            .to_owned();
+        assert!(!pane_id.is_empty(), "got empty pane_id");
+
+        // 4. Replace the shell with /tmp/<agent> via `exec` builtin.
+        self.exec(&[
+            "tmux",
+            "-S",
+            "/workspace/tmux.sock",
+            "send-keys",
+            "-t",
+            &pane_id,
+            &format!("exec /tmp/{agent} 9999"),
+            "Enter",
+        ])
+        .await;
+
+        // 5. Wait for the exec to take effect in the pane.
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+
+        pane_id
+    }
+
+    /// Write a state file for the given pane under this env's XDG directory.
+    ///
+    /// The state is a minimal JSON file: `{"pane_id": ..., "harness": ...,
+    /// "state": ..., "updated_at": ...}`.  The file is written on the HOST at
+    /// `xdg_path/drovr/agents/<pane_id>/state.json`.
+    pub fn write_state_file(&self, pane_id: &str, harness: &str, state: &str) {
+        let dir = self.xdg_path.join("drovr").join("agents").join(pane_id);
+        std::fs::create_dir_all(&dir).expect("create agent dir");
+        let json = format!(
+            r#"{{"pane_id":"{pane_id}","harness":"{harness}","state":"{state}","updated_at":"2026-01-01T00:00:00Z"}}"#
+        );
+        std::fs::write(dir.join("state.json"), json).expect("write state file");
+    }
+
+    /// Return the path of the state file for the given pane under this env's
+    /// XDG directory.
+    pub fn state_file_path(&self, pane_id: &str) -> PathBuf {
+        self.xdg_path
+            .join("drovr")
+            .join("agents")
+            .join(pane_id)
+            .join("state.json")
     }
 }
