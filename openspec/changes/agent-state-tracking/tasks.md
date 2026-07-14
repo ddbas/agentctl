@@ -67,22 +67,25 @@
 
 ## 5. dv hooks install
 
-- [ ] 5.1 Implement `dv hooks install` — reads `~/.claude/settings.json`
+- [ ] 5.1 Implement `dv hooks install <harness>` — dispatch on the harness
+      argument; return a clear error for unrecognised values
+- [ ] 5.2 Implement the `claude` handler — reads `~/.claude/settings.json`
       (creates if absent), merges the six drovr hook entries using
       `dv set-state <state> --harness claude` and `dv clear-state`, writes the
       file back atomically; `SessionStart` and `SessionEnd` are registered
       without `async`, all others with `async: true`
-- [ ] 5.2 Ensure idempotency: if a drovr entry already exists, do not duplicate
+- [ ] 5.3 Ensure idempotency: if a drovr entry already exists, do not duplicate
       it
-- [ ] 5.3 Preserve all existing non-drovr hook entries in the file
-- [ ] 5.4 Print a confirmation message listing which hooks were added vs.
+- [ ] 5.4 Preserve all existing non-drovr hook entries in the file
+- [ ] 5.5 Print a confirmation message listing which hooks were added vs.
       already present
-- [ ] 5.5 Write unit tests for install: clean file, idempotent re-run, merge
-      with existing hooks
+- [ ] 5.6 Write unit tests for install: clean file, idempotent re-run, merge
+      with existing hooks, unrecognised harness argument returns error
 
 ## 6. Documentation
 
 - [ ] 6.1 Update the project README with an "Agent state tracking" section
-      covering the state model, `dv hooks install` as the one-time setup step,
-      and the XDG file layout
-- [ ] 6.2 Ensure `AGENTS.md` references `dv hooks install` as required setup
+      covering the state model, `dv hooks install claude` as the one-time setup
+      step, and the XDG file layout
+- [ ] 6.2 Ensure `AGENTS.md` references `dv hooks install claude` as required
+      setup

@@ -178,12 +178,14 @@ complexity with no benefit.
 
 ---
 
-### D6 — Hook registration: `dv hooks install`
+### D6 — Hook registration: `dv hooks install <harness>`
 
-**Decision**: A new `dv hooks install` subcommand patches
-`~/.claude/settings.json` to register the five hook handlers. The command merges
-its entries into any existing hook configuration and is **idempotent**. Example
-of what it writes:
+**Decision**: A new `dv hooks install <harness>` subcommand patches the
+harness-specific settings file to register the hook handlers for the given
+harness. Currently the only supported value is `claude`, which patches
+`~/.claude/settings.json`. The command merges its entries into any existing hook
+configuration and is **idempotent**. Example of what `dv hooks install claude`
+writes:
 
 ```json
 {
@@ -250,8 +252,9 @@ of what it writes:
 }
 ```
 
-**Why `~/.claude/settings.json` (user scope)?** The hooks must fire for all
-projects, not just the drovr repo. User-scope settings apply globally.
+**Why `~/.claude/settings.json` (user scope) for the `claude` harness?** The
+hooks must fire for all projects, not just the drovr repo. User-scope settings
+apply globally.
 
 **Why not auto-install on first run?** Modifying the user's Claude config
 without explicit consent is surprising. An explicit install command is
@@ -306,10 +309,11 @@ The `list-sessions` command:
 
 1. Add `AgentState` enum and `StateStore` to the Rust codebase.
 2. Implement `dv set-state <state>` and `dv clear-state` subcommands.
-3. Implement `dv hooks install` to register them in `~/.claude/settings.json`.
+3. Implement `dv hooks install <harness>` to register them in the
+   harness-specific settings file.
 4. Update `dv list` to read state and run stale cleanup.
-5. Document `dv hooks install` in the README as the required one-time setup
-   step.
+5. Document `dv hooks install claude` in the README as the required one-time
+   setup step.
 
 No breaking changes to existing commands. State files are additive; absence of a
 file is handled gracefully (`unknown`).

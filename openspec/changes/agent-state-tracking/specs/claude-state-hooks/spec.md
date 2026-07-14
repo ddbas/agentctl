@@ -100,18 +100,18 @@ not supplied.
   and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
-### Requirement: dv hooks install registers handlers in user Claude settings
+### Requirement: dv hooks install claude registers handlers in user Claude settings
 
-The `dv hooks install` subcommand SHALL patch `~/.claude/settings.json` to
-register the six Claude hook entries using `dv set-state` and `dv clear-state`.
-`SessionStart` and `SessionEnd` are registered without `async` so they complete
-before Claude proceeds; all other hooks use `async: true`. The command SHALL be
-idempotent and SHALL merge into any existing hook configuration without
-overwriting it.
+The `dv hooks install claude` subcommand SHALL patch `~/.claude/settings.json`
+to register the six Claude hook entries using `dv set-state` and
+`dv clear-state`. `SessionStart` and `SessionEnd` are registered without `async`
+so they complete before Claude proceeds; all other hooks use `async: true`. The
+command SHALL be idempotent and SHALL merge into any existing hook configuration
+without overwriting it.
 
 #### Scenario: First-time install on a clean settings file
 
-- **WHEN** the user runs `dv hooks install` and `~/.claude/settings.json`
+- **WHEN** the user runs `dv hooks install claude` and `~/.claude/settings.json`
   contains no drovr hook entries
 - **THEN** the file is updated with entries for `SessionStart`,
   `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`, and `SessionEnd`
@@ -119,7 +119,7 @@ overwriting it.
 
 #### Scenario: Idempotent re-install
 
-- **WHEN** the user runs `dv hooks install` a second time
+- **WHEN** the user runs `dv hooks install claude` a second time
 - **THEN** no duplicate entries are added and the file content is identical to
   after the first run
 
