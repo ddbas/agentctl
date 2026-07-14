@@ -1,4 +1,6 @@
 mod commands;
+#[allow(dead_code)]
+mod state;
 
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -26,8 +28,8 @@ enum Commands {
     ///
     /// Queries every pane across all tmux sessions via `tmux list-panes -a`
     /// and prints one line per pane whose foreground process is a known agent
-    /// harness (`claude` or `pi`).  Output is three left-aligned columns:
-    /// `<agent>  <session>  <window>.<pane>`.
+    /// harness (`claude` or `pi`).  Output is four left-aligned columns:
+    /// `<agent>  <session>  <window>.<pane>  <state>`.
     ///
     /// `node` panes are resolved to `pi` when the pane's shell has a direct
     /// child process whose argv[0] basename is `pi`.
@@ -41,6 +43,58 @@ enum Commands {
         /// `DV_TMUX_SOCKET` environment variable when not set.
         #[arg(short, long, value_name = "PATH")]
         server: Option<String>,
+    },
+
+    /// Write the current agent state to the state file.
+    ///
+    /// Reads `$TMUX_PANE` from the environment to identify the current pane.
+    /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
+    /// supplied — suitable for calling from hooks that may run outside tmux.
+    #[command(name = "set-state")]
+    SetState {
+        /// New state. Accepted values: idle, working, done, blocked.
+        #[arg(value_name = "STATE")]
+        state: String,
+
+        /// Harness name to write to the state file (e.g. `claude`).
+        /// Defaults to `"unknown"` when omitted.
+        #[arg(long, value_name = "HARNESS")]
+        harness: Option<String>,
+
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+    },
+
+    /// Remove the state file for the current agent pane.
+    ///
+    /// Reads `$TMUX_PANE` from the environment. Exits 0 silently when
+    /// `$TMUX_PANE` is not set and `--pane` is not supplied, or when no
+    /// state file exists for the pane.
+    #[command(name = "clear-state")]
+    ClearState {
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+    },
+
+    /// Manage agent harness hooks.
+    Hooks {
+        #[command(subcommand)]
+        subcommand: HooksSubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksSubcommand {
+    /// Install hooks for a harness.
+    ///
+    /// No harnesses are currently supported; this command exits 1 with an
+    /// explanatory message for any input.
+    Install {
+        /// Harness name (e.g. `claude`).
+        #[arg(value_name = "HARNESS")]
+        harness: String,
     },
 }
 
@@ -60,6 +114,21 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Commands::List { server }) => {
             commands::list::run(server)?;
+        }
+        Some(Commands::SetState {
+            state,
+            harness,
+            pane,
+        }) => {
+            commands::set_state::run(state, harness, pane)?;
+        }
+        Some(Commands::ClearState { pane }) => {
+            commands::clear_state::run(pane)?;
+        }
+        Some(Commands::Hooks {
+            subcommand: HooksSubcommand::Install { harness },
+        }) => {
+            commands::hooks::run_install(&harness)?;
         }
     }
 

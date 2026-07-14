@@ -1,17 +1,41 @@
 ## Purpose
 
 Provide a `list` subcommand that discovers and displays tmux panes running agent
-harness processes (`claude`, `pi`) across all sessions.
+harness processes (`claude`, `pi`) across all sessions, reconciling live tmux
+state with persisted state files.
 
 ## Requirements
 
 ### Requirement: List agent harness panes by running process
 
-The CLI SHALL provide a `list` subcommand that queries every pane across all
-tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
-`pane_current_command` exactly matches a known agent harness name (`claude` or
-`pi`). Each line SHALL contain three left-aligned columns:
-`<agent-name>  <session-name>  <window-index>.<pane-index>`.
+The CLI SHALL provide a `list` subcommand that is the single point responsible
+for reconciling live tmux agent sessions with persisted state files. It performs
+the following steps in order:
+
+1. **Discover live sessions** — query every pane across all tmux sessions via
+   `tmux list-panes -a` and collect all panes whose `pane_current_command`
+   exactly matches a known agent harness name (`claude` or `pi`).
+2. **Load state files** — read every `state.json` found under the XDG data
+   directory and index them by `pane_id`.
+3. **Clean up orphaned state files** — for each state file whose `pane_id` does
+   not correspond to any live pane in the set discovered above, delete that
+   state file (the session is gone).
+4. **Reconcile contradictory state** — for each live pane, if a state file
+   exists for that pane's `pane_id` but its `harness` field does not match the
+   pane's `pane_current_command`, treat the pane's state as `unknown` (the state
+   file belongs to a different harness that previously ran in that pane; do
+   **not** delete it).
+5. **Render output** — print one line per live agent pane. A pane with no
+   matching state file, or whose state file is contradictory (step 4), displays
+   `unknown` in the state column.
+
+If tmux is unreachable the reconciliation steps above are skipped entirely (no
+state files are deleted) and the command exits 0 with no output.
+
+Each output line SHALL contain four left-aligned columns:
+`<agent-name>  <session-name>  <window-index>.<pane-index>  <state>`. The state
+column SHALL display the current `AgentState` for the agent (as lowercase
+string), or `unknown` if the pane has no state file or a contradictory one.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -24,15 +48,17 @@ tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
 #### Scenario: Output is columnar and left-aligned
 
 - **WHEN** two or more matching panes are printed
-- **THEN** all three columns (agent, session, window.pane) are left-aligned,
-  each padded to the width of the longest value in that column plus two spaces
+- **THEN** all four columns (agent, session, window.pane, state) are
+  left-aligned, each padded to the width of the longest value in that column
+  plus two spaces
 
 #### Scenario: Agent name appears in the first column
 
 - **WHEN** matching panes are displayed
 - **THEN** the first column contains the agent process name (`claude` or `pi`),
-  the second column contains the tmux session name, and the third column
-  contains the `window_index.pane_index` in the form `N.M`
+  the second column contains the tmux session name, the third column contains
+  the `window_index.pane_index` in the form `N.M`, and the fourth column
+  contains the agent state in lowercase
 
 #### Scenario: No matching panes
 
@@ -46,31 +72,34 @@ tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
 - **THEN** the command exits with code 0 and produces no output (treats absence
   of a server as zero panes)
 
-### Requirement: Target a specific tmux server socket
+#### Scenario: Agent has no state file
 
-The `list` subcommand SHALL accept an optional `--server` (`-s`) flag whose
-value is passed to `tmux -S <path>` to target a specific tmux server socket
-file.
+- **WHEN** the user runs `dv list` and a matching pane has no corresponding
+  state file
+- **THEN** the state column for that pane shows `unknown`
 
-#### Scenario: Custom server socket provided
+#### Scenario: Agent state is reflected in list output
 
-- **WHEN** the user runs `dv list --server /tmp/my-tmux.sock` and a pane on that
-  socket is running `pi`
-- **THEN** the output contains a line for that `pi` pane
+- **WHEN** the user runs `dv list` and a matching pane has a valid state file
+  with `"state": "working"`
+- **THEN** the state column for that pane shows `working`
 
-#### Scenario: Default server used when flag is omitted
+#### Scenario: Stale state file deleted when pane no longer exists
 
-- **WHEN** the user runs `dv list` without `--server`
-- **THEN** the command queries the default tmux server (no `-S` flag passed to
-  tmux)
+- **WHEN** the user runs `dv list` and a state file exists whose `pane_id` does
+  not correspond to any live tmux pane
+- **THEN** that state file is deleted before the output is printed
 
-### Requirement: Clear error when tmux binary is missing
+#### Scenario: Contradictory state file results in unknown state (not deleted)
 
-The `list` subcommand SHALL print a human-readable error message and exit
-non-zero when the `tmux` binary cannot be found on PATH.
+- **WHEN** the user runs `dv list` and a state file exists whose `pane_id`
+  corresponds to a live pane but the pane's current command does not match the
+  `harness` field in the state file
+- **THEN** the state column for that pane shows `unknown` and the state file is
+  **not** deleted
 
-#### Scenario: tmux not installed
+#### Scenario: Stale validation skipped when tmux is unreachable
 
-- **WHEN** the user runs `dv list` and `tmux` is not available on PATH
-- **THEN** the command exits with a non-zero code and prints an error containing
-  "tmux not found"
+- **WHEN** the user runs `dv list` and the tmux query fails
+- **THEN** no state files are deleted and the command exits with code 0 and no
+  output (consistent with existing no-tmux behaviour)
