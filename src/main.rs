@@ -103,6 +103,8 @@ enum HooksSubcommand {
 enum Harness {
     /// Pi coding agent — writes `~/.pi/agent/extensions/drovr.ts`.
     Pi,
+    /// Claude Code — patches `~/.claude/settings.json`.
+    Claude,
 }
 
 fn main() {

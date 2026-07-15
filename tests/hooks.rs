@@ -4,29 +4,29 @@ mod common;
 
 use std::fs;
 
-/// `dv hooks install claude` should exit 2 (Clap usage error) because
-/// `claude` is not a recognised harness value.
+/// `dv hooks install <unknown-harness>` exits 2 (Clap usage error).
+/// Note: `claude` is now a valid harness; this test uses unrecognised names.
 #[tokio::test]
 async fn hooks_install_unknown_harness_exits_two() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
         .dv()
-        .args(["hooks", "install", "claude"])
+        .args(["hooks", "install", "not-a-real-harness"])
         .output()
         .expect("failed to spawn dv hooks install");
 
     assert_eq!(
         output.status.code(),
         Some(2),
-        "`dv hooks install claude` should exit with Clap error code 2; got: {:?}",
+        "`dv hooks install not-a-real-harness` should exit with Clap error code 2; got: {:?}",
         output.status,
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("claude"),
-        "stderr should mention the invalid value 'claude'; got:\n{stderr}",
+        stderr.contains("not-a-real-harness"),
+        "stderr should mention the invalid value; got:\n{stderr}",
     );
 }
 
@@ -179,6 +179,126 @@ async fn hooks_install_pi_idempotent() {
     );
 
     // stdout must contain `=` prefix on second run.
+    let stdout2 = String::from_utf8_lossy(&out2.stdout);
+    assert!(
+        stdout2.contains('='),
+        "stdout should contain '=' for idempotent re-run; got:\n{stdout2}"
+    );
+}
+
+// ── Claude integration tests (task 2.6 and 2.7) ───────────────────────────────
+
+/// `dv hooks install claude` on a container with no `~/.claude/settings.json`:
+/// the file is created and contains all six drovr hook entries.
+#[tokio::test]
+async fn hooks_install_claude_creates_settings_file() {
+    let env = common::TmuxEnv::new().await;
+
+    // Use an isolated HOME so the install lands in a known location and never
+    // touches the developer's real ~/.claude/settings.json.
+    let fake_home = env.workspace_path.join("home_claude");
+    fs::create_dir_all(&fake_home).expect("create fake home");
+
+    let settings_path = fake_home.join(".claude").join("settings.json");
+
+    // Confirm the file does not exist before install.
+    assert!(
+        !settings_path.exists(),
+        "settings.json should not exist before install"
+    );
+
+    let output = env
+        .dv()
+        .args(["hooks", "install", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("spawn dv hooks install claude");
+
+    assert!(
+        output.status.success(),
+        "`dv hooks install claude` should exit 0; got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    // File must exist.
+    assert!(settings_path.exists(), "settings.json should be created");
+
+    // Parse and verify all six hook events are registered.
+    let content = fs::read_to_string(&settings_path).expect("read settings.json");
+    let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+    let hooks = &parsed["hooks"];
+
+    for event in &[
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "Stop",
+        "Notification",
+        "SessionEnd",
+    ] {
+        let arr = hooks[event]
+            .as_array()
+            .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+        assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
+    }
+
+    // stdout should contain '+' for new entries.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains('+'),
+        "stdout should contain '+' for new entries; got:\n{stdout}"
+    );
+}
+
+/// `dv hooks install claude` run twice: second run is a no-op; file content
+/// is byte-for-byte identical to after the first run.
+#[tokio::test]
+async fn hooks_install_claude_idempotent() {
+    let env = common::TmuxEnv::new().await;
+
+    let fake_home = env.workspace_path.join("home_claude2");
+    fs::create_dir_all(&fake_home).expect("create fake home");
+
+    let settings_path = fake_home.join(".claude").join("settings.json");
+
+    // First install.
+    let out1 = env
+        .dv()
+        .args(["hooks", "install", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("first dv hooks install claude");
+    assert!(out1.status.success(), "first install should succeed");
+
+    let content_after_first = fs::read_to_string(&settings_path).expect("read after first");
+    let mtime_after_first = fs::metadata(&settings_path).unwrap().modified().unwrap();
+
+    // Small sleep so that a write would produce a different mtime.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    // Second install.
+    let out2 = env
+        .dv()
+        .args(["hooks", "install", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("second dv hooks install claude");
+    assert!(out2.status.success(), "second install should succeed");
+
+    let content_after_second = fs::read_to_string(&settings_path).expect("read after second");
+    let mtime_after_second = fs::metadata(&settings_path).unwrap().modified().unwrap();
+
+    assert_eq!(
+        content_after_first, content_after_second,
+        "file content should be byte-for-byte identical after idempotent re-run"
+    );
+    assert_eq!(
+        mtime_after_first, mtime_after_second,
+        "file should not be rewritten on idempotent re-run"
+    );
+
+    // stdout should contain '=' on second run.
     let stdout2 = String::from_utf8_lossy(&out2.stdout);
     assert!(
         stdout2.contains('='),
