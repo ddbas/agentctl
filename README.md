@@ -15,7 +15,7 @@ cargo install --path .
 dv list          # list all agent panes with their current state
 dv set-state <state>   # write agent state from a hook
 dv clear-state         # remove the state file for the current pane
-dv hooks install <harness>   # install harness hooks (placeholder)
+dv hooks install <harness>   # install harness hooks (pi, claude)
 ```
 
 ## Commands
@@ -71,7 +71,54 @@ Exits 0 silently when `$TMUX_PANE` is not set, or when no state file exists.
 
 Installs hooks for the specified agent harness.
 
-Supported harnesses:
+Supported harnesses: `claude`, `pi`.
+
+#### `claude`
+
+Patches `~/.claude/settings.json` to register six hook entries that call
+`dv set-state` and `dv clear-state` at key Claude Code lifecycle events. The
+command is idempotent: re-running when all entries are already present reports
+`=` (no change) and does not rewrite the file.
+
+```bash
+dv hooks install claude
+```
+
+Example output (first install):
+
+```
+Installed drovr hooks for claude:
+  + SessionStart (startup)              → dv set-state idle --harness claude
+  + UserPromptSubmit                    → dv set-state working --harness claude [async]
+  + PreToolUse                          → dv set-state working --harness claude [async]
+  + Stop                                → dv set-state done --harness claude [async]
+  + Notification (permission_prompt)    → dv set-state blocked --harness claude [async]
+  + SessionEnd                          → dv clear-state
+```
+
+On a subsequent run (all entries already present):
+
+```
+Installed drovr hooks for claude:
+  = SessionStart (startup)              → dv set-state idle --harness claude
+  = UserPromptSubmit                    → dv set-state working --harness claude [async]
+  ...
+```
+
+**Claude lifecycle event → state mapping:**
+
+| Claude hook event  | Matcher             | Command                                 | Async |
+| ------------------ | ------------------- | --------------------------------------- | ----- |
+| `SessionStart`     | `startup`           | `dv set-state idle --harness claude`    | no    |
+| `UserPromptSubmit` | _(none)_            | `dv set-state working --harness claude` | yes   |
+| `PreToolUse`       | `*`                 | `dv set-state working --harness claude` | yes   |
+| `Stop`             | _(none)_            | `dv set-state done --harness claude`    | yes   |
+| `Notification`     | `permission_prompt` | `dv set-state blocked --harness claude` | yes   |
+| `SessionEnd`       | _(none)_            | `dv clear-state`                        | no    |
+
+`SessionStart` and `SessionEnd` run synchronously so the state file is
+established before any async hook fires and is cleaned up before the session
+exits. All other hooks use `async: true` to avoid blocking Claude's operation.
 
 #### `pi`
 

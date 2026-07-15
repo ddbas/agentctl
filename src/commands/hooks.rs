@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use serde_json::json;
 
 // ── Embedded pi extension content ─────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ export default function (pi: ExtensionAPI) {
 pub fn run_install(harness: Harness) -> Result<()> {
     match harness {
         Harness::Pi => install_pi(),
+        Harness::Claude => install_claude(),
     }
 }
 
@@ -148,6 +150,209 @@ fn tilde_collapse(path: &Path) -> String {
         return format!("~/{}", rel.display());
     }
     path.display().to_string()
+}
+
+// ── Claude harness ────────────────────────────────────────────────────────────
+
+/// A single drovr hook entry for Claude Code's settings.
+struct ClaudeHookDef {
+    event: &'static str,
+    matcher: Option<&'static str>,
+    command: &'static str,
+    async_: bool,
+}
+
+/// The six drovr hook entries to register in `~/.claude/settings.json`.
+const DROVR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
+    ClaudeHookDef {
+        event: "SessionStart",
+        matcher: Some("startup"),
+        command: "dv set-state idle --harness claude",
+        async_: false,
+    },
+    ClaudeHookDef {
+        event: "UserPromptSubmit",
+        matcher: None,
+        command: "dv set-state working --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "PreToolUse",
+        matcher: None,
+        command: "dv set-state working --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "Stop",
+        matcher: None,
+        command: "dv set-state done --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "Notification",
+        matcher: Some("permission_prompt"),
+        command: "dv set-state blocked --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "SessionEnd",
+        matcher: None,
+        command: "dv clear-state",
+        async_: false,
+    },
+];
+
+/// Resolve the default Claude settings path: `~/.claude/settings.json`.
+fn default_claude_settings_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().context("could not determine home directory")?;
+    Ok(home.join(".claude").join("settings.json"))
+}
+
+/// Install drovr hooks into `~/.claude/settings.json`.
+fn install_claude() -> Result<()> {
+    let path = default_claude_settings_path()?;
+    install_claude_to(&path)
+}
+
+/// Install drovr hooks into the given Claude settings path.
+///
+/// This is the testable core; production code calls `install_claude()` which
+/// supplies the default path.
+pub fn install_claude_to(dest: &Path) -> Result<()> {
+    // 1. Read existing content or start with an empty object.
+    let content = if dest.exists() {
+        fs::read_to_string(dest).with_context(|| format!("failed to read {}", dest.display()))?
+    } else {
+        "{}".to_string()
+    };
+
+    // 2. Parse JSON.
+    let mut root: serde_json::Value = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse JSON from {}", dest.display()))?;
+
+    // 3. Ensure root is an object with a "hooks" map.
+    let root_obj = root
+        .as_object_mut()
+        .context("settings.json root is not a JSON object")?;
+
+    let hooks_val = root_obj.entry("hooks").or_insert_with(|| json!({}));
+
+    let hooks_map = hooks_val
+        .as_object_mut()
+        .context("hooks field in settings.json is not a JSON object")?;
+
+    // 4. For each drovr hook definition, add it if not already present.
+    let mut statuses: Vec<bool> = Vec::new(); // true = newly added
+
+    for hook in DROVR_CLAUDE_HOOKS {
+        // Ensure the event key exists as an array.
+        let event_val = hooks_map.entry(hook.event).or_insert_with(|| json!([]));
+
+        let event_arr = event_val
+            .as_array_mut()
+            .with_context(|| format!("hooks.{} is not an array", hook.event))?;
+
+        // Check if this command is already registered under this event.
+        let already_exists = event_arr.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c == hook.command)
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+
+        if !already_exists {
+            event_arr.push(build_claude_hook_entry(hook));
+        }
+
+        statuses.push(!already_exists);
+    }
+
+    // 5. Write updated JSON back atomically (write .tmp sibling, then rename).
+    //    Skip if nothing changed — preserves mtime for idempotency.
+    let any_added = statuses.iter().any(|&added| added);
+    if any_added {
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        }
+
+        let json_str =
+            serde_json::to_string_pretty(&root).context("failed to serialize settings JSON")?;
+
+        let tmp_path = {
+            let mut fname = dest
+                .file_name()
+                .context("settings path has no file name")?
+                .to_os_string();
+            fname.push(".tmp");
+            dest.with_file_name(fname)
+        };
+
+        fs::write(&tmp_path, &json_str)
+            .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, dest).with_context(|| {
+            format!(
+                "failed to rename {} to {}",
+                tmp_path.display(),
+                dest.display()
+            )
+        })?;
+    }
+
+    // 6. Print human-readable summary.
+    println!("{}", format_claude_summary(&statuses));
+
+    Ok(())
+}
+
+/// Build a single JSON hook entry object for the given hook definition.
+fn build_claude_hook_entry(hook: &ClaudeHookDef) -> serde_json::Value {
+    let mut cmd_obj = serde_json::Map::new();
+    cmd_obj.insert("type".to_string(), json!("command"));
+    cmd_obj.insert("command".to_string(), json!(hook.command));
+    if hook.async_ {
+        cmd_obj.insert("async".to_string(), json!(true));
+    }
+
+    let mut entry = serde_json::Map::new();
+    if let Some(matcher) = hook.matcher {
+        entry.insert("matcher".to_string(), json!(matcher));
+    }
+    entry.insert(
+        "hooks".to_string(),
+        json!([serde_json::Value::Object(cmd_obj)]),
+    );
+
+    serde_json::Value::Object(entry)
+}
+
+/// Build the human-readable install summary string.
+///
+/// Exposed as a separate function so unit tests can assert on its output
+/// without capturing stdout.
+pub fn format_claude_summary(statuses: &[bool]) -> String {
+    let mut lines = vec!["Installed drovr hooks for claude:".to_string()];
+    for (hook, &added) in DROVR_CLAUDE_HOOKS.iter().zip(statuses.iter()) {
+        let prefix = if added { '+' } else { '=' };
+        let event_display = match hook.matcher {
+            Some(m) => format!("{} ({})", hook.event, m),
+            None => hook.event.to_string(),
+        };
+        let async_label = if hook.async_ { " [async]" } else { "" };
+        lines.push(format!(
+            "  {prefix} {event_display:<35} → {}{}",
+            hook.command, async_label
+        ));
+    }
+    lines.join("\n")
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -297,5 +502,221 @@ mod tests {
         // Use install_pi_to directly; run_install wires to the real home dir.
         install_pi_to(&dest).expect("install should succeed");
         assert!(dest.exists());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Claude unit tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    fn claude_settings_path(dir: &TempDir) -> PathBuf {
+        dir.path().join(".claude").join("settings.json")
+    }
+
+    // ── task 2.1: install on a clean (empty) settings file ───────────────────
+
+    #[test]
+    fn install_claude_clean_file_writes_all_six_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        assert!(
+            !dest.exists(),
+            "settings.json should not exist before install"
+        );
+
+        install_claude_to(&dest).expect("install_claude_to should succeed");
+
+        let content = fs::read_to_string(&dest).expect("settings.json should exist after install");
+        let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+        let hooks = &parsed["hooks"];
+
+        for event in &[
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "Stop",
+            "Notification",
+            "SessionEnd",
+        ] {
+            let arr = hooks[event]
+                .as_array()
+                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+            assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
+        }
+    }
+
+    // ── task 2.2: idempotent re-run ───────────────────────────────────────────
+
+    #[test]
+    fn install_claude_idempotent_no_duplicates() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        install_claude_to(&dest).expect("first install");
+        let content_after_first = fs::read_to_string(&dest).unwrap();
+        let mtime_before = fs::metadata(&dest).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        install_claude_to(&dest).expect("second install");
+        let content_after_second = fs::read_to_string(&dest).unwrap();
+        let mtime_after = fs::metadata(&dest).unwrap().modified().unwrap();
+
+        // File should not be rewritten when nothing changed.
+        assert_eq!(
+            mtime_before, mtime_after,
+            "file should not be rewritten on idempotent re-run"
+        );
+        assert_eq!(
+            content_after_first, content_after_second,
+            "content should be identical"
+        );
+
+        // No duplicate entries.
+        let parsed: serde_json::Value = serde_json::from_str(&content_after_second).unwrap();
+        for event in &[
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "Stop",
+            "Notification",
+            "SessionEnd",
+        ] {
+            let arr = parsed["hooks"][event].as_array().unwrap();
+            assert_eq!(
+                arr.len(),
+                1,
+                "hooks.{event} should have no duplicates after second install"
+            );
+        }
+    }
+
+    // ── task 2.3: merges with existing non-drovr hooks ────────────────────────
+
+    #[test]
+    fn install_claude_merges_with_existing_hooks() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with a custom non-drovr hook under UserPromptSubmit.
+        let existing = serde_json::json!({
+            "hooks": {
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [
+                            { "type": "command", "command": "my-custom-tool" }
+                        ]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // UserPromptSubmit should now have two entries: custom + drovr.
+        let user_prompt = parsed["hooks"]["UserPromptSubmit"].as_array().unwrap();
+        assert_eq!(
+            user_prompt.len(),
+            2,
+            "UserPromptSubmit should have custom + drovr entries"
+        );
+
+        // The custom hook should still be present.
+        let has_custom = user_prompt.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str()) == Some("my-custom-tool")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        assert!(has_custom, "custom hook should be preserved after install");
+
+        // The drovr hook should also be present under UserPromptSubmit.
+        let has_drovr = user_prompt.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("dv set-state working --harness claude")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        assert!(
+            has_drovr,
+            "drovr hook should be added alongside custom hook"
+        );
+    }
+
+    // ── task 2.4: async flag correctness ─────────────────────────────────────
+
+    #[test]
+    fn install_claude_async_flags_are_correct() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let hooks = &parsed["hooks"];
+
+        // These four events must have async: true.
+        for event in &["UserPromptSubmit", "PreToolUse", "Stop", "Notification"] {
+            let hook_entry = &hooks[event][0]["hooks"][0];
+            assert_eq!(
+                hook_entry.get("async"),
+                Some(&serde_json::Value::Bool(true)),
+                "{event} should have async: true"
+            );
+        }
+
+        // SessionStart and SessionEnd must NOT have the async field.
+        for event in &["SessionStart", "SessionEnd"] {
+            let hook_entry = &hooks[event][0]["hooks"][0];
+            assert!(
+                hook_entry.get("async").is_none(),
+                "{event} should not have async field"
+            );
+        }
+    }
+
+    // ── task 2.5: summary output uses + vs = ─────────────────────────────────
+
+    #[test]
+    fn format_claude_summary_uses_plus_for_new_entries() {
+        // All six entries newly added.
+        let statuses = vec![true; 6];
+        let summary = format_claude_summary(&statuses);
+        for line in summary.lines().skip(1) {
+            assert!(
+                line.trim_start().starts_with('+'),
+                "line should start with '+' for new entry: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_claude_summary_uses_equals_for_existing_entries() {
+        // All six entries already present.
+        let statuses = vec![false; 6];
+        let summary = format_claude_summary(&statuses);
+        for line in summary.lines().skip(1) {
+            assert!(
+                line.trim_start().starts_with('='),
+                "line should start with '=' for existing entry: {line}"
+            );
+        }
     }
 }

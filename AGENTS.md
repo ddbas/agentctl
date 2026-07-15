@@ -16,6 +16,20 @@ subscribes to pi lifecycle events (`session_start`, `before_agent_start`,
 `agent_settled`, `session_shutdown`) and calls `dv set-state` / `dv clear-state`
 automatically. The command is idempotent — re-running it is safe.
 
+## Required One-Time Setup for Claude Agents
+
+If you are running inside Claude Code, install the drovr lifecycle hooks so your
+agent state is tracked in real time:
+
+```bash
+dv hooks install claude
+```
+
+This patches `~/.claude/settings.json` to register six hook entries that call
+`dv set-state` / `dv clear-state` at key Claude lifecycle events
+(`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`,
+`SessionEnd`). The command is idempotent — re-running it is safe.
+
 ## Running Tasks
 
 Always invoke tasks and CLIs via `mise` — never call `cargo`, `npm`, or other
