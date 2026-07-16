@@ -17,12 +17,38 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
+    // NOTE: Ord is implemented manually below — do NOT derive it here.
     Idle,
     Working,
     Done,
     Blocked,
     #[default]
     Unknown,
+}
+
+impl AgentState {
+    /// Canonical sort priority: `Blocked(0) < Done(1) < Working(2) < Idle(3) < Unknown(4)`.
+    fn priority(self) -> u8 {
+        match self {
+            AgentState::Blocked => 0,
+            AgentState::Done => 1,
+            AgentState::Working => 2,
+            AgentState::Idle => 3,
+            AgentState::Unknown => 4,
+        }
+    }
+}
+
+impl PartialOrd for AgentState {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AgentState {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority().cmp(&other.priority())
+    }
 }
 
 impl fmt::Display for AgentState {
@@ -273,6 +299,54 @@ mod tests {
     fn delete_state_noop_when_absent() {
         let tmp = tempfile::tempdir().expect("tempdir");
         delete_state_in(tmp.path(), "%99").expect("delete absent");
+    }
+
+    // ── AgentState Ord ─────────────────────────────────────────────────────
+
+    #[test]
+    fn agent_state_blocked_is_minimum() {
+        for other in [
+            AgentState::Done,
+            AgentState::Working,
+            AgentState::Idle,
+            AgentState::Unknown,
+        ] {
+            assert!(AgentState::Blocked < other, "Blocked should be less than {other:?}");
+        }
+    }
+
+    #[test]
+    fn agent_state_unknown_is_maximum() {
+        for other in [
+            AgentState::Blocked,
+            AgentState::Done,
+            AgentState::Working,
+            AgentState::Idle,
+        ] {
+            assert!(AgentState::Unknown > other, "Unknown should be greater than {other:?}");
+        }
+    }
+
+    #[test]
+    fn agent_state_full_ascending_order() {
+        let mut states = vec![
+            AgentState::Unknown,
+            AgentState::Idle,
+            AgentState::Blocked,
+            AgentState::Working,
+            AgentState::Done,
+        ];
+        states.sort();
+        assert_eq!(
+            states,
+            vec![
+                AgentState::Blocked,
+                AgentState::Done,
+                AgentState::Working,
+                AgentState::Idle,
+                AgentState::Unknown,
+            ]
+        );
     }
 
     // ── AgentState Display ────────────────────────────────────────────────────

@@ -25,7 +25,10 @@ the following steps in order:
    pane's `pane_current_command`, treat the pane's state as `unknown` (the state
    file belongs to a different harness that previously ran in that pane; do
    **not** delete it).
-5. **Render output** — print one line per live agent pane. A pane with no
+5. **Sort output** — apply the sort key and order specified by `--sort-by` and
+   `--reverse` (defaulting to `updated-at` descending) to the filtered pane
+   list before rendering.
+6. **Render output** — print one line per live agent pane. A pane with no
    matching state file, or whose state file is contradictory (step 4), displays
    `unknown` in the state column.
 
@@ -116,3 +119,20 @@ terminal.
   `🌳 drovr (claude-hooks)`) while another contains only ASCII (e.g. `dotfiles`)
 - **THEN** the state column for every row starts at the same terminal column
   position, despite the emoji occupying two terminal columns
+
+#### Scenario: Default sort puts most recently active agents first
+
+- **WHEN** the user runs `dv list` without sort flags and multiple agents are
+  present
+- **THEN** agents are ordered by `updated_at` descending (most recently active
+  first; agents with no state file appear last)
+
+#### Scenario: Sort by agent name when flag is provided
+
+- **WHEN** the user runs `dv list --sort-by agent`
+- **THEN** output rows are ordered alphabetically by agent name
+
+#### Scenario: Descending sort reverses order
+
+- **WHEN** the user runs `dv list --sort-by state --reverse`
+- **THEN** output rows are ordered with `unknown` first and `blocked` last
