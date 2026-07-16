@@ -40,6 +40,12 @@ Each output line SHALL contain four left-aligned columns:
 column SHALL display the current `AgentState` for the agent (as lowercase
 string), or `unknown` if the pane has no state file or a contradictory one.
 
+Column widths SHALL be computed using **Unicode terminal display width** (the
+number of terminal columns a string occupies), not byte length or Unicode scalar
+count. Each column SHALL be padded to the maximum display width in that column
+plus two spaces, so that all rows are visually aligned in a fixed-width
+terminal.
+
 #### Scenario: Agent panes exist across multiple sessions
 
 - **WHEN** the user runs `dv list` and tmux has a pane in session `dev` running
@@ -52,8 +58,8 @@ string), or `unknown` if the pane has no state file or a contradictory one.
 
 - **WHEN** two or more matching panes are printed
 - **THEN** all four columns (agent, session, window.pane, state) are
-  left-aligned, each padded to the width of the longest value in that column
-  plus two spaces
+  left-aligned, each padded to the display width of the longest value in that
+  column plus two spaces, where display width is measured in terminal columns
 
 #### Scenario: Agent name appears in the first column
 
@@ -106,6 +112,13 @@ string), or `unknown` if the pane has no state file or a contradictory one.
 - **WHEN** the user runs `dv list` and the tmux query fails
 - **THEN** no state files are deleted and the command exits with code 0 and no
   output (consistent with existing no-tmux behaviour)
+
+#### Scenario: Columns align correctly when session name contains wide Unicode characters
+
+- **WHEN** the user runs `dv list` and one session name contains an emoji (e.g.
+  `🌳 drovr (claude-hooks)`) while another contains only ASCII (e.g. `dotfiles`)
+- **THEN** the state column for every row starts at the same terminal column
+  position, despite the emoji occupying two terminal columns
 
 #### Scenario: Default sort puts most recently active agents first
 
