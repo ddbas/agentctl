@@ -43,6 +43,20 @@ enum Commands {
         /// `DV_TMUX_SOCKET` environment variable when not set.
         #[arg(short, long, value_name = "PATH")]
         server: Option<String>,
+
+        /// Sort output by this property.
+        /// Valid values: state, agent, session, pane, updated-at.
+        #[arg(
+            long = "sort-by",
+            value_name = "KEY",
+            default_value_t = commands::list::SortKey::UpdatedAt
+        )]
+        sort_by: commands::list::SortKey,
+
+        /// Reverse the sort order.
+        /// For `updated-at` (the default key) this means oldest-active first.
+        #[arg(short = 'r', long)]
+        reverse: bool,
     },
 
     /// Write the current agent state to the state file.
@@ -121,8 +135,8 @@ fn run() -> anyhow::Result<()> {
         None | Some(Commands::Help) => {
             Cli::command().print_long_help()?;
         }
-        Some(Commands::List { server }) => {
-            commands::list::run(server)?;
+        Some(Commands::List { server, sort_by, reverse }) => {
+            commands::list::run(server, sort_by, reverse)?;
         }
         Some(Commands::SetState {
             state,

@@ -12,8 +12,40 @@ use std::process::Command;
 use unicode_width::UnicodeWidthStr;
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 
 use crate::state::{AgentInfo, AgentState, delete_state_in, list_agent_infos_in};
+
+// ── SortKey ──────────────────────────────────────────────────────────────────
+
+/// The property to sort `dv list` output by.
+#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum, Default)]
+pub enum SortKey {
+    /// Agent harness name, lexicographically.
+    Agent,
+    /// Tmux session name, lexicographically.
+    Session,
+    /// Pane position: window index first, then pane index.
+    Pane,
+    /// Agent state priority: Blocked < Done < Working < Idle < Unknown.
+    State,
+    /// Last state-file update timestamp. Newest first by default.
+    #[default]
+    #[value(name = "updated-at")]
+    UpdatedAt,
+}
+
+impl std::fmt::Display for SortKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SortKey::Agent => write!(f, "agent"),
+            SortKey::Session => write!(f, "session"),
+            SortKey::Pane => write!(f, "pane"),
+            SortKey::State => write!(f, "state"),
+            SortKey::UpdatedAt => write!(f, "updated-at"),
+        }
+    }
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -292,6 +324,61 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
     output
 }
 
+// ── Sorting ───────────────────────────────────────────────────────────────────
+
+/// Sort `panes` in-place by `key`.
+///
+/// The natural direction for each key is ascending (lowest value first), except
+/// [`SortKey::UpdatedAt`] whose natural direction is descending (newest first)
+/// to match the idiomatic behaviour of time-sorted CLI tools (`ls -t`,
+/// `git log`).
+///
+/// Passing `reverse = true` flips whatever the natural direction is.
+///
+/// Uses a stable sort so that equal-keyed entries preserve their original
+/// relative order.
+pub fn sort_panes(
+    panes: &mut Vec<&PaneEntry>,
+    key: SortKey,
+    reverse: bool,
+    state_map: &HashMap<String, AgentInfo>,
+) {
+    panes.sort_by(|a, b| match key {
+        SortKey::State => {
+            let sa = state_map
+                .get(&a.pane_id)
+                .map(|i| i.state)
+                .unwrap_or(AgentState::Unknown);
+            let sb = state_map
+                .get(&b.pane_id)
+                .map(|i| i.state)
+                .unwrap_or(AgentState::Unknown);
+            sa.cmp(&sb)
+        }
+        SortKey::Agent => a.agent.cmp(&b.agent),
+        SortKey::Session => a.session.cmp(&b.session),
+        SortKey::Pane => a
+            .window_index
+            .cmp(&b.window_index)
+            .then(a.pane_index.cmp(&b.pane_index)),
+        SortKey::UpdatedAt => {
+            // Natural direction: newest first (descending by timestamp).
+            let ta = state_map
+                .get(&a.pane_id)
+                .map(|i| i.updated_at)
+                .unwrap_or(DateTime::<Utc>::MIN_UTC);
+            let tb = state_map
+                .get(&b.pane_id)
+                .map(|i| i.updated_at)
+                .unwrap_or(DateTime::<Utc>::MIN_UTC);
+            tb.cmp(&ta) // note: tb before ta = descending
+        }
+    });
+    if reverse {
+        panes.reverse();
+    }
+}
+
 // ── Subcommand entry point ────────────────────────────────────────────────────
 
 /// Entry point for the `dv list` subcommand.
@@ -300,17 +387,19 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
 /// 1. `--server` / `-s` CLI flag
 /// 2. `DV_TMUX_SOCKET` environment variable (used by the test harness)
 /// 3. Default tmux server (no `-S` flag)
-pub fn run(server: Option<String>) -> Result<()> {
+pub fn run(server: Option<String>, sort_by: SortKey, reverse: bool) -> Result<()> {
     let server = server.or_else(|| std::env::var("DV_TMUX_SOCKET").ok());
 
     let panes = tmux_panes(server.as_deref())?;
-    let agent_panes = filter_agent_panes(&panes);
+    let mut agent_panes = filter_agent_panes(&panes);
 
     // Load state files and validate / clean up stale ones (best effort; only
     // when tmux was reachable, which is guaranteed at this point since
     // tmux_panes returned Ok).
     let mut state_map = load_state_map();
     validate_state_files(&mut state_map, &panes);
+
+    sort_panes(&mut agent_panes, sort_by, reverse, &state_map);
 
     let output = format_panes(&agent_panes, &state_map);
     print!("{output}");
@@ -581,5 +670,212 @@ mod tests {
         let table = make_table(&[(200, "pi")]);
         resolve_from_process_table(&mut panes, &table);
         assert_eq!(panes[0].agent, "claude");
+    }
+
+    // ── sort_panes ───────────────────────────────────────────────────────────────────────
+
+    /// Build a state map from (pane_id, state, updated_at) tuples.
+    fn state_map_with_times(
+        entries: &[(&str, AgentState, chrono::DateTime<chrono::Utc>)],
+    ) -> HashMap<String, AgentInfo> {
+        entries
+            .iter()
+            .map(|(id, state, ts)| {
+                let info = AgentInfo {
+                    pane_id: id.to_string(),
+                    harness: "claude".to_string(),
+                    state: *state,
+                    updated_at: *ts,
+                };
+                (id.to_string(), info)
+            })
+            .collect()
+    }
+
+    fn t(secs: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(secs, 0).expect("valid timestamp")
+    }
+
+    // ── 5.1: default sort = updated-at descending (newest first) ─────────────
+
+    #[test]
+    fn sort_panes_default_updated_at_newest_first() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi",     "dev", 0, 1, "%2");
+        let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
+        let map = state_map_with_times(&[
+            ("%1", AgentState::Idle,    t(1000)),
+            ("%2", AgentState::Working, t(3000)),
+            ("%3", AgentState::Done,    t(2000)),
+        ]);
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
+        sort_panes(&mut refs, SortKey::UpdatedAt, false, &map);
+        // Newest first: p2 (3000) > p3 (2000) > p1 (1000)
+        assert_eq!(refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
+            vec!["%2", "%3", "%1"]);
+    }
+
+    #[test]
+    fn sort_panes_updated_at_no_state_file_sorts_last() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi",     "dev", 0, 1, "%2"); // no state file
+        let map = state_map_with_times(&[("%1", AgentState::Idle, t(1000))]);
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
+        sort_panes(&mut refs, SortKey::UpdatedAt, false, &map);
+        // p1 has a real timestamp; p2 gets MIN_UTC → sorts last
+        assert_eq!(refs[0].pane_id, "%1");
+        assert_eq!(refs[1].pane_id, "%2");
+    }
+
+    #[test]
+    fn sort_panes_updated_at_reverse_oldest_first() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi",     "dev", 0, 1, "%2");
+        let map = state_map_with_times(&[
+            ("%1", AgentState::Idle, t(1000)),
+            ("%2", AgentState::Idle, t(3000)),
+        ]);
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
+        sort_panes(&mut refs, SortKey::UpdatedAt, true, &map);
+        // Reversed: oldest first → p1 (1000) before p2 (3000)
+        assert_eq!(refs[0].pane_id, "%1");
+        assert_eq!(refs[1].pane_id, "%2");
+    }
+
+    // ── 5.2: --sort-by agent ──────────────────────────────────────────────────────
+
+    #[test]
+    fn sort_panes_by_agent_alphabetical() {
+        let p1 = pane_with_id("pi",     "dev", 0, 0, "%1");
+        let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
+        sort_panes(&mut refs, SortKey::Agent, false, &empty_state_map());
+        assert_eq!(refs[0].agent, "claude");
+        assert_eq!(refs[1].agent, "pi");
+    }
+
+    #[test]
+    fn sort_panes_by_agent_reversed() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi",     "dev", 0, 1, "%2");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
+        sort_panes(&mut refs, SortKey::Agent, true, &empty_state_map());
+        assert_eq!(refs[0].agent, "pi");
+        assert_eq!(refs[1].agent, "claude");
+    }
+
+    // ── 5.3: --sort-by session ───────────────────────────────────────────────────
+
+    #[test]
+    fn sort_panes_by_session_alphabetical() {
+        let p1 = pane_with_id("claude", "work", 0, 0, "%1");
+        let p2 = pane_with_id("claude", "dev",  0, 1, "%2");
+        let p3 = pane_with_id("pi",     "alpha",0, 2, "%3");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
+        sort_panes(&mut refs, SortKey::Session, false, &empty_state_map());
+        assert_eq!(
+            refs.iter().map(|p| p.session.as_str()).collect::<Vec<_>>(),
+            vec!["alpha", "dev", "work"]
+        );
+    }
+
+    // ── 5.4: --sort-by pane ───────────────────────────────────────────────────────
+
+    #[test]
+    fn sort_panes_by_pane_window_then_pane_index() {
+        let p1 = pane_with_id("claude", "dev", 1, 2, "%1");
+        let p2 = pane_with_id("pi",     "dev", 0, 5, "%2");
+        let p3 = pane_with_id("claude", "dev", 1, 0, "%3");
+        let p4 = pane_with_id("pi",     "dev", 0, 0, "%4");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4];
+        sort_panes(&mut refs, SortKey::Pane, false, &empty_state_map());
+        // Expected: window 0 pane 0, window 0 pane 5, window 1 pane 0, window 1 pane 2
+        assert_eq!(
+            refs.iter().map(|p| (p.window_index, p.pane_index)).collect::<Vec<_>>(),
+            vec![(0,0), (0,5), (1,0), (1,2)]
+        );
+    }
+
+    // ── 5.5: --sort-by state --reverse ─────────────────────────────────────────
+
+    #[test]
+    fn sort_panes_state_ascending_blocked_first() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Unknown).unwrap();
+        write_state_to(tmp.path(), "%2", "claude", AgentState::Idle).unwrap();
+        write_state_to(tmp.path(), "%3", "claude", AgentState::Blocked).unwrap();
+        write_state_to(tmp.path(), "%4", "claude", AgentState::Working).unwrap();
+        write_state_to(tmp.path(), "%5", "claude", AgentState::Done).unwrap();
+        let map = load_state_map_from(tmp.path());
+
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
+        let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
+        let p4 = pane_with_id("claude", "dev", 0, 3, "%4");
+        let p5 = pane_with_id("claude", "dev", 0, 4, "%5");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5];
+        sort_panes(&mut refs, SortKey::State, false, &map);
+
+        let states: Vec<AgentState> = refs
+            .iter()
+            .map(|p| map[&p.pane_id].state)
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                AgentState::Blocked,
+                AgentState::Done,
+                AgentState::Working,
+                AgentState::Idle,
+                AgentState::Unknown,
+            ]
+        );
+    }
+
+    #[test]
+    fn sort_panes_state_reverse_unknown_first() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Blocked).unwrap();
+        write_state_to(tmp.path(), "%2", "claude", AgentState::Unknown).unwrap();
+        write_state_to(tmp.path(), "%3", "claude", AgentState::Idle).unwrap();
+        let map = load_state_map_from(tmp.path());
+
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
+        let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
+        sort_panes(&mut refs, SortKey::State, true, &map);
+
+        assert_eq!(map[refs[0].pane_id.as_str()].state, AgentState::Unknown);
+        assert_eq!(map[refs[2].pane_id.as_str()].state, AgentState::Blocked);
+    }
+
+    // ── Stability ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sort_panes_stable_equal_keys_preserve_order() {
+        // All panes have the same session name — relative order must be preserved.
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi",     "dev", 0, 1, "%2");
+        let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
+        sort_panes(&mut refs, SortKey::Session, false, &empty_state_map());
+        // All "dev" — original order preserved
+        assert_eq!(
+            refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
+            vec!["%1", "%2", "%3"]
+        );
+    }
+
+    // ── 5.6: invalid --sort-by value ───────────────────────────────────────────
+
+    #[test]
+    fn invalid_sort_by_rejected_by_clap() {
+        // Clap's ValueEnum parsing rejects unknown values at argument parse time.
+        // We verify this by using try_parse_from on the CLI root.
+        let result = <crate::Cli as clap::Parser>::try_parse_from(
+            ["dv", "list", "--sort-by", "foobar"]
+        );
+        assert!(result.is_err(), "expected clap error for unknown sort-by value");
     }
 }
