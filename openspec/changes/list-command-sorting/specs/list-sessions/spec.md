@@ -115,5 +115,5 @@ string), or `unknown` if the pane has no state file or a contradictory one.
 
 #### Scenario: Descending sort reverses order
 
-- **WHEN** the user runs `dv list --sort-by state --order desc`
+- **WHEN** the user runs `dv list --sort-by state --reverse`
 - **THEN** output rows are ordered with `unknown` first and `blocked` last

@@ -9,8 +9,7 @@ properties so they can find blocked, idle, or active agents at a glance.
 
 - Add a `--sort-by` flag (or short form `-s`) to `dv list` that accepts a sort
   key: `state`, `agent`, `session`, `pane`, or `updated-at`.
-- Add a `--order` flag (short form `-o`) to control sort direction: `asc`
-  (default) or `desc`.
+- Add a `--reverse` flag (short form `-r`) to reverse the sort order (boolean, absent = ascending).
 - Define a canonical state ordering for `AgentState` so that `blocked` is always
   at one extreme of the sort (appears first in ascending order), enabling quick
   identification of agents that need attention.
@@ -21,14 +20,14 @@ properties so they can find blocked, idle, or active agents at a glance.
 
 ### New Capabilities
 
-- `list-sorting`: Sorting support for `dv list` — `--sort-by` flag, `--order`
+- `list-sorting`: Sorting support for `dv list` — `--sort-by` flag, `--reverse`
   flag, and a canonical `AgentState` sort order where
   `blocked < idle < working < done < unknown`.
 
 ### Modified Capabilities
 
 - `list-sessions`: The `list` subcommand gains two new optional flags
-  (`--sort-by`, `--order`). Existing output format and reconciliation logic are
+  (`--sort-by`, `--reverse`). Existing output format and reconciliation logic are
   unchanged; only the order of printed rows is affected.
 
 ## Impact

@@ -15,7 +15,7 @@ filter → load state map → `format_panes`.
 
 - Let callers control which column the output is sorted by via `--sort-by`
   (`-s`)
-- Let callers control ascending vs descending order via `--order` (`-o`)
+- Let callers control ascending vs descending order via `--reverse` (`-r`)
 - Establish a canonical `AgentState` priority ordering where `blocked` is at one
   extreme so it can surface first
 - Keep the change additive — no existing behaviour changes for callers who omit
@@ -46,12 +46,14 @@ Expose five sort keys:
 **Alternatives considered**: Alphabetical-only keys — rejected because
 `state`-first default is the most useful out of the box.
 
-### Decision: Sort order flag values
+### Decision: Sort order flag
 
-Use `asc` and `desc` as the two values for `--order`. Default is `asc`.
+Use `--reverse` / `-r` as a boolean flag to flip the sort direction. Absent =
+ascending, present = descending.
 
-**Alternatives considered**: `ascending`/`descending` (more verbose, less
-ergonomic at CLI), `+`/`-` (non-obvious).
+**Alternatives considered**: `--order asc`/`desc` value flag — more explicit but
+more verbose; `--reverse` is idiomatic (mirrors `ls -r`, `sort -r`,
+`git log --reverse`) and saves a keystroke.
 
 ### Decision: AgentState priority ordering
 
@@ -71,7 +73,7 @@ blocked(0) < idle(1) < working(2) < done(3) < unknown(4)
 - `unknown` at index 4: no state file or contradictory state — least
   informative, shown last.
 
-With `--order desc`, `unknown` surfaces first and `blocked` is last (useful when
+With `--reverse`, `unknown` surfaces first and `blocked` is last (useful when
 looking for completed agents).
 
 Implement via `Ord` / `PartialOrd` on `AgentState` using the explicit numeric
@@ -91,7 +93,7 @@ Sort is applied to the `Vec<&PaneEntry>` (or the owned `Vec<PaneEntry>`) after
 filtering but before `format_panes`. The state map is passed in as context for
 state-based or updated-at-based sort comparisons.
 
-A helper `sort_panes(panes, key, order, state_map)` is introduced in `list.rs`.
+A helper `sort_panes(panes, key, reverse, state_map)` is introduced in `list.rs`.
 
 **Alternatives considered**: Sort inside `format_panes` — rejected;
 `format_panes` is a pure formatter and should not own sort logic.
@@ -102,16 +104,15 @@ Add to the `list` subcommand in `main.rs`:
 
 - `--sort-by` / `-s`: accepts `state` (default), `agent`, `session`, `pane`,
   `updated-at`. Parse into a `SortKey` enum in `list.rs`.
-- `--order` / `-o`: accepts `asc` (default), `desc`. Parse into a `SortOrder`
-  enum in `list.rs`.
+- `--reverse` / `-r`: boolean flag; when present the sort order is reversed.
 
-Update `run(server, sort_by, order)` signature accordingly.
+Update `run(server, sort_by, reverse)` signature accordingly.
 
 ## Risks / Trade-offs
 
-- [Risk] `--order` conflicts with other subcommands' short flag `-o` in future →
-  Mitigation: acceptable now; can be resolved by moving to long-only flags if
-  conflicts arise.
+- [Risk] Short flag `-r` may conflict with a future flag on the `list`
+  subcommand → Mitigation: acceptable now; `-r` for reverse is a widely
+  understood convention.
 - [Risk] Sorted output differs from the implicit tmux order users may have grown
   accustomed to → Mitigation: state-asc is strictly more useful; old order was
   implementation-defined, not specified.

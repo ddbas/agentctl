@@ -64,45 +64,39 @@ flag is omitted SHALL be `state`.
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing valid values
 
-### Requirement: dv list accepts --order flag
+### Requirement: dv list accepts --reverse flag
 
-The `list` subcommand SHALL accept an `--order` flag (short: `-o`) that controls
-whether the sort is ascending or descending. Accepted values are `asc` and
-`desc`. The default value when the flag is omitted SHALL be `asc`.
+The `list` subcommand SHALL accept a `--reverse` flag (short: `-r`) that
+reverses the sort order. It is a boolean flag: absent means ascending, present
+means descending. It may be combined with any `--sort-by` value.
 
 #### Scenario: Ascending order (default)
 
-- **WHEN** the user runs `dv list` without `--order` (or with `--order asc`)
+- **WHEN** the user runs `dv list` without `--reverse`
 - **THEN** rows are sorted in ascending order according to the active sort key
 
-#### Scenario: Descending order reverses the sort
+#### Scenario: Descending order when --reverse is present
 
-- **WHEN** the user runs `dv list --order desc`
+- **WHEN** the user runs `dv list --reverse`
 - **THEN** rows are sorted in descending order according to the active sort key,
   so e.g. with `--sort-by state`, Unknown appears first and Blocked appears last
-
-#### Scenario: Invalid order value is rejected
-
-- **WHEN** the user runs `dv list --order random`
-- **THEN** the command exits with a non-zero exit code and prints an error
-  message listing valid values (`asc`, `desc`)
 
 ### Requirement: sort_panes helper function
 
 The `list` module SHALL expose a `sort_panes` function that accepts a mutable
-slice of `PaneEntry` references, a `SortKey`, a `SortOrder`, and a reference to
-the state map, and sorts in-place according to the given key and order.
+slice of `PaneEntry` references, a `SortKey`, a `reverse: bool`, and a reference
+to the state map, and sorts in-place according to the given key and direction.
 
 #### Scenario: sort_panes sorts by state ascending
 
-- **WHEN** `sort_panes` is called with `SortKey::State` and `SortOrder::Asc` on
+- **WHEN** `sort_panes` is called with `SortKey::State` and `reverse: false` on
   a mixed list
 - **THEN** the slice is ordered by `AgentState` priority ascending (Blocked
   first)
 
 #### Scenario: sort_panes sorts by state descending
 
-- **WHEN** `sort_panes` is called with `SortKey::State` and `SortOrder::Desc` on
+- **WHEN** `sort_panes` is called with `SortKey::State` and `reverse: true` on
   a mixed list
 - **THEN** the slice is ordered by `AgentState` priority descending (Unknown
   first)
