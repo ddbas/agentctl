@@ -4,6 +4,7 @@
 //! - `pi`: writes a TypeScript extension to `~/.pi/agent/extensions/drovr.ts`
 
 use crate::Harness;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -162,11 +163,11 @@ struct ClaudeHookDef {
     async_: bool,
 }
 
-/// The six drovr hook entries to register in `~/.claude/settings.json`.
+/// The eight drovr hook entries to register in `~/.claude/settings.json`.
 const DROVR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "SessionStart",
-        matcher: Some("startup"),
+        matcher: Some("startup|resume|clear"),
         command: "dv set-state idle --harness claude",
         async_: false,
     },
@@ -177,13 +178,25 @@ const DROVR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
         async_: true,
     },
     ClaudeHookDef {
-        event: "PreToolUse",
+        event: "PostToolUse",
         matcher: None,
         command: "dv set-state working --harness claude",
         async_: true,
     },
     ClaudeHookDef {
+        event: "PreToolUse",
+        matcher: Some("AskUserQuestion|ExitPlanMode"),
+        command: "dv set-state blocked --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
         event: "Stop",
+        matcher: None,
+        command: "dv set-state done --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "StopFailure",
         matcher: None,
         command: "dv set-state done --harness claude",
         async_: true,
@@ -201,6 +214,40 @@ const DROVR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
         async_: false,
     },
 ];
+
+/// Returns `true` if `cmd` is a drovr-managed command.
+///
+/// Drovr commands always start with `dv set-state ` or equal `dv clear-state`.
+fn is_drovr_command(cmd: &str) -> bool {
+    cmd.starts_with("dv set-state ") || cmd == "dv clear-state"
+}
+
+/// Returns the single drovr command string from `entry`'s inner hooks array,
+/// provided the entry contains exactly one hook and that hook has a drovr
+/// command. Returns `None` otherwise (multi-hook entries or non-drovr hooks).
+fn get_single_drovr_command(entry: &serde_json::Value) -> Option<&str> {
+    let hooks = entry.get("hooks")?.as_array()?;
+    if hooks.len() != 1 {
+        return None;
+    }
+    let cmd = hooks[0].get("command")?.as_str()?;
+    if is_drovr_command(cmd) {
+        Some(cmd)
+    } else {
+        None
+    }
+}
+
+/// Status of a drovr hook after `install_claude_to` runs.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HookStatus {
+    /// The hook was not present and was newly added.
+    New,
+    /// The hook was present but had a stale matcher; the matcher was updated.
+    Updated,
+    /// The hook was already correct; no change was made.
+    Unchanged,
+}
 
 /// Resolve the default Claude settings path: `~/.claude/settings.json`.
 fn default_claude_settings_path() -> Result<PathBuf> {
@@ -241,8 +288,80 @@ pub fn install_claude_to(dest: &Path) -> Result<()> {
         .as_object_mut()
         .context("hooks field in settings.json is not a JSON object")?;
 
-    // 4. For each drovr hook definition, add it if not already present.
-    let mut statuses: Vec<bool> = Vec::new(); // true = newly added
+    // 4. Build a lookup from (event, command) → &ClaudeHookDef for cleanup.
+    let drovr_lookup: HashMap<(&str, &str), &ClaudeHookDef> = DROVR_CLAUDE_HOOKS
+        .iter()
+        .map(|h| ((h.event, h.command), h))
+        .collect();
+
+    // 5. Cleanup pass: remove superseded drovr entries and update stale matchers.
+    //
+    //    An entry is "superseded" when it has a single drovr command that is no
+    //    longer registered under that event in DROVR_CLAUDE_HOOKS (e.g. the old
+    //    general PreToolUse → working hook that was replaced by PostToolUse).
+    //
+    //    An entry is "stale" when its command is still registered but its matcher
+    //    differs (e.g. SessionStart with `startup` that should be
+    //    `startup|resume|clear`).
+    let mut removed: Vec<(String, String)> = Vec::new();
+    let mut updated_commands: HashSet<(String, String)> = HashSet::new();
+
+    let event_names: Vec<String> = hooks_map.keys().cloned().collect();
+    for event_name in &event_names {
+        let event_arr = match hooks_map
+            .get_mut(event_name.as_str())
+            .and_then(|v| v.as_array_mut())
+        {
+            Some(arr) => arr,
+            None => continue,
+        };
+
+        // Read pass: classify each entry.
+        let mut to_remove: Vec<usize> = Vec::new();
+        let mut to_update: Vec<(usize, Option<&'static str>)> = Vec::new();
+
+        for (i, entry) in event_arr.iter().enumerate() {
+            if let Some(cmd) = get_single_drovr_command(entry) {
+                match drovr_lookup.get(&(event_name.as_str(), cmd)) {
+                    None => {
+                        // Superseded — schedule for removal.
+                        to_remove.push(i);
+                        removed.push((event_name.clone(), cmd.to_owned()));
+                    }
+                    Some(&hook) => {
+                        // Present — check if matcher needs updating.
+                        let current_matcher = entry.get("matcher").and_then(|m| m.as_str());
+                        if current_matcher != hook.matcher {
+                            to_update.push((i, hook.matcher));
+                            updated_commands.insert((event_name.clone(), cmd.to_owned()));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write pass: apply matcher updates (do before removals to keep indices stable).
+        for (i, new_matcher) in to_update {
+            if let Some(obj) = event_arr[i].as_object_mut() {
+                match new_matcher {
+                    Some(m) => {
+                        obj.insert("matcher".to_string(), json!(m));
+                    }
+                    None => {
+                        obj.remove("matcher");
+                    }
+                }
+            }
+        }
+
+        // Write pass: remove superseded entries in reverse order.
+        for i in to_remove.into_iter().rev() {
+            event_arr.remove(i);
+        }
+    }
+
+    // 6. Add-or-skip pass: register any hook not yet present.
+    let mut statuses: Vec<HookStatus> = Vec::new();
 
     for hook in DROVR_CLAUDE_HOOKS {
         // Ensure the event key exists as an array.
@@ -268,17 +387,24 @@ pub fn install_claude_to(dest: &Path) -> Result<()> {
                 .unwrap_or(false)
         });
 
-        if !already_exists {
+        if already_exists {
+            let was_updated =
+                updated_commands.contains(&(hook.event.to_string(), hook.command.to_string()));
+            statuses.push(if was_updated {
+                HookStatus::Updated
+            } else {
+                HookStatus::Unchanged
+            });
+        } else {
             event_arr.push(build_claude_hook_entry(hook));
+            statuses.push(HookStatus::New);
         }
-
-        statuses.push(!already_exists);
     }
 
-    // 5. Write updated JSON back atomically (write .tmp sibling, then rename).
+    // 7. Write updated JSON back atomically (write .tmp sibling, then rename).
     //    Skip if nothing changed — preserves mtime for idempotency.
-    let any_added = statuses.iter().any(|&added| added);
-    if any_added {
+    let any_changed = statuses.iter().any(|s| *s != HookStatus::Unchanged) || !removed.is_empty();
+    if any_changed {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create directory {}", parent.display()))?;
@@ -307,8 +433,8 @@ pub fn install_claude_to(dest: &Path) -> Result<()> {
         })?;
     }
 
-    // 6. Print human-readable summary.
-    println!("{}", format_claude_summary(&statuses));
+    // 8. Print human-readable summary.
+    println!("{}", format_claude_summary(&statuses, &removed));
 
     Ok(())
 }
@@ -338,10 +464,25 @@ fn build_claude_hook_entry(hook: &ClaudeHookDef) -> serde_json::Value {
 ///
 /// Exposed as a separate function so unit tests can assert on its output
 /// without capturing stdout.
-pub fn format_claude_summary(statuses: &[bool]) -> String {
-    let mut lines = vec!["Installed drovr hooks for claude:".to_string()];
-    for (hook, &added) in DROVR_CLAUDE_HOOKS.iter().zip(statuses.iter()) {
-        let prefix = if added { '+' } else { '=' };
+///
+/// - `+` newly added entry
+/// - `~` entry was present but had a stale matcher — updated in place
+/// - `=` entry was already correct — no change
+/// - `-` entry was superseded and removed
+pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String)]) -> String {
+    let mut lines = vec!["Installed drovr hooks for claude (8 entries):".to_string()];
+
+    // Show removed (superseded) entries first so they're visible.
+    for (event, cmd) in removed {
+        lines.push(format!("  - {event:<35} → {cmd} [removed]"));
+    }
+
+    for (hook, status) in DROVR_CLAUDE_HOOKS.iter().zip(statuses.iter()) {
+        let prefix = match status {
+            HookStatus::New => '+',
+            HookStatus::Updated => '~',
+            HookStatus::Unchanged => '=',
+        };
         let event_display = match hook.matcher {
             Some(m) => format!("{} ({})", hook.event, m),
             None => hook.event.to_string(),
@@ -512,10 +653,10 @@ mod tests {
         dir.path().join(".claude").join("settings.json")
     }
 
-    // ── task 2.1: install on a clean (empty) settings file ───────────────────
+    // ── task 3.1: install on a clean (empty) settings file ──────────────────
 
     #[test]
-    fn install_claude_clean_file_writes_all_six_entries() {
+    fn install_claude_clean_file_writes_all_eight_entries() {
         let tmp = TempDir::new().unwrap();
         let dest = claude_settings_path(&tmp);
 
@@ -533,8 +674,10 @@ mod tests {
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
+            "PostToolUse",
             "PreToolUse",
             "Stop",
+            "StopFailure",
             "Notification",
             "SessionEnd",
         ] {
@@ -545,7 +688,7 @@ mod tests {
         }
     }
 
-    // ── task 2.2: idempotent re-run ───────────────────────────────────────────
+    // ── task 3.2: idempotent re-run ──────────────────────────────────────────
 
     #[test]
     fn install_claude_idempotent_no_duplicates() {
@@ -572,13 +715,15 @@ mod tests {
             "content should be identical"
         );
 
-        // No duplicate entries.
+        // No duplicate entries — all 8 events, each exactly once.
         let parsed: serde_json::Value = serde_json::from_str(&content_after_second).unwrap();
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
+            "PostToolUse",
             "PreToolUse",
             "Stop",
+            "StopFailure",
             "Notification",
             "SessionEnd",
         ] {
@@ -659,7 +804,7 @@ mod tests {
         );
     }
 
-    // ── task 2.4: async flag correctness ─────────────────────────────────────
+    // ── task 3.3: async flag correctness ─────────────────────────────────────
 
     #[test]
     fn install_claude_async_flags_are_correct() {
@@ -672,8 +817,15 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         let hooks = &parsed["hooks"];
 
-        // These four events must have async: true.
-        for event in &["UserPromptSubmit", "PreToolUse", "Stop", "Notification"] {
+        // These events must have async: true.
+        for event in &[
+            "UserPromptSubmit",
+            "PostToolUse",
+            "PreToolUse",
+            "Stop",
+            "StopFailure",
+            "Notification",
+        ] {
             let hook_entry = &hooks[event][0]["hooks"][0];
             assert_eq!(
                 hook_entry.get("async"),
@@ -692,13 +844,12 @@ mod tests {
         }
     }
 
-    // ── task 2.5: summary output uses + vs = ─────────────────────────────────
+    // ── task 3.4 / 5.5: summary output uses +, ~, = ────────────────────────────
 
     #[test]
     fn format_claude_summary_uses_plus_for_new_entries() {
-        // All six entries newly added.
-        let statuses = vec![true; 6];
-        let summary = format_claude_summary(&statuses);
+        let statuses = vec![HookStatus::New; 8];
+        let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
             assert!(
                 line.trim_start().starts_with('+'),
@@ -709,14 +860,262 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_equals_for_existing_entries() {
-        // All six entries already present.
-        let statuses = vec![false; 6];
-        let summary = format_claude_summary(&statuses);
+        let statuses = vec![HookStatus::Unchanged; 8];
+        let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
             assert!(
                 line.trim_start().starts_with('='),
                 "line should start with '=' for existing entry: {line}"
             );
         }
+    }
+
+    #[test]
+    fn format_claude_summary_uses_tilde_for_updated_entries() {
+        let statuses = vec![HookStatus::Updated; 8];
+        let summary = format_claude_summary(&statuses, &[]);
+        for line in summary.lines().skip(1) {
+            assert!(
+                line.trim_start().starts_with('~'),
+                "line should start with '~' for updated entry: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_claude_summary_shows_removed_entries_with_dash() {
+        let statuses = vec![HookStatus::Unchanged; 8];
+        let removed = vec![(
+            "PreToolUse".to_string(),
+            "dv set-state working --harness claude".to_string(),
+        )];
+        let summary = format_claude_summary(&statuses, &removed);
+        let lines: Vec<&str> = summary.lines().collect();
+        // Header is line 0; removed entries come before the hook lines.
+        assert!(
+            lines[1].trim_start().starts_with('-'),
+            "removed entry should start with '-': {}",
+            lines[1]
+        );
+        assert!(
+            lines[1].contains("PreToolUse"),
+            "removed line should contain event name"
+        );
+        assert!(
+            lines[1].contains("[removed]"),
+            "removed line should contain '[removed]'"
+        );
+    }
+
+    // ── task 5.5: migration — stale matcher update ────────────────────────────
+
+    #[test]
+    fn install_claude_updates_stale_session_start_matcher() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with old-style SessionStart hook (startup only).
+        let existing = serde_json::json!({
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{ "type": "command", "command": "dv set-state idle --harness claude" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Matcher should be updated to startup|resume|clear.
+        let session_start = &parsed["hooks"]["SessionStart"];
+        let arr = session_start.as_array().unwrap();
+        // Still exactly one entry (not a duplicate).
+        assert_eq!(
+            arr.len(),
+            1,
+            "SessionStart should have exactly one entry after update"
+        );
+        assert_eq!(
+            arr[0].get("matcher").and_then(|v| v.as_str()),
+            Some("startup|resume|clear"),
+            "SessionStart matcher should be updated to startup|resume|clear"
+        );
+    }
+
+    // ── task 5.5: migration — superseded entry removal ──────────────────────
+
+    #[test]
+    fn install_claude_removes_superseded_pretooluse_working_entry() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with the old general PreToolUse → working hook (no matcher).
+        let existing = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": "dv set-state working --harness claude" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let pretooluse = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+
+        // The old general working entry must be gone.
+        let has_old_general = pretooluse.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("dv set-state working --harness claude")
+                    })
+                })
+                .unwrap_or(false)
+                && entry.get("matcher").is_none()
+        });
+        assert!(
+            !has_old_general,
+            "old general PreToolUse → working entry should be removed"
+        );
+
+        // The new specific blocked entry must be present.
+        let has_blocked = pretooluse.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("dv set-state blocked --harness claude")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        assert!(
+            has_blocked,
+            "new AskUserQuestion|ExitPlanMode → blocked entry should be present"
+        );
+    }
+
+    #[test]
+    fn install_claude_session_start_has_correct_matcher() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let session_start = &parsed["hooks"]["SessionStart"][0];
+        assert_eq!(
+            session_start.get("matcher").and_then(|v| v.as_str()),
+            Some("startup|resume|clear"),
+            "SessionStart should have matcher startup|resume|clear"
+        );
+    }
+
+    // ── task 3.6: PreToolUse interactive-tools matcher ────────────────────────
+
+    #[test]
+    fn install_claude_pretooluse_blocked_has_correct_matcher() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let hooks = parsed["hooks"]["PreToolUse"]
+            .as_array()
+            .expect("PreToolUse should be an array");
+
+        let blocked_entry = hooks.iter().find(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("dv set-state blocked --harness claude")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        let entry = blocked_entry.expect("should have a blocked PreToolUse entry");
+        assert_eq!(
+            entry.get("matcher").and_then(|v| v.as_str()),
+            Some("AskUserQuestion|ExitPlanMode"),
+            "blocked PreToolUse should have matcher AskUserQuestion|ExitPlanMode"
+        );
+    }
+
+    // ── task 3.7: PostToolUse entry ───────────────────────────────────────────
+
+    #[test]
+    fn install_claude_posttooluse_has_working_command_and_no_matcher() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let entry = &parsed["hooks"]["PostToolUse"][0];
+
+        // No matcher field (fires on all tool completions).
+        assert!(
+            entry.get("matcher").is_none(),
+            "PostToolUse entry should have no matcher"
+        );
+        // Command is dv set-state working.
+        let cmd = entry["hooks"][0]
+            .get("command")
+            .and_then(|v| v.as_str())
+            .expect("PostToolUse hook should have a command");
+        assert_eq!(cmd, "dv set-state working --harness claude");
+    }
+
+    // ── task 3.8: StopFailure entry ───────────────────────────────────────────
+
+    #[test]
+    fn install_claude_stopfailure_has_done_command_async_and_no_matcher() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let entry = &parsed["hooks"]["StopFailure"][0];
+
+        // No matcher.
+        assert!(
+            entry.get("matcher").is_none(),
+            "StopFailure entry should have no matcher"
+        );
+        let hook = &entry["hooks"][0];
+        // Command.
+        assert_eq!(
+            hook.get("command").and_then(|v| v.as_str()),
+            Some("dv set-state done --harness claude")
+        );
+        // Async.
+        assert_eq!(
+            hook.get("async"),
+            Some(&serde_json::Value::Bool(true)),
+            "StopFailure should have async: true"
+        );
     }
 }
