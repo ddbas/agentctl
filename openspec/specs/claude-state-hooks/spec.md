@@ -2,33 +2,48 @@
 
 ## Purpose
 
-Specification for drovr's Claude harness integration: the six Claude lifecycle
-hook entries (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`,
-`Notification`, `SessionEnd`) that keep the agent state file in sync with
-Claude's current activity, and the `dv hooks install claude` command that
-registers them.
+Specification for drovr's Claude harness integration: the eight Claude lifecycle
+hook entries (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PreToolUse`,
+`Stop`, `StopFailure`, `Notification`, `SessionEnd`) that keep the agent state
+file in sync with Claude's current activity, and the `dv hooks install claude`
+command that registers them.
 
 ## Requirements
 
 ### Requirement: SessionStart hook calls dv set-state idle
 
 The Claude `SessionStart` hook SHALL invoke `dv set-state idle --harness claude`
-so that the agent's state file is written to
-`$XDG_DATA_HOME/drovr/agents/$TMUX_PANE/state.json` with `"state": "idle"`.
-`dv set-state` exits 0 silently when `$TMUX_PANE` is not set.
+when the session starts fresh, resumes from a prior run, or is cleared. The hook
+SHALL be registered with `matcher: "startup|resume|clear"` so it fires for all
+three sources. `dv set-state` exits 0 silently when `$TMUX_PANE` is not set.
 
-#### Scenario: SessionStart fires inside tmux
+#### Scenario: SessionStart fires on new session inside tmux
 
 - **WHEN** Claude fires the `SessionStart` hook with source `startup` and
   `$TMUX_PANE` is set
 - **THEN** the state file at `$XDG_DATA_HOME/drovr/agents/$TMUX_PANE/state.json`
   is written with `"state": "idle"` and the current `updated_at` timestamp
 
-#### Scenario: SessionStart overwrites state from a prior session in the same pane
+#### Scenario: SessionStart fires on resumed session inside tmux
 
-- **WHEN** a state file already exists for `$TMUX_PANE` (left by a previous
-  session) and `SessionStart` fires again in that pane
-- **THEN** the existing state file is overwritten with `"state": "idle"`
+- **WHEN** a Claude session is killed and later resumed (via `--resume`,
+  `--continue`, or `/resume`), causing `SessionStart` to fire with source
+  `resume`, and `$TMUX_PANE` is set
+- **THEN** the state file is written with `"state": "idle"`, replacing any
+  previous state (including "unknown" from a missing file)
+
+#### Scenario: SessionStart fires after /clear inside tmux
+
+- **WHEN** the user runs `/clear` in Claude, causing `SessionStart` to fire with
+  source `clear`, and `$TMUX_PANE` is set
+- **THEN** the state file is written with `"state": "idle"`
+
+#### Scenario: SessionStart does not fire on compaction
+
+- **WHEN** Claude auto-compacts or the user runs `/compact`, causing
+  `SessionStart` to fire with source `compact`
+- **THEN** the hook does NOT fire (filtered by Claude's `matcher`) and no state
+  change occurs
 
 ### Requirement: UserPromptSubmit hook calls dv set-state working
 
@@ -40,15 +55,44 @@ The Claude `UserPromptSubmit` hook SHALL invoke
 - **WHEN** Claude fires the `UserPromptSubmit` hook and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "working"`
 
-### Requirement: PreToolUse hook calls dv set-state working
+### Requirement: PostToolUse hook calls dv set-state working
+
+The Claude `PostToolUse` hook SHALL invoke
+`dv set-state working --harness claude` (async) after any tool completes
+successfully. This replaces the former `PreToolUse` general hook as the primary
+"still working" refresh signal.
+
+#### Scenario: PostToolUse fires inside tmux
+
+- **WHEN** Claude fires the `PostToolUse` hook for any tool and `$TMUX_PANE` is
+  set
+- **THEN** the agent's state file is updated to `"state": "working"`
+
+### Requirement: PreToolUse hook calls dv set-state blocked for interactive tools
 
 The Claude `PreToolUse` hook SHALL invoke
-`dv set-state working --harness claude` (async).
+`dv set-state blocked --harness claude` (async) when registered with
+`matcher: "AskUserQuestion|ExitPlanMode"`. This covers tools that show a
+blocking interactive dialog and wait for user input before continuing.
 
-#### Scenario: PreToolUse fires inside tmux
+#### Scenario: AskUserQuestion tool fires inside tmux
 
-- **WHEN** Claude fires the `PreToolUse` hook and `$TMUX_PANE` is set
-- **THEN** the agent's state file is updated to `"state": "working"`
+- **WHEN** Claude calls the `AskUserQuestion` tool and `$TMUX_PANE` is set
+- **THEN** the agent's state file is updated to `"state": "blocked"` before the
+  interactive dialog is shown
+
+#### Scenario: ExitPlanMode tool fires inside tmux
+
+- **WHEN** Claude calls the `ExitPlanMode` tool (plan approval dialog) and
+  `$TMUX_PANE` is set
+- **THEN** the agent's state file is updated to `"state": "blocked"` before the
+  plan approval dialog is shown
+
+#### Scenario: Non-interactive PreToolUse does not set blocked
+
+- **WHEN** Claude calls any tool other than `AskUserQuestion` or `ExitPlanMode`
+- **THEN** this hook does NOT fire (filtered by Claude's `matcher`) and no
+  "blocked" state change occurs
 
 ### Requirement: Stop hook calls dv set-state done
 
@@ -58,6 +102,18 @@ The Claude `Stop` hook SHALL invoke `dv set-state done --harness claude`
 #### Scenario: Stop hook fires inside tmux
 
 - **WHEN** Claude fires the `Stop` hook and `$TMUX_PANE` is set
+- **THEN** the agent's state file is updated to `"state": "done"`
+
+### Requirement: StopFailure hook calls dv set-state done
+
+The Claude `StopFailure` hook SHALL invoke `dv set-state done --harness claude`
+(async) so that API errors (rate-limit, server overload, authentication failure,
+etc.) do not leave state permanently stuck at "working".
+
+#### Scenario: StopFailure fires inside tmux
+
+- **WHEN** Claude's turn ends due to an API error, firing the `StopFailure`
+  hook, and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "done"`
 
 ### Requirement: Notification hook calls dv set-state blocked on permission prompts
@@ -113,19 +169,30 @@ not supplied.
 ### Requirement: dv hooks install claude registers handlers in user Claude settings
 
 The `dv hooks install claude` subcommand SHALL patch `~/.claude/settings.json`
-to register the six Claude hook entries using `dv set-state` and
-`dv clear-state`. `SessionStart` and `SessionEnd` are registered without `async`
-so they complete before Claude proceeds; all other hooks use `async: true`. The
-command SHALL be idempotent and SHALL merge into any existing hook configuration
-without overwriting it.
+to register eight Claude hook entries using `dv set-state` and `dv clear-state`.
+`SessionStart` and `SessionEnd` are registered without `async` so they complete
+before Claude proceeds; all other hooks use `async: true`. The command SHALL be
+idempotent and SHALL merge into any existing hook configuration without
+overwriting it.
+
+The eight entries are:
+
+| Event              | Matcher                         | Command                                 | Async |
+| ------------------ | ------------------------------- | --------------------------------------- | ----- |
+| `SessionStart`     | `startup\|resume\|clear`        | `dv set-state idle --harness claude`    | no    |
+| `UserPromptSubmit` | —                               | `dv set-state working --harness claude` | yes   |
+| `PostToolUse`      | —                               | `dv set-state working --harness claude` | yes   |
+| `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `dv set-state blocked --harness claude` | yes   |
+| `Stop`             | —                               | `dv set-state done --harness claude`    | yes   |
+| `StopFailure`      | —                               | `dv set-state done --harness claude`    | yes   |
+| `Notification`     | `permission_prompt`             | `dv set-state blocked --harness claude` | yes   |
+| `SessionEnd`       | —                               | `dv clear-state`                        | no    |
 
 #### Scenario: First-time install on a clean settings file
 
 - **WHEN** the user runs `dv hooks install claude` and `~/.claude/settings.json`
   contains no drovr hook entries
-- **THEN** the file is updated with entries for `SessionStart`,
-  `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`, and `SessionEnd`
-  using `dv set-state` / `dv clear-state` commands
+- **THEN** the file is updated with all eight entries listed above
 
 #### Scenario: Idempotent re-install
 
