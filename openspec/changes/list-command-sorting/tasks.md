@@ -2,7 +2,7 @@
 
 - [ ] 1.1 Add `Ord` and `PartialOrd` impls to `AgentState` in `src/state.rs`
       using an explicit priority map:
-      `Blocked=0, Idle=1, Working=2, Done=3, Unknown=4`
+      `Blocked=0, Done=1, Working=2, Idle=3, Unknown=4`
 - [ ] 1.2 Add unit tests for the ordering: all five variants sort correctly,
       `Blocked` is minimum, `Unknown` is maximum, full ascending slice matches
       expected order

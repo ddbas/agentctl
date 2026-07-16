@@ -60,16 +60,14 @@ more verbose; `--reverse` is idiomatic (mirrors `ls -r`, `sort -r`,
 Define a canonical ascending priority order:
 
 ```
-blocked(0) < idle(1) < working(2) < done(3) < unknown(4)
+blocked(0) < done(1) < working(2) < idle(3) < unknown(4)
 ```
 
-- `blocked` at index 0: represents agents that need human attention _right now_
-  — surfacing them first in the default (`state asc`) view is the most valuable
-  default behaviour.
-- `idle` at index 1: live but not active — worth knowing, but less urgent than
-  blocked.
-- `working` at index 2: making progress — healthy state, no action needed.
-- `done` at index 3: finished — can be reviewed or cleaned up.
+- `blocked` at index 0: needs human attention right now — surfaces first.
+- `done` at index 1: finished and waiting to be reviewed/cleaned up — next most
+  actionable after blocked.
+- `working` at index 2: making progress — healthy, no action needed.
+- `idle` at index 3: live but inactive — lowest urgency among known states.
 - `unknown` at index 4: no state file or contradictory state — least
   informative, shown last.
 

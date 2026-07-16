@@ -3,7 +3,7 @@
 ### Requirement: AgentState has a canonical sort ordering
 
 The `AgentState` type SHALL implement `Ord` and `PartialOrd` using an explicit
-priority mapping: `Blocked(0) < Idle(1) < Working(2) < Done(3) < Unknown(4)`.
+priority mapping: `Blocked(0) < Done(1) < Working(2) < Idle(3) < Unknown(4)`.
 This ordering is independent of enum variant declaration order.
 
 #### Scenario: Blocked is the lowest priority value
@@ -19,7 +19,7 @@ This ordering is independent of enum variant declaration order.
 #### Scenario: Full ordering is stable
 
 - **WHEN** all five variants are sorted in ascending order
-- **THEN** the result is `[Blocked, Idle, Working, Done, Unknown]`
+- **THEN** the result is `[Blocked, Done, Working, Idle, Unknown]`
 
 ### Requirement: dv list accepts --sort-by flag
 
