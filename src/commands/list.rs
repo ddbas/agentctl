@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::process::Command;
 
+use unicode_width::UnicodeWidthStr;
+
 use anyhow::Result;
 
 use crate::state::{AgentInfo, AgentState, delete_state_in, list_agent_infos_in};
@@ -263,9 +265,9 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
         })
         .collect();
 
-    let max_agent = panes.iter().map(|p| p.agent.len()).max().unwrap_or(0);
-    let max_session = panes.iter().map(|p| p.session.len()).max().unwrap_or(0);
-    let max_wp = window_pane.iter().map(|s| s.len()).max().unwrap_or(0);
+    let max_agent = panes.iter().map(|p| p.agent.width()).max().unwrap_or(0);
+    let max_session = panes.iter().map(|p| p.session.width()).max().unwrap_or(0);
+    let max_wp = window_pane.iter().map(|s| s.width()).max().unwrap_or(0);
 
     let col1 = max_agent + 2;
     let col2 = max_session + 2;
@@ -273,9 +275,18 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
 
     let mut output = String::new();
     for ((pane, wp), state) in panes.iter().zip(window_pane.iter()).zip(states.iter()) {
+        let pad1 = col1 - pane.agent.width();
+        let pad2 = col2 - pane.session.width();
+        let pad3 = col3 - wp.width();
         output.push_str(&format!(
-            "{:<col1$}{:<col2$}{:<col3$}{}\n",
-            pane.agent, pane.session, wp, state
+            "{}{}{}{}{}{}{}\n",
+            pane.agent,
+            " ".repeat(pad1),
+            pane.session,
+            " ".repeat(pad2),
+            wp,
+            " ".repeat(pad3),
+            state
         ));
     }
     output
@@ -382,6 +393,45 @@ mod tests {
     }
 
     // ── format_panes ────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_panes_aligns_columns_with_wide_unicode() {
+        // 🌳 is a wide character (2 terminal columns, 4 UTF-8 bytes, 1 scalar)
+        let data = vec![
+            pane_with_id("pi", "dotfiles", 0, 0, "%1"),
+            pane_with_id("pi", "🌳 drovr (claude-hooks)", 0, 0, "%2"),
+            pane_with_id("pi", "🌳 drovr (list-sort)", 0, 0, "%3"),
+        ];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &empty_state_map());
+
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 3);
+
+        // Find the byte offset of the state column start on each line.
+        // Because the session column is padded to the same display width,
+        // the state token should appear at the same display-column position.
+        // We check this by measuring the display width of everything before
+        // the final whitespace-delimited token on each line.
+        fn state_display_col(line: &str) -> usize {
+            // The state is the last whitespace-delimited word.
+            let state_start = line.rfind(|c: char| c == ' ').map(|i| i + 1).unwrap_or(0);
+            UnicodeWidthStr::width(&line[..state_start])
+        }
+
+        let col0 = state_display_col(lines[0]);
+        let col1 = state_display_col(lines[1]);
+        let col2 = state_display_col(lines[2]);
+
+        assert_eq!(
+            col0, col1,
+            "state column misaligned between ASCII and emoji rows:\n{output}"
+        );
+        assert_eq!(
+            col0, col2,
+            "state column misaligned between ASCII and emoji rows:\n{output}"
+        );
+    }
 
     #[test]
     fn format_panes_left_aligned_correct_widths() {
