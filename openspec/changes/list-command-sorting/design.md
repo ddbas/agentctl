@@ -100,8 +100,9 @@ A helper `sort_panes(panes, key, reverse, state_map)` is introduced in `list.rs`
 
 Add to the `list` subcommand in `main.rs`:
 
-- `--sort-by` / `-s`: accepts `state` (default), `agent`, `session`, `pane`,
-  `updated-at`. Parse into a `SortKey` enum in `list.rs`.
+- `--sort-by`: accepts `state` (default), `agent`, `session`, `pane`,
+  `updated-at`. Parse into a `SortKey` enum in `list.rs`. (No short form —
+  `-s` is already claimed by `--server`.)
 - `--reverse` / `-r`: boolean flag; when present the sort order is reversed.
 
 Update `run(server, sort_by, reverse)` signature accordingly.

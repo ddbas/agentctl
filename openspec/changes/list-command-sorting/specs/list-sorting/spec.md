@@ -23,10 +23,10 @@ This ordering is independent of enum variant declaration order.
 
 ### Requirement: dv list accepts --sort-by flag
 
-The `list` subcommand SHALL accept a `--sort-by` flag (short: `-s`) that
-controls which property is used to sort the output rows. Accepted values are:
-`state`, `agent`, `session`, `pane`, `updated-at`. The default value when the
-flag is omitted SHALL be `updated-at`.
+The `list` subcommand SHALL accept a `--sort-by` flag that controls which
+property is used to sort the output rows. Accepted values are: `state`, `agent`,
+`session`, `pane`, `updated-at`. The default value when the flag is omitted
+SHALL be `updated-at`.
 
 #### Scenario: Default sort is by updated-at descending
 
