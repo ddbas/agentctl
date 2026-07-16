@@ -13,8 +13,7 @@ properties so they can find blocked, idle, or active agents at a glance.
 - Define a canonical state ordering for `AgentState` so that `blocked` is always
   at one extreme of the sort (appears first in ascending order), enabling quick
   identification of agents that need attention.
-- Default sort is by `state` ascending so blocked agents surface first out of
-  the box.
+- Default sort is by `updated-at` descending (most recently active agents surface first out of the box).
 
 ## Capabilities
 

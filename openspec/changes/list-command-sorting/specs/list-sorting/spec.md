@@ -26,13 +26,13 @@ This ordering is independent of enum variant declaration order.
 The `list` subcommand SHALL accept a `--sort-by` flag (short: `-s`) that
 controls which property is used to sort the output rows. Accepted values are:
 `state`, `agent`, `session`, `pane`, `updated-at`. The default value when the
-flag is omitted SHALL be `state`.
+flag is omitted SHALL be `updated-at`.
 
-#### Scenario: Default sort is by state ascending
+#### Scenario: Default sort is by updated-at descending
 
 - **WHEN** the user runs `dv list` without any sort flags
-- **THEN** the output rows are ordered by `AgentState` priority ascending
-  (Blocked first, Unknown last)
+- **THEN** the output rows are ordered by the `updated_at` timestamp descending
+  (most recently active agent first; panes with no state file appear last)
 
 #### Scenario: Sort by agent name
 

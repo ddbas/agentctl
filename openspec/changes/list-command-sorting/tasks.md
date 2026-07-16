@@ -34,7 +34,7 @@
 ## 4. CLI Flag Wiring
 
 - [ ] 4.1 Add `--sort-by` / `-s` argument to the `list` subcommand in
-      `src/main.rs` (clap); default `state`
+      `src/main.rs` (clap); default `updated-at`
 - [ ] 4.2 Add `--reverse` / `-r` boolean flag to the `list` subcommand in
       `src/main.rs` (clap); default `false`
 - [ ] 4.3 Update `run(server, sort_by, reverse)` signature in
@@ -46,8 +46,8 @@
 
 ## 5. Tests
 
-- [ ] 5.1 Add integration / unit test: `dv list` with no flags sorts blocked
-      agents before idle/working/done/unknown
+- [ ] 5.1 Add unit test: `dv list` with no flags sorts by `updated_at`
+      descending (most recently active first, no-state-file panes last)
 - [ ] 5.2 Add unit test: `dv list --sort-by agent` sorts alphabetically by agent
       name
 - [ ] 5.3 Add unit test: `dv list --sort-by session` sorts by session name

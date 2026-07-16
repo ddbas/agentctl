@@ -101,12 +101,12 @@ string), or `unknown` if the pane has no state file or a contradictory one.
 - **THEN** no state files are deleted and the command exits with code 0 and no
   output (consistent with existing no-tmux behaviour)
 
-#### Scenario: Default sort puts blocked agents first
+#### Scenario: Default sort puts most recently active agents first
 
 - **WHEN** the user runs `dv list` without sort flags and multiple agents are
-  present with different states including `blocked`
-- **THEN** all panes with state `blocked` appear before panes with any other
-  state
+  present
+- **THEN** agents are ordered by `updated_at` descending (most recently active
+  first; agents with no state file appear last)
 
 #### Scenario: Sort by agent name when flag is provided
 
