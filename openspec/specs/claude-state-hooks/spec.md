@@ -10,12 +10,13 @@ that registers them.
 
 ## Requirements
 
-### Requirement: SessionStart hook calls rd state set idle
+### Requirement: SessionStart hook calls rd agent status idle
 
-The Claude `SessionStart` hook SHALL invoke `rd state set idle --harness claude`
-when the session starts fresh, resumes from a prior run, or is cleared. The hook
-SHALL be registered with `matcher: "startup|resume|clear"` so it fires for all
-three sources. `rd state set` exits 0 silently when `$TMUX_PANE` is not set.
+The Claude `SessionStart` hook SHALL invoke
+`rd agent status idle --harness claude` when the session starts fresh, resumes
+from a prior run, or is cleared. The hook SHALL be registered with
+`matcher: "startup|resume|clear"` so it fires for all three sources.
+`rd agent status` exits 0 silently when `$TMUX_PANE` is not set.
 
 #### Scenario: SessionStart fires on new session inside tmux
 
@@ -45,20 +46,20 @@ three sources. `rd state set` exits 0 silently when `$TMUX_PANE` is not set.
 - **THEN** the hook does NOT fire (filtered by Claude's `matcher`) and no state
   change occurs
 
-### Requirement: UserPromptSubmit hook calls rd state set working
+### Requirement: UserPromptSubmit hook calls rd agent status working
 
 The Claude `UserPromptSubmit` hook SHALL invoke
-`rd state set working --harness claude` (async).
+`rd agent status working --harness claude` (async).
 
 #### Scenario: UserPromptSubmit fires inside tmux
 
 - **WHEN** Claude fires the `UserPromptSubmit` hook and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "working"`
 
-### Requirement: PostToolUse hook calls rd state set working
+### Requirement: PostToolUse hook calls rd agent status working
 
 The Claude `PostToolUse` hook SHALL invoke
-`rd state set working --harness claude` (async) after any tool completes
+`rd agent status working --harness claude` (async) after any tool completes
 successfully. This replaces the former `PreToolUse` general hook as the primary
 "still working" refresh signal.
 
@@ -68,10 +69,10 @@ successfully. This replaces the former `PreToolUse` general hook as the primary
   set
 - **THEN** the agent's state file is updated to `"state": "working"`
 
-### Requirement: PreToolUse hook calls rd state set blocked for interactive tools
+### Requirement: PreToolUse hook calls rd agent status blocked for interactive tools
 
 The Claude `PreToolUse` hook SHALL invoke
-`rd state set blocked --harness claude` (async) when registered with
+`rd agent status blocked --harness claude` (async) when registered with
 `matcher: "AskUserQuestion|ExitPlanMode"`. This covers tools that show a
 blocking interactive dialog and wait for user input before continuing.
 
@@ -94,9 +95,9 @@ blocking interactive dialog and wait for user input before continuing.
 - **THEN** this hook does NOT fire (filtered by Claude's `matcher`) and no
   "blocked" state change occurs
 
-### Requirement: Stop hook calls rd state set done
+### Requirement: Stop hook calls rd agent status done
 
-The Claude `Stop` hook SHALL invoke `rd state set done --harness claude`
+The Claude `Stop` hook SHALL invoke `rd agent status done --harness claude`
 (async).
 
 #### Scenario: Stop hook fires inside tmux
@@ -104,11 +105,12 @@ The Claude `Stop` hook SHALL invoke `rd state set done --harness claude`
 - **WHEN** Claude fires the `Stop` hook and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "done"`
 
-### Requirement: StopFailure hook calls rd state set done
+### Requirement: StopFailure hook calls rd agent status done
 
-The Claude `StopFailure` hook SHALL invoke `rd state set done --harness claude`
-(async) so that API errors (rate-limit, server overload, authentication failure,
-etc.) do not leave state permanently stuck at "working".
+The Claude `StopFailure` hook SHALL invoke
+`rd agent status done --harness claude` (async) so that API errors (rate-limit,
+server overload, authentication failure, etc.) do not leave state permanently
+stuck at "working".
 
 #### Scenario: StopFailure fires inside tmux
 
@@ -116,10 +118,10 @@ etc.) do not leave state permanently stuck at "working".
   hook, and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "done"`
 
-### Requirement: Notification hook calls rd state set blocked on permission prompts
+### Requirement: Notification hook calls rd agent status blocked on permission prompts
 
 The Claude `Notification` hook SHALL invoke
-`rd state set blocked --harness claude` (async) when registered with
+`rd agent status blocked --harness claude` (async) when registered with
 `matcher: "permission_prompt"`. Because Claude's hook system only fires the hook
 when the matcher matches, no stdin-parsing logic is required inside `rd`.
 
@@ -136,10 +138,10 @@ when the matcher matches, no stdin-parsing logic is required inside `rd`.
 - **THEN** the hook is not triggered (filtered by Claude's `matcher`) and no
   state change occurs
 
-### Requirement: SessionEnd hook calls rd state clear
+### Requirement: SessionEnd hook calls rd agent clear
 
-The Claude `SessionEnd` hook SHALL invoke `rd state clear` so the state file is
-removed when the session exits normally. `rd state clear` exits 0 silently when
+The Claude `SessionEnd` hook SHALL invoke `rd agent clear` so the state file is
+removed when the session exits normally. `rd agent clear` exits 0 silently when
 `$TMUX_PANE` is not set or when no state file exists.
 
 #### Scenario: SessionEnd fires inside tmux
@@ -152,45 +154,46 @@ removed when the session exits normally. `rd state clear` exits 0 silently when
 
 - **WHEN** Claude fires the `SessionEnd` hook but no state file exists for
   `$TMUX_PANE`
-- **THEN** `rd state clear` exits 0 without error
+- **THEN** `rd agent clear` exits 0 without error
 
-### Requirement: rd state set and rd state clear are no-ops outside tmux
+### Requirement: rd agent status and rd agent clear are no-ops outside tmux
 
-Both `rd state set <state>` and `rd state clear` SHALL exit with code 0 and
+Both `rd agent status <state>` and `rd agent clear` SHALL exit with code 0 and
 write nothing when `$TMUX_PANE` is not set in the environment and `--pane` is
 not supplied.
 
 #### Scenario: Hook fires outside tmux
 
-- **WHEN** `rd state set` or `rd state clear` is invoked with `$TMUX_PANE` unset
-  and no `--pane` flag
+- **WHEN** `rd agent status` or `rd agent clear` is invoked with `$TMUX_PANE`
+  unset and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
 ### Requirement: rd install claude registers handlers in user Claude settings
 
 The `rd install claude` subcommand SHALL patch `~/.claude/settings.json` to
-register eight Claude hook entries using `rd state set` and `rd state clear`.
+register eight Claude hook entries using `rd agent status` and `rd agent clear`.
 `SessionStart` and `SessionEnd` are registered without `async` so they complete
 before Claude proceeds; all other hooks use `async: true`. The command SHALL be
 idempotent and SHALL merge into any existing hook configuration without
 overwriting it. If `~/.claude/settings.json` already contains hook entries
-registered by a pre-rename `rd` binary (using `rd set-state`/`rd clear-state`
-commands), those entries SHALL be recognized as radr-managed, removed as
-superseded, and replaced with the equivalent `rd state set`/`rd state clear`
-entries.
+registered by an older `rd` binary using either the pre-rename
+`rd set-state`/`rd clear-state` commands or the subsequently renamed
+`rd state set`/`rd state clear` commands, those entries SHALL be recognized as
+radr-managed, removed as superseded, and replaced with the equivalent
+`rd agent status`/`rd agent clear` entries.
 
 The eight entries are:
 
-| Event              | Matcher                         | Command                                 | Async |
-| ------------------ | ------------------------------- | --------------------------------------- | ----- |
-| `SessionStart`     | `startup\|resume\|clear`        | `rd state set idle --harness claude`    | no    |
-| `UserPromptSubmit` | —                               | `rd state set working --harness claude` | yes   |
-| `PostToolUse`      | —                               | `rd state set working --harness claude` | yes   |
-| `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `rd state set blocked --harness claude` | yes   |
-| `Stop`             | —                               | `rd state set done --harness claude`    | yes   |
-| `StopFailure`      | —                               | `rd state set done --harness claude`    | yes   |
-| `Notification`     | `permission_prompt`             | `rd state set blocked --harness claude` | yes   |
-| `SessionEnd`       | —                               | `rd state clear`                        | no    |
+| Event              | Matcher                         | Command                                    | Async |
+| ------------------ | ------------------------------- | ------------------------------------------ | ----- |
+| `SessionStart`     | `startup\|resume\|clear`        | `rd agent status idle --harness claude`    | no    |
+| `UserPromptSubmit` | —                               | `rd agent status working --harness claude` | yes   |
+| `PostToolUse`      | —                               | `rd agent status working --harness claude` | yes   |
+| `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `rd agent status blocked --harness claude` | yes   |
+| `Stop`             | —                               | `rd agent status done --harness claude`    | yes   |
+| `StopFailure`      | —                               | `rd agent status done --harness claude`    | yes   |
+| `Notification`     | `permission_prompt`             | `rd agent status blocked --harness claude` | yes   |
+| `SessionEnd`       | —                               | `rd agent clear`                           | no    |
 
 #### Scenario: First-time install on a clean settings file
 
@@ -214,22 +217,32 @@ The eight entries are:
 
 - **WHEN** `~/.claude/settings.json` contains radr hook entries using the old
   `rd set-state ...` / `rd clear-state` commands (from a `rd` binary installed
-  before this rename)
+  before either rename)
 - **THEN** running `rd install claude` removes the old entries and adds the
-  equivalent `rd state set ...` / `rd state clear` entries, with no duplicate or
-  leftover old-style entries remaining
+  equivalent `rd agent status ...` / `rd agent clear` entries, with no duplicate
+  or leftover old-style entries remaining
+
+#### Scenario: Install migrates rd state to rd agent hook commands
+
+- **WHEN** `~/.claude/settings.json` contains radr hook entries using the
+  intermediate `rd state set ...` / `rd state clear` commands (from a `rd`
+  binary installed after the `set-state`→`state set` rename but before this
+  `state`→`agent` rename)
+- **THEN** running `rd install claude` removes the old entries and adds the
+  equivalent `rd agent status ...` / `rd agent clear` entries, with no duplicate
+  or leftover old-style entries remaining
 
 ### Requirement: rd uninstall claude removes only radr-managed hook entries
 
 The `rd uninstall claude` subcommand SHALL remove radr-managed hook entries from
-`~/.claude/settings.json`, recognizing both current-form commands
-(`rd state set ...` / `rd state clear`) and pre-rename legacy commands
-(`rd set-state ...` / `rd clear-state`) using the same recognition logic as
-`rd install claude`'s migration path. All non-radr content in the file,
-including non-radr hook entries under the same event and any other top-level
-settings keys, SHALL be preserved unchanged. The command SHALL be idempotent:
-running it again after all radr entries are removed SHALL make no further
-changes.
+`~/.claude/settings.json`, recognizing the current-form commands
+(`rd agent status ...` / `rd agent clear`) as well as both prior legacy forms
+(`rd state set ...` / `rd state clear`, and the earlier `rd set-state ...` /
+`rd clear-state`) using the same recognition logic as `rd install claude`'s
+migration path. All non-radr content in the file, including non-radr hook
+entries under the same event and any other top-level settings keys, SHALL be
+preserved unchanged. The command SHALL be idempotent: running it again after all
+radr entries are removed SHALL make no further changes.
 
 #### Scenario: Uninstall removes all eight radr hook entries
 
@@ -247,8 +260,9 @@ changes.
 
 #### Scenario: Uninstall removes legacy pre-rename entries
 
-- **WHEN** `~/.claude/settings.json` contains radr hook entries using the
-  pre-rename `rd set-state ...` / `rd clear-state` command strings (from an
+- **WHEN** `~/.claude/settings.json` contains radr hook entries using either the
+  earliest `rd set-state ...` / `rd clear-state` command strings or the
+  intermediate `rd state set ...` / `rd state clear` command strings (from an
   older `rd` binary, not yet migrated by `rd install claude`)
 - **THEN** `rd uninstall claude` recognizes and removes those entries as
   radr-managed

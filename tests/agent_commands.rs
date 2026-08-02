@@ -1,10 +1,10 @@
-//! Integration tests for the `rd state set` and `rd state clear` subcommands.
+//! Integration tests for the `rd agent status` and `rd agent clear` subcommands.
 
 mod common;
 
-// ── rd state set ──────────────────────────────────────────────────────────────
+// ── rd agent status ──────────────────────────────────────────────────────────────
 
-/// `rd state set working --harness claude --pane %42` should write a state
+/// `rd agent status working --harness claude --pane %42` should write a state
 /// file under `XDG_DATA_HOME` and exit 0.
 #[tokio::test]
 async fn set_state_writes_state_file() {
@@ -13,8 +13,8 @@ async fn set_state_writes_state_file() {
     let output = env
         .rd()
         .args([
-            "state",
-            "set",
+            "agent",
+            "status",
             "working",
             "--harness",
             "claude",
@@ -22,11 +22,11 @@ async fn set_state_writes_state_file() {
             "%42",
         ])
         .output()
-        .expect("failed to spawn rd state set");
+        .expect("failed to spawn rd agent status");
 
     assert!(
         output.status.success(),
-        "`rd state set` should exit 0; stderr: {}",
+        "`rd agent status` should exit 0; stderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
 
@@ -44,7 +44,7 @@ async fn set_state_writes_state_file() {
     );
 }
 
-/// `rd state set idle --pane %10` without `--harness` should write `"unknown"`
+/// `rd agent status idle --pane %10` without `--harness` should write `"unknown"`
 /// as the harness field.
 #[tokio::test]
 async fn set_state_defaults_harness_to_unknown() {
@@ -52,9 +52,9 @@ async fn set_state_defaults_harness_to_unknown() {
 
     let output = env
         .rd()
-        .args(["state", "set", "idle", "--pane", "%10"])
+        .args(["agent", "status", "idle", "--pane", "%10"])
         .output()
-        .expect("failed to spawn rd state set");
+        .expect("failed to spawn rd agent status");
 
     assert!(output.status.success());
 
@@ -65,7 +65,7 @@ async fn set_state_defaults_harness_to_unknown() {
     );
 }
 
-/// `rd state set` with `$TMUX_PANE` unset and no `--pane` flag should exit 0
+/// `rd agent status` with `$TMUX_PANE` unset and no `--pane` flag should exit 0
 /// silently without creating any state file.
 #[tokio::test]
 async fn set_state_no_pane_exits_silently() {
@@ -73,14 +73,14 @@ async fn set_state_no_pane_exits_silently() {
 
     let output = env
         .rd()
-        .args(["state", "set", "idle"])
+        .args(["agent", "status", "idle"])
         .env_remove("TMUX_PANE")
         .output()
-        .expect("failed to spawn rd state set");
+        .expect("failed to spawn rd agent status");
 
     assert!(
         output.status.success(),
-        "`rd state set` should exit 0 silently when TMUX_PANE is unset"
+        "`rd agent status` should exit 0 silently when TMUX_PANE is unset"
     );
     assert!(
         output.stdout.is_empty() && output.stderr.is_empty(),
@@ -97,58 +97,58 @@ async fn set_state_no_pane_exits_silently() {
     );
 }
 
-/// `rd state set <unknown>` should exit non-zero with an error message.
+/// `rd agent status <unknown>` should exit non-zero with an error message.
 #[tokio::test]
 async fn set_state_unknown_state_exits_nonzero() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
         .rd()
-        .args(["state", "set", "flying", "--pane", "%1"])
+        .args(["agent", "status", "flying", "--pane", "%1"])
         .output()
-        .expect("failed to spawn rd state set");
+        .expect("failed to spawn rd agent status");
 
     assert!(
         !output.status.success(),
-        "`rd state set` should exit non-zero for unknown state"
+        "`rd agent status` should exit non-zero for unknown state"
     );
 }
 
-// ── rd state clear ────────────────────────────────────────────────────────────
+// ── rd agent clear ────────────────────────────────────────────────────────────
 
-/// `rd state clear --pane %42` should delete an existing state file and exit 0.
+/// `rd agent clear --pane %42` should delete an existing state file and exit 0.
 #[tokio::test]
 async fn clear_state_removes_existing_state_file() {
     let env = common::TmuxEnv::new().await;
 
-    // Write a state file first via state set.
+    // Write a state file first via agent status.
     let write_out = env
         .rd()
-        .args(["state", "set", "done", "--pane", "%42"])
+        .args(["agent", "status", "done", "--pane", "%42"])
         .output()
-        .expect("spawn state set");
+        .expect("spawn agent status");
     assert!(write_out.status.success());
     assert!(env.state_file_path("%42").exists());
 
     // Now clear it.
     let output = env
         .rd()
-        .args(["state", "clear", "--pane", "%42"])
+        .args(["agent", "clear", "--pane", "%42"])
         .output()
-        .expect("failed to spawn rd state clear");
+        .expect("failed to spawn rd agent clear");
 
     assert!(
         output.status.success(),
-        "`rd state clear` should exit 0; stderr: {}",
+        "`rd agent clear` should exit 0; stderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(
         !env.state_file_path("%42").exists(),
-        "state file should have been deleted by rd state clear"
+        "state file should have been deleted by rd agent clear"
     );
 }
 
-/// `rd state clear --pane %99` when no state file exists should exit 0 silently
+/// `rd agent clear --pane %99` when no state file exists should exit 0 silently
 /// (no-op).
 #[tokio::test]
 async fn clear_state_absent_file_exits_silently() {
@@ -156,17 +156,17 @@ async fn clear_state_absent_file_exits_silently() {
 
     let output = env
         .rd()
-        .args(["state", "clear", "--pane", "%99"])
+        .args(["agent", "clear", "--pane", "%99"])
         .output()
-        .expect("failed to spawn rd state clear");
+        .expect("failed to spawn rd agent clear");
 
     assert!(
         output.status.success(),
-        "`rd state clear` should exit 0 when state file absent"
+        "`rd agent clear` should exit 0 when state file absent"
     );
 }
 
-/// `rd state clear` with `$TMUX_PANE` unset and no `--pane` flag exits 0
+/// `rd agent clear` with `$TMUX_PANE` unset and no `--pane` flag exits 0
 /// silently.
 #[tokio::test]
 async fn clear_state_no_pane_exits_silently() {
@@ -174,13 +174,13 @@ async fn clear_state_no_pane_exits_silently() {
 
     let output = env
         .rd()
-        .args(["state", "clear"])
+        .args(["agent", "clear"])
         .env_remove("TMUX_PANE")
         .output()
-        .expect("failed to spawn rd state clear");
+        .expect("failed to spawn rd agent clear");
 
     assert!(
         output.status.success(),
-        "`rd state clear` should exit 0 silently when TMUX_PANE is unset"
+        "`rd agent clear` should exit 0 silently when TMUX_PANE is unset"
     );
 }
