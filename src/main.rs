@@ -59,13 +59,32 @@ enum Commands {
         reverse: bool,
     },
 
+    /// Install radr on a harness.
+    ///
+    /// Writes the necessary integration files for the chosen harness so that
+    /// `rd list` shows real-time agent state without polling. Today this means
+    /// installing hook integrations, but may include more in the future.
+    Install {
+        /// Harness to install radr on.
+        #[arg(value_name = "HARNESS")]
+        harness: Harness,
+    },
+
+    /// Manage agent state.
+    State {
+        #[command(subcommand)]
+        subcommand: StateSubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum StateSubcommand {
     /// Write the current agent state to the state file.
     ///
     /// Reads `$TMUX_PANE` from the environment to identify the current pane.
     /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
     /// supplied — suitable for calling from hooks that may run outside tmux.
-    #[command(name = "set-state")]
-    SetState {
+    Set {
         /// New state. Accepted values: idle, working, done, blocked.
         #[arg(value_name = "STATE")]
         state: String,
@@ -85,34 +104,14 @@ enum Commands {
     /// Reads `$TMUX_PANE` from the environment. Exits 0 silently when
     /// `$TMUX_PANE` is not set and `--pane` is not supplied, or when no
     /// state file exists for the pane.
-    #[command(name = "clear-state")]
-    ClearState {
+    Clear {
         /// Override the pane ID instead of reading `$TMUX_PANE`.
         #[arg(long, value_name = "PANE_ID")]
         pane: Option<String>,
     },
-
-    /// Manage agent harness hooks.
-    Hooks {
-        #[command(subcommand)]
-        subcommand: HooksSubcommand,
-    },
 }
 
-#[derive(Subcommand)]
-enum HooksSubcommand {
-    /// Install hooks for a harness.
-    ///
-    /// Writes the necessary hook files for the chosen harness so that
-    /// `rd list` shows real-time agent state without polling.
-    Install {
-        /// Harness to install hooks for.
-        #[arg(value_name = "HARNESS")]
-        harness: Harness,
-    },
-}
-
-/// Harnesses supported by `rd hooks install`.
+/// Harnesses supported by `rd install`.
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Harness {
     /// Pi coding agent — writes `~/.pi/agent/extensions/radr.ts`.
@@ -142,20 +141,23 @@ fn run() -> anyhow::Result<()> {
         }) => {
             commands::list::run(server, sort_by, reverse)?;
         }
-        Some(Commands::SetState {
-            state,
-            harness,
-            pane,
+        Some(Commands::Install { harness }) => {
+            commands::hooks::run_install(harness)?;
+        }
+        Some(Commands::State {
+            subcommand:
+                StateSubcommand::Set {
+                    state,
+                    harness,
+                    pane,
+                },
         }) => {
             commands::set_state::run(state, harness, pane)?;
         }
-        Some(Commands::ClearState { pane }) => {
-            commands::clear_state::run(pane)?;
-        }
-        Some(Commands::Hooks {
-            subcommand: HooksSubcommand::Install { harness },
+        Some(Commands::State {
+            subcommand: StateSubcommand::Clear { pane },
         }) => {
-            commands::hooks::run_install(harness)?;
+            commands::clear_state::run(pane)?;
         }
     }
 

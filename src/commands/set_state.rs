@@ -1,10 +1,10 @@
-//! `rd set-state` — write the current agent state to the state file.
+//! `rd state set` — write the current agent state to the state file.
 
 use anyhow::Result;
 
 use crate::state::{AgentState, write_state};
 
-/// Accepted state values for `rd set-state`.
+/// Accepted state values for `rd state set`.
 fn parse_state(s: &str) -> Option<AgentState> {
     match s {
         "idle" => Some(AgentState::Idle),
@@ -15,7 +15,7 @@ fn parse_state(s: &str) -> Option<AgentState> {
     }
 }
 
-/// Entry point for `rd set-state <state> [--harness <h>] [--pane <id>]`.
+/// Entry point for `rd state set <state> [--harness <h>] [--pane <id>]`.
 ///
 /// Resolution order for pane ID:
 ///   1. `--pane` flag

@@ -1,10 +1,10 @@
-//! `rd clear-state` — remove the state file for the current agent pane.
+//! `rd state clear` — remove the state file for the current agent pane.
 
 use anyhow::Result;
 
 use crate::state::delete_state;
 
-/// Entry point for `rd clear-state [--pane <id>]`.
+/// Entry point for `rd state clear [--pane <id>]`.
 ///
 /// Resolution order for pane ID:
 ///   1. `--pane` flag
