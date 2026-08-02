@@ -1,6 +1,6 @@
 ## Why
 
-The `dv` CLI currently has no awareness of what each agent is actually doing —
+The `rd` CLI currently has no awareness of what each agent is actually doing —
 users have no way to tell at a glance whether an agent is waiting for input,
 actively running, has finished, or has never been prompted. Adding first-class
 state tracking gives operators immediate situational awareness across all agents
@@ -14,11 +14,11 @@ new work only to idle agents).
 - Define a file-based state persistence mechanism: each agent harness writes
   state-change events to a well-known path so that the CLI can read them at any
   time without needing to be running when the events occur.
-- Add a `dv hooks install <harness>` subcommand as a placeholder for
+- Add a `rd hooks install <harness>` subcommand as a placeholder for
   harness-specific hook registration. No harnesses are supported in this
   iteration; the command exits 1 with a clear message. Concrete harness support
   (e.g. `claude`) is added by dependent changes.
-- Expose agent state in the `dv` CLI output (e.g. `dv list`).
+- Expose agent state in the `rd` CLI output (e.g. `rd list`).
 
 ## Capabilities
 
@@ -35,8 +35,8 @@ new work only to idle agents).
 ## Impact
 
 - **New files**: state file under a per-agent directory (e.g.
-  `~/.local/share/drovr/sessions/<session-id>/agents/<agent-id>/state.json`).
-- **CLI binary (`dv`)**: reads state files when listing agents; exposes
-  `dv set-state`, `dv clear-state`, and `dv hooks install <harness>` (no-op
+  `~/.local/share/radr/sessions/<session-id>/agents/<agent-id>/state.json`).
+- **CLI binary (`rd`)**: reads state files when listing agents; exposes
+  `rd set-state`, `rd clear-state`, and `rd hooks install <harness>` (no-op
   placeholder in this iteration).
 - **No breaking changes** to existing session or tmux APIs.

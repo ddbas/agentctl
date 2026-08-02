@@ -10,7 +10,7 @@ tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
 
 #### Scenario: Agent panes exist across multiple sessions
 
-- **WHEN** the user runs `dv list` and tmux has a pane in session `dev` running
+- **WHEN** the user runs `rd list` and tmux has a pane in session `dev` running
   `claude` at window 0 pane 0, and a pane in session `work` running `pi` at
   window 1 pane 0, and other panes running `zsh` or `nvim`
 - **THEN** the output contains exactly two lines — one for `claude` and one for
@@ -31,13 +31,13 @@ tmux sessions via `tmux list-panes -a` and prints one line for each pane whose
 
 #### Scenario: No matching panes
 
-- **WHEN** the user runs `dv list` and no pane's `pane_current_command` matches
+- **WHEN** the user runs `rd list` and no pane's `pane_current_command` matches
   `claude` or `pi`
 - **THEN** the command exits with code 0 and produces no output
 
 #### Scenario: No tmux server running
 
-- **WHEN** the user runs `dv list` and no tmux server is active
+- **WHEN** the user runs `rd list` and no tmux server is active
 - **THEN** the command exits with code 0 and produces no output (treats absence
   of a server as zero panes)
 
@@ -49,13 +49,13 @@ file.
 
 #### Scenario: Custom server socket provided
 
-- **WHEN** the user runs `dv list --server /tmp/my-tmux.sock` and a pane on that
+- **WHEN** the user runs `rd list --server /tmp/my-tmux.sock` and a pane on that
   socket is running `pi`
 - **THEN** the output contains a line for that `pi` pane
 
 #### Scenario: Default server used when flag is omitted
 
-- **WHEN** the user runs `dv list` without `--server`
+- **WHEN** the user runs `rd list` without `--server`
 - **THEN** the command queries the default tmux server (no `-S` flag passed to
   tmux)
 
@@ -66,6 +66,6 @@ non-zero when the `tmux` binary cannot be found on PATH.
 
 #### Scenario: tmux not installed
 
-- **WHEN** the user runs `dv list` and `tmux` is not available on PATH
+- **WHEN** the user runs `rd list` and `tmux` is not available on PATH
 - **THEN** the command exits with a non-zero code and prints an error containing
   "tmux not found"

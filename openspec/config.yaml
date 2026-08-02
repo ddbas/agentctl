@@ -4,5 +4,5 @@ schema: spec-driven
 # This is shown to AI when creating artifacts.
 context: |
   Tech stack: Rust, Cargo
-  CLI binary: dv
+  CLI binary: rd
   We use conventional commits

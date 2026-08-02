@@ -1,6 +1,6 @@
 ## Context
 
-The `dv list` command discovers tmux panes running agent harnesses (`claude`,
+The `rd list` command discovers tmux panes running agent harnesses (`claude`,
 `pi`) and prints them in a fixed columnar format. Currently there is no user
 control over output order — rows appear in whatever order `tmux list-panes -a`
 returns them, which is effectively session/window/pane index order.
@@ -41,7 +41,8 @@ Expose five sort keys:
 | `pane`       | `window_index.pane_index` numerically (window major, pane minor)                |
 | `updated-at` | `updated_at` timestamp from state file; panes with no state file sort as oldest |
 
-**Default**: `updated-at` descending (most recently active agents surface first without any flags).
+**Default**: `updated-at` descending (most recently active agents surface first
+without any flags).
 
 **Alternatives considered**: Alphabetical-only keys — rejected because
 `state`-first default is the most useful out of the box.
@@ -91,7 +92,8 @@ Sort is applied to the `Vec<&PaneEntry>` (or the owned `Vec<PaneEntry>`) after
 filtering but before `format_panes`. The state map is passed in as context for
 state-based or updated-at-based sort comparisons.
 
-A helper `sort_panes(panes, key, reverse, state_map)` is introduced in `list.rs`.
+A helper `sort_panes(panes, key, reverse, state_map)` is introduced in
+`list.rs`.
 
 **Alternatives considered**: Sort inside `format_panes` — rejected;
 `format_panes` is a pure formatter and should not own sort logic.
@@ -101,8 +103,8 @@ A helper `sort_panes(panes, key, reverse, state_map)` is introduced in `list.rs`
 Add to the `list` subcommand in `main.rs`:
 
 - `--sort-by`: accepts `state` (default), `agent`, `session`, `pane`,
-  `updated-at`. Parse into a `SortKey` enum in `list.rs`. (No short form —
-  `-s` is already claimed by `--server`.)
+  `updated-at`. Parse into a `SortKey` enum in `list.rs`. (No short form — `-s`
+  is already claimed by `--server`.)
 - `--reverse` / `-r`: boolean flag; when present the sort order is reversed.
 
 Update `run(server, sort_by, reverse)` signature accordingly.

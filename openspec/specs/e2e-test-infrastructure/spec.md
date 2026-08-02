@@ -39,7 +39,7 @@ and a Docker canary helper usable by all integration test files.
 
 `TmuxEnv` SHALL start a Docker container with tmux installed, start a tmux
 server inside that container on a Unix socket within the bind-mounted workspace,
-and expose the socket path so the host `dv` binary can be directed at it.
+and expose the socket path so the host `rd` binary can be directed at it.
 
 #### Scenario: Container starts with tmux server running
 
@@ -64,28 +64,28 @@ and expose the socket path so the host `dv` binary can be directed at it.
 - **WHEN** Docker is unavailable or the image cannot be pulled
 - **THEN** the test panics with a descriptive message identifying the cause
 
-### Requirement: dv binary runner targets the isolated tmux socket
+### Requirement: rd binary runner targets the isolated tmux socket
 
-`TmuxEnv::dv()` SHALL return a `std::process::Command` using `CARGO_BIN_EXE_dv`
+`TmuxEnv::rd()` SHALL return a `std::process::Command` using `CARGO_BIN_EXE_rd`
 with `TMUX` and `TMUX_PANE` removed and a socket-targeting env var
-(`DV_TMUX_SOCKET`) set to the container's socket path so that `dv` subcommands
+(`RD_TMUX_SOCKET`) set to the container's socket path so that `rd` subcommands
 use the isolated server.
 
-#### Scenario: dv binary is invocable from tests
+#### Scenario: rd binary is invocable from tests
 
-- **WHEN** a test calls `env.dv()` and appends arguments
-- **THEN** the returned `Command` runs the `dv` binary built by `cargo test`
+- **WHEN** a test calls `env.rd()` and appends arguments
+- **THEN** the returned `Command` runs the `rd` binary built by `cargo test`
 
-#### Scenario: TMUX and TMUX_PANE are absent from dv invocations
+#### Scenario: TMUX and TMUX_PANE are absent from rd invocations
 
 - **WHEN** tests run inside an active tmux session on the developer's machine
-- **THEN** `dv()` strips `TMUX` and `TMUX_PANE` so `dv` does not behave as if it
+- **THEN** `rd()` strips `TMUX` and `TMUX_PANE` so `rd` does not behave as if it
   is inside a session
 
-#### Scenario: dv is directed at the container tmux socket
+#### Scenario: rd is directed at the container tmux socket
 
-- **WHEN** `dv` shells out to `tmux`
-- **THEN** `DV_TMUX_SOCKET` is set to the bind-mounted socket path so tmux
+- **WHEN** `rd` shells out to `tmux`
+- **THEN** `RD_TMUX_SOCKET` is set to the bind-mounted socket path so tmux
   connects to the container server, not the host server
 
 ### Requirement: Async container-backed tests with Tokio runtime
@@ -128,20 +128,20 @@ Docker and testcontainers infrastructure independently of the tmux helper.
 
 ### Requirement: Help command integration tests
 
-The project SHALL include integration tests that verify `dv help`, `dv --help`,
-and `dv` (no arguments) produce expected output and exit successfully.
+The project SHALL include integration tests that verify `rd help`, `rd --help`,
+and `rd` (no arguments) produce expected output and exit successfully.
 
-#### Scenario: dv help exits zero
+#### Scenario: rd help exits zero
 
-- **WHEN** `dv help` is invoked via `TmuxEnv::dv()`
+- **WHEN** `rd help` is invoked via `TmuxEnv::rd()`
 - **THEN** the process exits with status 0
 
-#### Scenario: dv --help prints usage
+#### Scenario: rd --help prints usage
 
-- **WHEN** `dv --help` is invoked via `TmuxEnv::dv()`
+- **WHEN** `rd --help` is invoked via `TmuxEnv::rd()`
 - **THEN** stdout contains "usage" (case-insensitive)
 
-#### Scenario: dv with no args exits zero
+#### Scenario: rd with no args exits zero
 
-- **WHEN** `dv` is invoked with no arguments via `TmuxEnv::dv()`
+- **WHEN** `rd` is invoked with no arguments via `TmuxEnv::rd()`
 - **THEN** the process exits with status 0

@@ -1,6 +1,6 @@
 ## Why
 
-The Claude Code hook integration has three gaps that cause drovr to misreport
+The Claude Code hook integration has three gaps that cause radr to misreport
 agent state: resumed sessions appear as "unknown" instead of "idle", API errors
 leave state permanently stuck at "working", and when Claude calls
 `AskUserQuestion` or shows a plan approval dialog the agent appears "working"
@@ -17,7 +17,7 @@ rather than "blocked".
   for specific tools
 - Add `PreToolUse(AskUserQuestion|ExitPlanMode) → blocked` so interactive
   question and plan-approval dialogs correctly report a "blocked" state
-- Update `dv hooks install claude` to register all updated/new hook entries
+- Update `rd hooks install claude` to register all updated/new hook entries
 
 ## Capabilities
 
@@ -33,7 +33,7 @@ _(none — all changes are to existing capabilities)_
 
 ## Impact
 
-- `src/commands/hooks.rs`: Update `DROVR_CLAUDE_HOOKS` constant — change
+- `src/commands/hooks.rs`: Update `RADR_CLAUDE_HOOKS` constant — change
   `SessionStart` matcher, remove general `PreToolUse` entry, add `PostToolUse`
   entry, add `PreToolUse(AskUserQuestion)` entry, add `StopFailure` entry
 - `openspec/specs/claude-state-hooks/spec.md`: Delta requirements for the new

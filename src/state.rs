@@ -1,7 +1,7 @@
 //! Agent state tracking — shared types and file-based state store.
 //!
 //! State files are stored at:
-//!   `$XDG_DATA_HOME/drovr/agents/<pane-id>/state.json`
+//!   `$XDG_DATA_HOME/radr/agents/<pane-id>/state.json`
 //! where `XDG_DATA_HOME` defaults to `~/.local/share`.
 
 use std::fmt;
@@ -95,14 +95,14 @@ pub fn xdg_data_home() -> PathBuf {
 
 /// Return the directory for the given pane's state files under `base`.
 ///
-/// `<base>/drovr/agents/<pane-id>/`
+/// `<base>/radr/agents/<pane-id>/`
 pub fn agent_dir_in(base: &Path, pane_id: &str) -> PathBuf {
-    base.join("drovr").join("agents").join(pane_id)
+    base.join("radr").join("agents").join(pane_id)
 }
 
 /// Return the path of the state file for the given pane under `base`.
 ///
-/// `<base>/drovr/agents/<pane-id>/state.json`
+/// `<base>/radr/agents/<pane-id>/state.json`
 pub fn state_file_path_in(base: &Path, pane_id: &str) -> PathBuf {
     agent_dir_in(base, pane_id).join("state.json")
 }
@@ -183,10 +183,10 @@ pub fn delete_state_in(base: &Path, pane_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Glob all `state.json` files under `<base>/drovr/agents/` and return parsed
+/// Glob all `state.json` files under `<base>/radr/agents/` and return parsed
 /// [`AgentInfo`] values. Files that cannot be read or parsed are skipped.
 pub fn list_agent_infos_in(base: &Path) -> Vec<AgentInfo> {
-    let agents_dir = base.join("drovr").join("agents");
+    let agents_dir = base.join("radr").join("agents");
     let read_dir = match std::fs::read_dir(&agents_dir) {
         Ok(rd) => rd,
         Err(_) => return Vec::new(),
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn read_state_corrupt_file_returns_unknown() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("drovr").join("agents").join("%bad");
+        let dir = tmp.path().join("radr").join("agents").join("%bad");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("state.json"), b"not-json").unwrap();
         assert_eq!(read_state_from(tmp.path(), "%bad"), AgentState::Unknown);
@@ -311,7 +311,10 @@ mod tests {
             AgentState::Idle,
             AgentState::Unknown,
         ] {
-            assert!(AgentState::Blocked < other, "Blocked should be less than {other:?}");
+            assert!(
+                AgentState::Blocked < other,
+                "Blocked should be less than {other:?}"
+            );
         }
     }
 
@@ -323,7 +326,10 @@ mod tests {
             AgentState::Working,
             AgentState::Idle,
         ] {
-            assert!(AgentState::Unknown > other, "Unknown should be greater than {other:?}");
+            assert!(
+                AgentState::Unknown > other,
+                "Unknown should be greater than {other:?}"
+            );
         }
     }
 

@@ -1,33 +1,35 @@
 ## Why
 
-The `dv list` command currently outputs agent harness panes in an arbitrary
+The `rd list` command currently outputs agent harness panes in an arbitrary
 order, making it hard to quickly locate what matters — especially when many
 agents are running. Users need the ability to sort results by meaningful
 properties so they can find blocked, idle, or active agents at a glance.
 
 ## What Changes
 
-- Add a `--sort-by` flag (or short form `-s`) to `dv list` that accepts a sort
+- Add a `--sort-by` flag (or short form `-s`) to `rd list` that accepts a sort
   key: `state`, `agent`, `session`, `pane`, or `updated-at`.
-- Add a `--reverse` flag (short form `-r`) to reverse the sort order (boolean, absent = ascending).
+- Add a `--reverse` flag (short form `-r`) to reverse the sort order (boolean,
+  absent = ascending).
 - Define a canonical state ordering for `AgentState` so that `blocked` is always
   at one extreme of the sort (appears first in ascending order), enabling quick
   identification of agents that need attention.
-- Default sort is by `updated-at` descending (most recently active agents surface first out of the box).
+- Default sort is by `updated-at` descending (most recently active agents
+  surface first out of the box).
 
 ## Capabilities
 
 ### New Capabilities
 
-- `list-sorting`: Sorting support for `dv list` — `--sort-by` flag, `--reverse`
+- `list-sorting`: Sorting support for `rd list` — `--sort-by` flag, `--reverse`
   flag, and a canonical `AgentState` sort order where
   `blocked < idle < working < done < unknown`.
 
 ### Modified Capabilities
 
 - `list-sessions`: The `list` subcommand gains two new optional flags
-  (`--sort-by`, `--reverse`). Existing output format and reconciliation logic are
-  unchanged; only the order of printed rows is affected.
+  (`--sort-by`, `--reverse`). Existing output format and reconciliation logic
+  are unchanged; only the order of printed rows is affected.
 
 ## Impact
 

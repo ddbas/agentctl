@@ -1,25 +1,25 @@
-//! Integration tests for `dv hooks install`.
+//! Integration tests for `rd hooks install`.
 
 mod common;
 
 use std::fs;
 
-/// `dv hooks install <unknown-harness>` exits 2 (Clap usage error).
+/// `rd hooks install <unknown-harness>` exits 2 (Clap usage error).
 /// Note: `claude` is now a valid harness; this test uses unrecognised names.
 #[tokio::test]
 async fn hooks_install_unknown_harness_exits_two() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "not-a-real-harness"])
         .output()
-        .expect("failed to spawn dv hooks install");
+        .expect("failed to spawn rd hooks install");
 
     assert_eq!(
         output.status.code(),
         Some(2),
-        "`dv hooks install not-a-real-harness` should exit with Clap error code 2; got: {:?}",
+        "`rd hooks install not-a-real-harness` should exit with Clap error code 2; got: {:?}",
         output.status,
     );
 
@@ -30,22 +30,22 @@ async fn hooks_install_unknown_harness_exits_two() {
     );
 }
 
-/// `dv hooks install <unknown-harness>` always exits 2 (Clap usage error).
+/// `rd hooks install <unknown-harness>` always exits 2 (Clap usage error).
 #[tokio::test]
 async fn hooks_install_unknown_harness_names_exit_two() {
     let env = common::TmuxEnv::new().await;
 
     for harness in &["aider", "my-custom-harness"] {
         let output = env
-            .dv()
+            .rd()
             .args(["hooks", "install", harness])
             .output()
-            .unwrap_or_else(|_| panic!("spawn dv hooks install {harness}"));
+            .unwrap_or_else(|_| panic!("spawn rd hooks install {harness}"));
 
         assert_eq!(
             output.status.code(),
             Some(2),
-            "`dv hooks install {harness}` should exit 2; got: {:?}",
+            "`rd hooks install {harness}` should exit 2; got: {:?}",
             output.status,
         );
     }
@@ -53,8 +53,8 @@ async fn hooks_install_unknown_harness_names_exit_two() {
 
 // ── Pi integration tests (task 2.6 and 2.7) ───────────────────────────────────
 
-/// `dv hooks install pi` on a container with no `~/.pi/agent/extensions/`
-/// directory: directory and `drovr.ts` are created; file contains all four
+/// `rd hooks install pi` on a container with no `~/.pi/agent/extensions/`
+/// directory: directory and `radr.ts` are created; file contains all four
 /// event handlers.
 #[tokio::test]
 async fn hooks_install_pi_creates_extension_file() {
@@ -69,24 +69,24 @@ async fn hooks_install_pi_creates_extension_file() {
         .join(".pi")
         .join("agent")
         .join("extensions")
-        .join("drovr.ts");
+        .join("radr.ts");
 
     // Confirm extension does not exist before install.
     assert!(
         !ext_path.exists(),
-        "drovr.ts should not exist before install"
+        "radr.ts should not exist before install"
     );
 
     let output = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "pi"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn dv hooks install pi");
+        .expect("spawn rd hooks install pi");
 
     assert!(
         output.status.success(),
-        "`dv hooks install pi` should exit 0; got: {:?}\nstderr: {}",
+        "`rd hooks install pi` should exit 0; got: {:?}\nstderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr),
     );
@@ -98,10 +98,10 @@ async fn hooks_install_pi_creates_extension_file() {
     );
 
     // File must exist.
-    assert!(ext_path.exists(), "drovr.ts should be created");
+    assert!(ext_path.exists(), "radr.ts should be created");
 
     // File must contain all four handlers.
-    let content = fs::read_to_string(&ext_path).expect("read drovr.ts");
+    let content = fs::read_to_string(&ext_path).expect("read radr.ts");
     assert!(
         content.contains(r#"pi.on("session_start""#),
         "missing session_start handler"
@@ -127,7 +127,7 @@ async fn hooks_install_pi_creates_extension_file() {
     );
 }
 
-/// `dv hooks install pi` run twice: second run is a no-op; file is
+/// `rd hooks install pi` run twice: second run is a no-op; file is
 /// byte-for-byte identical to after the first run.
 #[tokio::test]
 async fn hooks_install_pi_idempotent() {
@@ -140,15 +140,15 @@ async fn hooks_install_pi_idempotent() {
         .join(".pi")
         .join("agent")
         .join("extensions")
-        .join("drovr.ts");
+        .join("radr.ts");
 
     // First install.
     let out1 = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "pi"])
         .env("HOME", &fake_home)
         .output()
-        .expect("first dv hooks install pi");
+        .expect("first rd hooks install pi");
     assert!(out1.status.success(), "first install should succeed");
 
     let content_after_first = fs::read_to_string(&ext_path).expect("read after first install");
@@ -159,11 +159,11 @@ async fn hooks_install_pi_idempotent() {
 
     // Second install.
     let out2 = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "pi"])
         .env("HOME", &fake_home)
         .output()
-        .expect("second dv hooks install pi");
+        .expect("second rd hooks install pi");
     assert!(out2.status.success(), "second install should succeed");
 
     let content_after_second = fs::read_to_string(&ext_path).expect("read after second install");
@@ -188,8 +188,8 @@ async fn hooks_install_pi_idempotent() {
 
 // ── Claude integration tests (task 2.6 and 2.7) ───────────────────────────────
 
-/// `dv hooks install claude` on a container with no `~/.claude/settings.json`:
-/// the file is created and contains all six drovr hook entries.
+/// `rd hooks install claude` on a container with no `~/.claude/settings.json`:
+/// the file is created and contains all six radr hook entries.
 #[tokio::test]
 async fn hooks_install_claude_creates_settings_file() {
     let env = common::TmuxEnv::new().await;
@@ -208,15 +208,15 @@ async fn hooks_install_claude_creates_settings_file() {
     );
 
     let output = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn dv hooks install claude");
+        .expect("spawn rd hooks install claude");
 
     assert!(
         output.status.success(),
-        "`dv hooks install claude` should exit 0; got: {:?}\nstderr: {}",
+        "`rd hooks install claude` should exit 0; got: {:?}\nstderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr),
     );
@@ -251,7 +251,7 @@ async fn hooks_install_claude_creates_settings_file() {
     );
 }
 
-/// `dv hooks install claude` run twice: second run is a no-op; file content
+/// `rd hooks install claude` run twice: second run is a no-op; file content
 /// is byte-for-byte identical to after the first run.
 #[tokio::test]
 async fn hooks_install_claude_idempotent() {
@@ -264,11 +264,11 @@ async fn hooks_install_claude_idempotent() {
 
     // First install.
     let out1 = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("first dv hooks install claude");
+        .expect("first rd hooks install claude");
     assert!(out1.status.success(), "first install should succeed");
 
     let content_after_first = fs::read_to_string(&settings_path).expect("read after first");
@@ -279,11 +279,11 @@ async fn hooks_install_claude_idempotent() {
 
     // Second install.
     let out2 = env
-        .dv()
+        .rd()
         .args(["hooks", "install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("second dv hooks install claude");
+        .expect("second rd hooks install claude");
     assert!(out2.status.success(), "second install should succeed");
 
     let content_after_second = fs::read_to_string(&settings_path).expect("read after second");
