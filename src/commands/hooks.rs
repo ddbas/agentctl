@@ -1,8 +1,16 @@
-//! `rd install` — install radr on agent harnesses.
+//! `rd install` / `rd uninstall` — install or remove radr on agent harnesses.
 //!
-//! Today this means installing hook integrations, but may include more in
-//! the future. Supported harnesses:
-//! - `pi`: writes a TypeScript extension to `~/.pi/agent/extensions/radr.ts`
+//! Today this means installing (or removing) hook integrations, but may
+//! include more in the future. Supported harnesses:
+//! - `pi`: writes (or deletes) a TypeScript extension at
+//!   `~/.pi/agent/extensions/radr.ts`.
+//! - `claude`: merges (or removes) radr-managed hook entries in
+//!   `~/.claude/settings.json`, leaving all other content untouched.
+//!
+//! `rd uninstall <harness>` is the structural inverse of `rd install
+//! <harness>` and shares the same `Harness` enum, so both dispatches
+//! (`run_install`, `run_uninstall`) must remain exhaustive matches with no
+//! wildcard arm.
 
 use crate::Harness;
 use std::collections::{HashMap, HashSet};
@@ -57,6 +65,14 @@ pub fn run_install(harness: Harness) -> Result<()> {
     match harness {
         Harness::Pi => install_pi(),
         Harness::Claude => install_claude(),
+    }
+}
+
+/// Entry point for `rd uninstall <harness>`.
+pub fn run_uninstall(harness: Harness) -> Result<()> {
+    match harness {
+        Harness::Pi => uninstall_pi(),
+        Harness::Claude => uninstall_claude(),
     }
 }
 
@@ -122,6 +138,42 @@ enum FileStatus {
     New,
     Unchanged,
     Updated,
+}
+
+/// Uninstall the radr pi extension from `~/.pi/agent/extensions/radr.ts`.
+fn uninstall_pi() -> Result<()> {
+    let path = default_pi_extension_path()?;
+    uninstall_pi_to(&path)
+}
+
+/// Uninstall the radr pi extension at the given path.
+///
+/// Deletes `dest` if it exists, regardless of its content (the file is
+/// documented as radr-managed regardless of drift). No-op if `dest` does not
+/// exist. Never removes the parent `extensions/` directory.
+///
+/// This is the testable core; production code calls `uninstall_pi()` which
+/// supplies the default path.
+pub fn uninstall_pi_to(dest: &Path) -> Result<()> {
+    let removed = dest.exists();
+    if removed {
+        fs::remove_file(dest).with_context(|| format!("failed to remove {}", dest.display()))?;
+    }
+
+    print_pi_uninstall_summary(dest, removed);
+
+    Ok(())
+}
+
+fn print_pi_uninstall_summary(dest: &Path, removed: bool) {
+    let path_display = tilde_collapse(dest);
+
+    println!("Uninstalled radr extension for pi:");
+    if removed {
+        println!("  - {path_display}");
+    } else {
+        println!("  = {path_display} (nothing to remove)");
+    }
 }
 
 fn print_pi_summary(dest: &Path, status: FileStatus) {
@@ -499,6 +551,137 @@ pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String
             "  {prefix} {event_display:<35} → {}{}",
             hook.command, async_label
         ));
+    }
+    lines.join("\n")
+}
+
+/// Uninstall radr hooks from `~/.claude/settings.json`.
+fn uninstall_claude() -> Result<()> {
+    let path = default_claude_settings_path()?;
+    uninstall_claude_to(&path)
+}
+
+/// Uninstall radr hooks from the given Claude settings path.
+///
+/// Removes any hook entry whose single command matches `is_radr_command`
+/// (covering both current and pre-rename forms), regardless of whether the
+/// exact `(event, command)` pair is in the current `RADR_CLAUDE_HOOKS`
+/// table. Multi-command entries are left untouched. Event keys whose array
+/// becomes empty are pruned; the `hooks` key is pruned if it becomes an
+/// empty object. The settings file itself is never deleted, and the file is
+/// not written at all when nothing changed (preserves mtime).
+///
+/// This is the testable core; production code calls `uninstall_claude()`
+/// which supplies the default path.
+pub fn uninstall_claude_to(dest: &Path) -> Result<()> {
+    // 1. Nothing to do if the settings file does not exist.
+    if !dest.exists() {
+        println!("{}", format_claude_uninstall_summary(&[]));
+        return Ok(());
+    }
+
+    // 2. Read and parse.
+    let content =
+        fs::read_to_string(dest).with_context(|| format!("failed to read {}", dest.display()))?;
+    let mut root: serde_json::Value = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse JSON from {}", dest.display()))?;
+
+    let mut removed: Vec<(String, String)> = Vec::new();
+
+    {
+        let root_obj = root
+            .as_object_mut()
+            .context("settings.json root is not a JSON object")?;
+
+        let hooks_present = root_obj.contains_key("hooks");
+        if hooks_present {
+            let hooks_map = root_obj
+                .get_mut("hooks")
+                .and_then(|v| v.as_object_mut())
+                .context("hooks field in settings.json is not a JSON object")?;
+
+            let event_names: Vec<String> = hooks_map.keys().cloned().collect();
+            let mut empty_events: Vec<String> = Vec::new();
+
+            for event_name in &event_names {
+                let event_arr = match hooks_map
+                    .get_mut(event_name.as_str())
+                    .and_then(|v| v.as_array_mut())
+                {
+                    Some(arr) => arr,
+                    None => continue,
+                };
+
+                let mut to_remove: Vec<usize> = Vec::new();
+                for (i, entry) in event_arr.iter().enumerate() {
+                    if let Some(cmd) = get_single_radr_command(entry) {
+                        to_remove.push(i);
+                        removed.push((event_name.clone(), cmd.to_owned()));
+                    }
+                }
+
+                for i in to_remove.into_iter().rev() {
+                    event_arr.remove(i);
+                }
+
+                if event_arr.is_empty() {
+                    empty_events.push(event_name.clone());
+                }
+            }
+
+            for event_name in &empty_events {
+                hooks_map.remove(event_name.as_str());
+            }
+
+            if hooks_map.is_empty() {
+                root_obj.remove("hooks");
+            }
+        }
+    }
+
+    // 3. Skip the write entirely if nothing was removed (preserves mtime).
+    if !removed.is_empty() {
+        let json_str =
+            serde_json::to_string_pretty(&root).context("failed to serialize settings JSON")?;
+
+        let tmp_path = {
+            let mut fname = dest
+                .file_name()
+                .context("settings path has no file name")?
+                .to_os_string();
+            fname.push(".tmp");
+            dest.with_file_name(fname)
+        };
+
+        fs::write(&tmp_path, &json_str)
+            .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, dest).with_context(|| {
+            format!(
+                "failed to rename {} to {}",
+                tmp_path.display(),
+                dest.display()
+            )
+        })?;
+    }
+
+    // 4. Print summary.
+    println!("{}", format_claude_uninstall_summary(&removed));
+
+    Ok(())
+}
+
+/// Build the human-readable uninstall summary string.
+///
+/// - `-` entry was removed
+/// - `=` nothing needed removing
+pub fn format_claude_uninstall_summary(removed: &[(String, String)]) -> String {
+    if removed.is_empty() {
+        return "Uninstalled radr hooks for claude:\n  = nothing to remove".to_string();
+    }
+
+    let mut lines = vec!["Uninstalled radr hooks for claude:".to_string()];
+    for (event, cmd) in removed {
+        lines.push(format!("  - {event:<35} → {cmd}"));
     }
     lines.join("\n")
 }
@@ -1207,5 +1390,337 @@ mod tests {
             Some(&serde_json::Value::Bool(true)),
             "StopFailure should have async: true"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pi uninstall unit tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── task 2.4: uninstall removes an existing file ─────────────────────────
+
+    #[test]
+    fn uninstall_pi_removes_existing_file() {
+        let tmp = TempDir::new().unwrap();
+        let dest = ext_path(&tmp);
+
+        install_pi_to(&dest).expect("install first");
+        assert!(dest.exists());
+
+        uninstall_pi_to(&dest).expect("uninstall should succeed");
+
+        assert!(!dest.exists(), "file should be removed after uninstall");
+    }
+
+    // ── task 2.5: uninstall is a no-op when the file is absent ──────────────
+
+    #[test]
+    fn uninstall_pi_noop_when_absent() {
+        let tmp = TempDir::new().unwrap();
+        let dest = ext_path(&tmp);
+
+        assert!(!dest.exists());
+
+        uninstall_pi_to(&dest).expect("uninstall should succeed even when absent");
+
+        assert!(!dest.exists());
+    }
+
+    // ── task 2.6: uninstall removes hand-modified content ────────────────────
+
+    #[test]
+    fn uninstall_pi_removes_file_with_stale_content() {
+        let tmp = TempDir::new().unwrap();
+        let dest = ext_path(&tmp);
+
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, "// hand modified, does not match generated content").unwrap();
+
+        uninstall_pi_to(&dest).expect("uninstall should succeed");
+
+        assert!(
+            !dest.exists(),
+            "file should be removed regardless of content"
+        );
+    }
+
+    // ── task 2.7: uninstall leaves the extensions directory in place ─────────
+
+    #[test]
+    fn uninstall_pi_leaves_extensions_directory_in_place() {
+        let tmp = TempDir::new().unwrap();
+        let dest = ext_path(&tmp);
+
+        install_pi_to(&dest).expect("install first");
+        assert!(dest.parent().unwrap().exists());
+
+        uninstall_pi_to(&dest).expect("uninstall should succeed");
+
+        assert!(!dest.exists(), "file should be removed");
+        assert!(
+            dest.parent().unwrap().exists(),
+            "extensions directory should remain in place"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Claude uninstall unit tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── task 3.7: uninstall removes all eight radr-managed entries ──────────
+
+    #[test]
+    fn uninstall_claude_removes_all_eight_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        install_claude_to(&dest).expect("install first");
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // hooks key should be gone entirely (no non-radr content ever existed).
+        assert!(
+            parsed.get("hooks").is_none(),
+            "hooks key should be pruned once empty"
+        );
+    }
+
+    // ── task 3.8: uninstall preserves non-radr hooks under the same event ───
+
+    #[test]
+    fn uninstall_claude_preserves_non_radr_hook_under_same_event() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with a custom non-radr hook under UserPromptSubmit.
+        let existing = serde_json::json!({
+            "hooks": {
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [
+                            { "type": "command", "command": "my-custom-tool" }
+                        ]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        let user_prompt = parsed["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .expect("UserPromptSubmit should remain since custom hook is preserved");
+        assert_eq!(
+            user_prompt.len(),
+            1,
+            "only the custom hook should remain under UserPromptSubmit"
+        );
+        assert_eq!(
+            user_prompt[0]["hooks"][0]["command"].as_str(),
+            Some("my-custom-tool")
+        );
+    }
+
+    // ── task 3.9: uninstall recognizes pre-rename legacy entries ─────────────
+
+    #[test]
+    fn uninstall_claude_removes_pre_rename_legacy_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        let existing = serde_json::json!({
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume|clear",
+                        "hooks": [{ "type": "command", "command": "rd set-state idle --harness claude" }]
+                    }
+                ],
+                "SessionEnd": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd clear-state" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert!(
+            parsed.get("hooks").is_none(),
+            "hooks key should be pruned once all legacy entries are removed"
+        );
+    }
+
+    // ── task 3.10: uninstall prunes empty event keys and the hooks key ──────
+
+    #[test]
+    fn uninstall_claude_prunes_empty_event_and_hooks_key() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        install_claude_to(&dest).expect("install first");
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert!(
+            parsed.get("hooks").is_none(),
+            "hooks key should be entirely removed once empty"
+        );
+        // Settings file itself must still exist.
+        assert!(dest.exists(), "settings.json should not be deleted");
+    }
+
+    // ── task 3.11: uninstall is a no-op when no radr entries are present ────
+
+    #[test]
+    fn uninstall_claude_noop_when_no_radr_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        let existing = serde_json::json!({
+            "hooks": {
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [
+                            { "type": "command", "command": "my-custom-tool" }
+                        ]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        let mtime_before = fs::metadata(&dest).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let mtime_after = fs::metadata(&dest).unwrap().modified().unwrap();
+        assert_eq!(
+            mtime_before, mtime_after,
+            "file should not be rewritten when there is nothing to remove"
+        );
+    }
+
+    // ── task 3.12: uninstall is a no-op when settings.json does not exist ───
+
+    #[test]
+    fn uninstall_claude_noop_when_file_absent() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        assert!(!dest.exists());
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed even when absent");
+
+        assert!(
+            !dest.exists(),
+            "uninstall should not create the settings file"
+        );
+    }
+
+    // ── task 3.13: running uninstall twice produces no further change ───────
+
+    #[test]
+    fn uninstall_claude_idempotent_second_run_noop() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        install_claude_to(&dest).expect("install first");
+        uninstall_claude_to(&dest).expect("first uninstall");
+
+        let mtime_before = fs::metadata(&dest).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        uninstall_claude_to(&dest).expect("second uninstall");
+
+        let mtime_after = fs::metadata(&dest).unwrap().modified().unwrap();
+        assert_eq!(
+            mtime_before, mtime_after,
+            "second uninstall run should make no further changes"
+        );
+    }
+
+    // ── task 3.14: uninstall does not touch multi-command hook entries ──────
+
+    #[test]
+    fn uninstall_claude_leaves_mixed_command_entry_untouched() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // A single entry whose hooks array mixes a radr command with a
+        // non-radr command — cannot be safely attributed as radr-owned.
+        let existing = serde_json::json!({
+            "hooks": {
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [
+                            { "type": "command", "command": "rd state set working --harness claude" },
+                            { "type": "command", "command": "my-custom-tool" }
+                        ]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        let user_prompt = parsed["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .expect("UserPromptSubmit entry should remain untouched");
+        assert_eq!(
+            user_prompt.len(),
+            1,
+            "mixed-command entry should not be split or removed"
+        );
+        assert_eq!(
+            user_prompt[0]["hooks"].as_array().unwrap().len(),
+            2,
+            "mixed-command entry's hooks array should be untouched"
+        );
+    }
+
+    // ── format_claude_uninstall_summary output ───────────────────────────────
+
+    #[test]
+    fn format_claude_uninstall_summary_nothing_to_remove() {
+        let summary = format_claude_uninstall_summary(&[]);
+        assert!(summary.contains("= nothing to remove"));
+    }
+
+    #[test]
+    fn format_claude_uninstall_summary_lists_removed_entries() {
+        let removed = vec![(
+            "SessionStart".to_string(),
+            "rd state set idle --harness claude".to_string(),
+        )];
+        let summary = format_claude_uninstall_summary(&removed);
+        let lines: Vec<&str> = summary.lines().collect();
+        assert!(lines[1].trim_start().starts_with('-'));
+        assert!(lines[1].contains("SessionStart"));
+        assert!(lines[1].contains("rd state set idle --harness claude"));
     }
 }
