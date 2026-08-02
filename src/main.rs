@@ -70,6 +70,23 @@ enum Commands {
         harness: Harness,
     },
 
+    /// Uninstall radr from a harness.
+    ///
+    /// Removes the integration files written by `rd install <harness>`,
+    /// leaving all other user configuration untouched. Idempotent: running
+    /// this on a harness that was never installed (or already uninstalled)
+    /// is a no-op that exits 0.
+    ///
+    /// - `pi`: deletes `~/.pi/agent/extensions/radr.ts` if present.
+    /// - `claude`: removes only the radr-managed hook entries from
+    ///   `~/.claude/settings.json`, pruning empty event arrays and the
+    ///   `hooks` key, but never deleting the settings file itself.
+    Uninstall {
+        /// Harness to uninstall radr from.
+        #[arg(value_name = "HARNESS")]
+        harness: Harness,
+    },
+
     /// Manage agent state.
     State {
         #[command(subcommand)]
@@ -111,7 +128,12 @@ enum StateSubcommand {
     },
 }
 
-/// Harnesses supported by `rd install`.
+/// Harnesses supported by `rd install` and `rd uninstall`.
+///
+/// Shared by both subcommands so they can never drift out of sync on which
+/// harnesses are supported: `match harness { ... }` in both `run_install`
+/// and `run_uninstall` must remain exhaustive (no wildcard `_` arm), so
+/// adding a new variant here forces both call sites to be updated.
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Harness {
     /// Pi coding agent — writes `~/.pi/agent/extensions/radr.ts`.
@@ -143,6 +165,9 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Commands::Install { harness }) => {
             commands::hooks::run_install(harness)?;
+        }
+        Some(Commands::Uninstall { harness }) => {
+            commands::hooks::run_uninstall(harness)?;
         }
         Some(Commands::State {
             subcommand:
