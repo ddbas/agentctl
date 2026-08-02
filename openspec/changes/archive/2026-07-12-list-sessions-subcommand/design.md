@@ -1,7 +1,7 @@
 ## Context
 
-`dv` is the drovr developer CLI built with Rust and `clap`. Currently it has
-only a `help` subcommand. Developers frequently run AI agent harness processes
+`rd` is the radr developer CLI built with Rust and `clap`. Currently it has only
+a `help` subcommand. Developers frequently run AI agent harness processes
 (`claude`, `pi`) inside tmux panes — in any session, with any session name — and
 need a fast way to enumerate what is live. The tmux CLI (`tmux list-panes -a`)
 is the canonical source of truth: it exposes `#{pane_current_command}`, the
@@ -11,7 +11,7 @@ basename of the foreground process in every pane across every session.
 
 **Goals:**
 
-- Add a `dv list` subcommand that prints one line per pane whose
+- Add a `rd list` subcommand that prints one line per pane whose
   `pane_current_command` exactly matches a known agent harness name (`claude` or
   `pi`).
 - Each output line shows three columns: agent name, session name, and
@@ -62,7 +62,7 @@ This avoids any dependency on session naming conventions.
 but argv[0] is preserved as `pi` via the shebang mechanism. tmux's
 `pane_current_command` reflects the actual binary name (`node`), not argv[0].
 Running `ps -A -o pid=,ppid=,args=` once and checking `args` (argv[0]) of direct
-children of the pane's shell PID lets `dv` correctly identify those panes
+children of the pane's shell PID lets `rd` correctly identify those panes
 without false-positives (an unrelated `node` process running something other
 than `pi` would not match).
 

@@ -1,6 +1,6 @@
 ## Why
 
-The `dv` CLI manages tmux sessions. Without container isolation, any test that
+The `rd` CLI manages tmux sessions. Without container isolation, any test that
 invokes `tmux` will interact with the developer's live sessions, be affected by
 `TMUX`/`TMUX_PANE` env vars set when running inside an existing session, and
 leave orphaned sessions on the host. We need a reproducible, host-safe test
@@ -14,12 +14,12 @@ meaningful CLI coverage.
 - Add a `tests/common/mod.rs` shared helper module that exports a `TmuxEnv`
   struct: it starts an `alpine`-based Docker container with tmux installed,
   starts an isolated tmux server inside that container on a bind-mounted socket
-  path, and exposes a `dv` binary runner that points at that socket.
+  path, and exposes a `rd` binary runner that points at that socket.
 - Add an example E2E test (`tests/e2e_example.rs`) that starts a `hello-world`
   Docker container via testcontainers as a canary for the async runner
   infrastructure.
 - Add a first real integration test (`tests/help_command.rs`) exercising
-  `dv help`, `dv --help`, and `dv` (no args) inside an isolated `TmuxEnv`.
+  `rd help`, `rd --help`, and `rd` (no args) inside an isolated `TmuxEnv`.
 - Update `Cargo.toml` dev-dependencies to include `testcontainers`, `tokio`
   (with `macros`/`rt-multi-thread`/`time` features), and `tempfile`.
 

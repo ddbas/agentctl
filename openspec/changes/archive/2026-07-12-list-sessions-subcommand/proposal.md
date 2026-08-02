@@ -1,19 +1,19 @@
 ## Why
 
 Developers running multiple AI agent harness sessions (e.g., `claude`, `pi`)
-across tmux need a quick way to see what is currently active. A `dv list`
+across tmux need a quick way to see what is currently active. A `rd list`
 subcommand surfaces all relevant sessions from a tmux server at a glance, giving
 operators instant visibility without manually querying tmux.
 
 ## What Changes
 
-- Add a `list` subcommand to `dv` that queries every pane across all tmux
+- Add a `list` subcommand to `rd` that queries every pane across all tmux
   sessions via `tmux list-panes -a`.
 - Identify agent harness panes by a two-step process:
   1. `#{pane_current_command}` is checked first — a value of `claude` is a
      direct match.
   2. Because `pi` is a Node.js application, tmux reports its foreground process
-     as `node`. For any pane where `pane_current_command == "node"`, `dv` walks
+     as `node`. For any pane where `pane_current_command == "node"`, `rd` walks
      the child processes of `#{pane_pid}` (the pane's shell) using
      `ps -A -o pid=,ppid=,args=` and checks whether the argv\[0\] basename of
      any direct child equals `pi`. If so, the pane is reported as a `pi` pane.

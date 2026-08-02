@@ -44,14 +44,14 @@
 - [x] 4.4 Unit test columnar formatting: all three columns are left-aligned and
       padded to the correct widths across a mixed-length dataset
 - [x] 4.5 Integration/E2E test using `testcontainers` + `alpine/git` container
-      verifying `dv list` exits 0 and produces no output when tmux is absent
+      verifying `rd list` exits 0 and produces no output when tmux is absent
       (binary not on PATH edge case handled gracefully)
 
 ## 5. Validation
 
 - [x] 5.1 Run `mise run build` and confirm zero compile errors
 - [x] 5.2 Run `mise run test` and confirm all tests pass
-- [x] 5.3 Manual smoke-test: `dv list` against a live tmux server with at least
+- [x] 5.3 Manual smoke-test: `rd list` against a live tmux server with at least
       one `pi` or `claude` pane running
 
 ## 6. `pi`-via-`node` Detection

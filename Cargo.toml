@@ -1,10 +1,10 @@
 [package]
-name = "drovr"
+name = "radr"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "dv"
+name = "rd"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,8 +1,8 @@
 ## Context
 
-Drovr tracks Claude Code session state via Claude's hook system. The current
+Radr tracks Claude Code session state via Claude's hook system. The current
 implementation registers six hooks in `~/.claude/settings.json` that call
-`dv set-state` / `dv clear-state` at key lifecycle events. Three gaps were
+`rd set-state` / `rd clear-state` at key lifecycle events. Three gaps were
 identified through empirical testing:
 
 1. **`SessionStart` matcher is `"startup"` only** — resumed sessions fire
@@ -17,7 +17,7 @@ identified through empirical testing:
    specific `PreToolUse(AskUserQuestion) → blocked` hook alongside the general
    one (all matching hooks fire in parallel).
 
-The fix spans `src/commands/hooks.rs` (the `DROVR_CLAUDE_HOOKS` constant and
+The fix spans `src/commands/hooks.rs` (the `RADR_CLAUDE_HOOKS` constant and
 associated tests) and the `claude-state-hooks` spec.
 
 ## Goals / Non-Goals
@@ -28,7 +28,7 @@ associated tests) and the `claude-state-hooks` spec.
 - API-error stops correctly report "done"
 - Interactive tool dialogs (`AskUserQuestion`, `ExitPlanMode`) report "blocked"
 - No race conditions in hook execution
-- `dv hooks install claude` remains idempotent
+- `rd hooks install claude` remains idempotent
 
 **Non-Goals:**
 
@@ -73,7 +73,7 @@ PostToolUse(*) → working                 ← fires after AskUserQuestion compl
 non-deterministic and fragile across OS schedulers.
 
 **Semantics note:** `PostToolUse` fires only on tool success.
-`PostToolUseFailure` is separate. For drovr's purposes "working" after a failed
+`PostToolUseFailure` is separate. For radr's purposes "working" after a failed
 tool is also correct (Claude processes the failure and continues), so no
 `PostToolUseFailure` hook is added.
 
@@ -91,14 +91,14 @@ The final registered hooks are:
 
 | #   | Event              | Matcher                         | Command                | Async |
 | --- | ------------------ | ------------------------------- | ---------------------- | ----- |
-| 1   | `SessionStart`     | `startup\|resume\|clear`        | `dv set-state idle`    | no    |
-| 2   | `UserPromptSubmit` | —                               | `dv set-state working` | yes   |
-| 3   | `PostToolUse`      | —                               | `dv set-state working` | yes   |
-| 4   | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `dv set-state blocked` | yes   |
-| 5   | `Stop`             | —                               | `dv set-state done`    | yes   |
-| 6   | `StopFailure`      | —                               | `dv set-state done`    | yes   |
-| 7   | `Notification`     | `permission_prompt`             | `dv set-state blocked` | yes   |
-| 8   | `SessionEnd`       | —                               | `dv clear-state`       | no    |
+| 1   | `SessionStart`     | `startup\|resume\|clear`        | `rd set-state idle`    | no    |
+| 2   | `UserPromptSubmit` | —                               | `rd set-state working` | yes   |
+| 3   | `PostToolUse`      | —                               | `rd set-state working` | yes   |
+| 4   | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `rd set-state blocked` | yes   |
+| 5   | `Stop`             | —                               | `rd set-state done`    | yes   |
+| 6   | `StopFailure`      | —                               | `rd set-state done`    | yes   |
+| 7   | `Notification`     | `permission_prompt`             | `rd set-state blocked` | yes   |
+| 8   | `SessionEnd`       | —                               | `rd clear-state`       | no    |
 
 Hook 3 (`PreToolUse` → working) is removed and replaced by hook 3 above.
 
@@ -108,7 +108,7 @@ Hook 3 (`PreToolUse` → working) is removed and replaced by hook 3 above.
   "working" is never refreshed. `UserPromptSubmit` already set it at turn start,
   so state is correct; this is not a regression.
 - **Widening `SessionStart` matcher** → existing installs have
-  `matcher: "startup"`. `dv hooks install claude` is idempotent by command
+  `matcher: "startup"`. `rd hooks install claude` is idempotent by command
   string — the old `startup`-matcher entry and the new
   `startup|resume|clear`-matcher entry have different structures, so both would
   coexist after re-install. The installer MUST detect and replace the old entry,
@@ -123,10 +123,10 @@ Hook 3 (`PreToolUse` → working) is removed and replaced by hook 3 above.
 
 ## Migration Plan
 
-Users who already ran `dv hooks install claude` will have the old hook set.
-After updating `dv`:
+Users who already ran `rd hooks install claude` will have the old hook set.
+After updating `rd`:
 
-1. Run `dv hooks install claude` again — new hooks (PostToolUse, StopFailure,
+1. Run `rd hooks install claude` again — new hooks (PostToolUse, StopFailure,
    AskUserQuestion-scoped PreToolUse) are added.
 2. The old `PreToolUse(*)` → working entry remains (no removal logic). It is
    harmless alongside the new `PostToolUse(*)` → working entry; the duplicate

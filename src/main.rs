@@ -6,9 +6,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "dv",
-    about = "🐂 dv — tmux based agent multiplexer",
-    long_about = "🐂 dv — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
+    name = "rd",
+    about = "📡 rd — tmux based agent multiplexer",
+    long_about = "📡 rd — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
     version,
     propagate_version = true,
     // Disable built-in `help` subcommand so we can define our own.
@@ -40,7 +40,7 @@ enum Commands {
     List {
         /// Target a specific tmux server socket file.
         /// Forwarded as `tmux -S <path>`.  Falls back to the
-        /// `DV_TMUX_SOCKET` environment variable when not set.
+        /// `RD_TMUX_SOCKET` environment variable when not set.
         #[arg(short, long, value_name = "PATH")]
         server: Option<String>,
 
@@ -104,7 +104,7 @@ enum HooksSubcommand {
     /// Install hooks for a harness.
     ///
     /// Writes the necessary hook files for the chosen harness so that
-    /// `dv list` shows real-time agent state without polling.
+    /// `rd list` shows real-time agent state without polling.
     Install {
         /// Harness to install hooks for.
         #[arg(value_name = "HARNESS")]
@@ -112,10 +112,10 @@ enum HooksSubcommand {
     },
 }
 
-/// Harnesses supported by `dv hooks install`.
+/// Harnesses supported by `rd hooks install`.
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Harness {
-    /// Pi coding agent — writes `~/.pi/agent/extensions/drovr.ts`.
+    /// Pi coding agent — writes `~/.pi/agent/extensions/radr.ts`.
     Pi,
     /// Claude Code — patches `~/.claude/settings.json`.
     Claude,
@@ -135,7 +135,11 @@ fn run() -> anyhow::Result<()> {
         None | Some(Commands::Help) => {
             Cli::command().print_long_help()?;
         }
-        Some(Commands::List { server, sort_by, reverse }) => {
+        Some(Commands::List {
+            server,
+            sort_by,
+            reverse,
+        }) => {
             commands::list::run(server, sort_by, reverse)?;
         }
         Some(Commands::SetState {
