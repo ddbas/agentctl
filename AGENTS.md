@@ -8,12 +8,12 @@ If you are running inside pi, install the radr lifecycle hooks so your agent
 state is tracked in real time:
 
 ```bash
-rd hooks install pi
+rd install pi
 ```
 
 This writes `~/.pi/agent/extensions/radr.ts`, a TypeScript extension that
 subscribes to pi lifecycle events (`session_start`, `before_agent_start`,
-`agent_settled`, `session_shutdown`) and calls `rd set-state` / `rd clear-state`
+`agent_settled`, `session_shutdown`) and calls `rd state set` / `rd state clear`
 automatically. The command is idempotent — re-running it is safe.
 
 ## Required One-Time Setup for Claude Agents
@@ -22,11 +22,11 @@ If you are running inside Claude Code, install the radr lifecycle hooks so your
 agent state is tracked in real time:
 
 ```bash
-rd hooks install claude
+rd install claude
 ```
 
 This patches `~/.claude/settings.json` to register six hook entries that call
-`rd set-state` / `rd clear-state` at key Claude lifecycle events
+`rd state set` / `rd state clear` at key Claude lifecycle events
 (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`,
 `SessionEnd`). The command is idempotent — re-running it is safe.
 

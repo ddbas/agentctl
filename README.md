@@ -13,9 +13,9 @@ cargo install --path .
 
 ```bash
 rd list          # list all agent panes with their current state
-rd set-state <state>   # write agent state from a hook
-rd clear-state         # remove the state file for the current pane
-rd hooks install <harness>   # install harness hooks (pi, claude)
+rd state set <state>   # write agent state from a hook
+rd state clear         # remove the state file for the current pane
+rd install <harness>   # install harness hooks (pi, claude)
 ```
 
 ## Commands
@@ -36,14 +36,14 @@ state file exists for that pane.
 As a side effect, `rd list` validates persisted state files and deletes stale
 ones (see "Agent state tracking" below).
 
-### `rd set-state <state>`
+### `rd state set <state>`
 
 Write the current agent state to a file. Intended to be called from agent
 harness hooks. Accepted values: `idle`, `working`, `done`, `blocked`.
 
 ```bash
-rd set-state working --harness claude
-rd set-state idle    --harness pi --pane %12
+rd state set working --harness claude
+rd state set idle    --harness pi --pane %12
 ```
 
 Flags:
@@ -55,19 +55,19 @@ Flags:
 Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not supplied —
 safe to call unconditionally from hooks that may run outside tmux.
 
-### `rd clear-state`
+### `rd state clear`
 
 Delete the state file for the current pane (`$TMUX_PANE`). Typically called from
 a session-end hook.
 
 ```bash
-rd clear-state           # uses $TMUX_PANE
-rd clear-state --pane %12
+rd state clear           # uses $TMUX_PANE
+rd state clear --pane %12
 ```
 
 Exits 0 silently when `$TMUX_PANE` is not set, or when no state file exists.
 
-### `rd hooks install <harness>`
+### `rd install <harness>`
 
 Installs hooks for the specified agent harness.
 
@@ -76,32 +76,32 @@ Supported harnesses: `claude`, `pi`.
 #### `claude`
 
 Patches `~/.claude/settings.json` to register six hook entries that call
-`rd set-state` and `rd clear-state` at key Claude Code lifecycle events. The
+`rd state set` and `rd state clear` at key Claude Code lifecycle events. The
 command is idempotent: re-running when all entries are already present reports
 `=` (no change) and does not rewrite the file.
 
 ```bash
-rd hooks install claude
+rd install claude
 ```
 
 Example output (first install):
 
 ```
 Installed radr hooks for claude:
-  + SessionStart (startup)              → rd set-state idle --harness claude
-  + UserPromptSubmit                    → rd set-state working --harness claude [async]
-  + PreToolUse                          → rd set-state working --harness claude [async]
-  + Stop                                → rd set-state done --harness claude [async]
-  + Notification (permission_prompt)    → rd set-state blocked --harness claude [async]
-  + SessionEnd                          → rd clear-state
+  + SessionStart (startup)              → rd state set idle --harness claude
+  + UserPromptSubmit                    → rd state set working --harness claude [async]
+  + PreToolUse                          → rd state set working --harness claude [async]
+  + Stop                                → rd state set done --harness claude [async]
+  + Notification (permission_prompt)    → rd state set blocked --harness claude [async]
+  + SessionEnd                          → rd state clear
 ```
 
 On a subsequent run (all entries already present):
 
 ```
 Installed radr hooks for claude:
-  = SessionStart (startup)              → rd set-state idle --harness claude
-  = UserPromptSubmit                    → rd set-state working --harness claude [async]
+  = SessionStart (startup)              → rd state set idle --harness claude
+  = UserPromptSubmit                    → rd state set working --harness claude [async]
   ...
 ```
 
@@ -109,12 +109,12 @@ Installed radr hooks for claude:
 
 | Claude hook event  | Matcher             | Command                                 | Async |
 | ------------------ | ------------------- | --------------------------------------- | ----- |
-| `SessionStart`     | `startup`           | `rd set-state idle --harness claude`    | no    |
-| `UserPromptSubmit` | _(none)_            | `rd set-state working --harness claude` | yes   |
-| `PreToolUse`       | `*`                 | `rd set-state working --harness claude` | yes   |
-| `Stop`             | _(none)_            | `rd set-state done --harness claude`    | yes   |
-| `Notification`     | `permission_prompt` | `rd set-state blocked --harness claude` | yes   |
-| `SessionEnd`       | _(none)_            | `rd clear-state`                        | no    |
+| `SessionStart`     | `startup`           | `rd state set idle --harness claude`    | no    |
+| `UserPromptSubmit` | _(none)_            | `rd state set working --harness claude` | yes   |
+| `PreToolUse`       | `*`                 | `rd state set working --harness claude` | yes   |
+| `Stop`             | _(none)_            | `rd state set done --harness claude`    | yes   |
+| `Notification`     | `permission_prompt` | `rd state set blocked --harness claude` | yes   |
+| `SessionEnd`       | _(none)_            | `rd state clear`                        | no    |
 
 `SessionStart` and `SessionEnd` run synchronously so the state file is
 established before any async hook fires and is cleaned up before the session
@@ -123,12 +123,12 @@ exits. All other hooks use `async: true` to avoid blocking Claude's operation.
 #### `pi`
 
 Writes a TypeScript extension to `~/.pi/agent/extensions/radr.ts` that
-subscribes to pi lifecycle events and calls `rd set-state` / `rd clear-state`.
+subscribes to pi lifecycle events and calls `rd state set` / `rd state clear`.
 The command is idempotent: re-running when the file is already up to date
 reports no change.
 
 ```bash
-rd hooks install pi
+rd install pi
 ```
 
 Example output (first install):
@@ -136,10 +136,10 @@ Example output (first install):
 ```
 Installed radr extension for pi:
   + ~/.pi/agent/extensions/radr.ts
-    session_start        → rd set-state idle --harness pi
-    before_agent_start   → rd set-state working --harness pi
-    agent_settled        → rd set-state done --harness pi
-    session_shutdown     → rd clear-state
+    session_start        → rd state set idle --harness pi
+    before_agent_start   → rd state set working --harness pi
+    agent_settled        → rd state set done --harness pi
+    session_shutdown     → rd state clear
 ```
 
 On a subsequent run (file already up to date):
@@ -156,10 +156,10 @@ overwritten.
 
 | Pi event             | Command                             |
 | -------------------- | ----------------------------------- |
-| `session_start`      | `rd set-state idle --harness pi`    |
-| `before_agent_start` | `rd set-state working --harness pi` |
-| `agent_settled`      | `rd set-state done --harness pi`    |
-| `session_shutdown`   | `rd clear-state`                    |
+| `session_start`      | `rd state set idle --harness pi`    |
+| `before_agent_start` | `rd state set working --harness pi` |
+| `agent_settled`      | `rd state set done --harness pi`    |
+| `session_shutdown`   | `rd state clear`                    |
 
 Note: the `blocked` state is not mapped — pi does not expose a native
 permission-prompt lifecycle event.
@@ -219,15 +219,15 @@ deleted.
 
 ### Integrating from a harness hook
 
-Call `rd set-state` from your harness lifecycle hooks. Example (shell):
+Call `rd state set` from your harness lifecycle hooks. Example (shell):
 
 ```bash
 # On task start
-rd set-state working --harness myharness
+rd state set working --harness myharness
 
 # On task complete
-rd set-state idle --harness myharness
+rd state set idle --harness myharness
 
 # On session end
-rd clear-state
+rd state clear
 ```

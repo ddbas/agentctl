@@ -3,20 +3,19 @@
 ## Purpose
 
 Specifies how radr integrates with the pi coding agent harness via a TypeScript
-extension (`rd hooks install pi`) that tracks agent state in real time by
-subscribing to pi lifecycle events and calling `rd set-state` /
-`rd clear-state`.
+extension (`rd install pi`) that tracks agent state in real time by subscribing
+to pi lifecycle events and calling `rd state set` / `rd state clear`.
 
 ---
 
 ## Requirements
 
-### Requirement: session_start event calls rd set-state idle
+### Requirement: session_start event calls rd state set idle
 
-The pi extension SHALL invoke `rd set-state idle --harness pi` when the
+The pi extension SHALL invoke `rd state set idle --harness pi` when the
 `session_start` event fires, so that the agent's state file is written to
 `$XDG_DATA_HOME/radr/agents/$TMUX_PANE/state.json` with `"state": "idle"`.
-`rd set-state` exits 0 silently when `$TMUX_PANE` is not set.
+`rd state set` exits 0 silently when `$TMUX_PANE` is not set.
 
 #### Scenario: session_start fires inside tmux
 
@@ -31,11 +30,9 @@ The pi extension SHALL invoke `rd set-state idle --harness pi` when the
   session) and `session_start` fires again in that pane
 - **THEN** the existing state file is overwritten with `"state": "idle"`
 
----
+### Requirement: before_agent_start event calls rd state set working
 
-### Requirement: before_agent_start event calls rd set-state working
-
-The pi extension SHALL invoke `rd set-state working --harness pi` when the
+The pi extension SHALL invoke `rd state set working --harness pi` when the
 `before_agent_start` event fires, reflecting that the agent has started
 processing the user's prompt.
 
@@ -45,11 +42,9 @@ processing the user's prompt.
   `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "working"`
 
----
+### Requirement: agent_settled event calls rd state set done
 
-### Requirement: agent_settled event calls rd set-state done
-
-The pi extension SHALL invoke `rd set-state done --harness pi` when the
+The pi extension SHALL invoke `rd state set done --harness pi` when the
 `agent_settled` event fires. `agent_settled` fires only when pi will not
 continue automatically (no pending retries, compaction, or follow-up messages),
 making it the correct signal for the `done` state.
@@ -68,11 +63,9 @@ making it the correct signal for the `done` state.
   before the final settlement, i.e. intermediate `agent_end` events do not set
   `done`)
 
----
+### Requirement: session_shutdown event calls rd state clear
 
-### Requirement: session_shutdown event calls rd clear-state
-
-The pi extension SHALL invoke `rd clear-state` when the `session_shutdown` event
+The pi extension SHALL invoke `rd state clear` when the `session_shutdown` event
 fires, so the state file is removed when the session exits or is replaced.
 
 #### Scenario: session_shutdown fires on quit inside tmux
@@ -92,55 +85,53 @@ fires, so the state file is removed when the session exits or is replaced.
 #### Scenario: session_shutdown is a no-op when no state file exists
 
 - **WHEN** pi fires `session_shutdown` but no state file exists for `$TMUX_PANE`
-- **THEN** `rd clear-state` exits 0 without error
+- **THEN** `rd state clear` exits 0 without error
 
----
+### Requirement: rd state set and rd state clear are no-ops outside tmux
 
-### Requirement: rd set-state and rd clear-state are no-ops outside tmux
-
-Both `rd set-state <state>` and `rd clear-state` SHALL exit with code 0 and
+Both `rd state set <state>` and `rd state clear` SHALL exit with code 0 and
 write nothing when `$TMUX_PANE` is not set and `--pane` is not supplied.
 
 #### Scenario: Extension fires outside tmux
 
-- **WHEN** any pi event fires and the extension calls `rd set-state` or
-  `rd clear-state` with `$TMUX_PANE` unset and no `--pane` flag
+- **WHEN** any pi event fires and the extension calls `rd state set` or
+  `rd state clear` with `$TMUX_PANE` unset and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
----
+### Requirement: rd install pi generates the pi extension file
 
-### Requirement: rd hooks install pi generates the pi extension file
-
-The `rd hooks install pi` subcommand SHALL write the radr TypeScript extension
-to `~/.pi/agent/extensions/radr.ts`. The file SHALL subscribe to
-`session_start`, `before_agent_start`, `agent_settled`, and `session_shutdown`
-events and call the appropriate `rd` commands. The command SHALL be idempotent:
-re-running when the file content is already identical SHALL make no change and
-SHALL report the file as already up to date.
+The `rd install pi` subcommand SHALL write the radr TypeScript extension to
+`~/.pi/agent/extensions/radr.ts`. The file SHALL subscribe to `session_start`,
+`before_agent_start`, `agent_settled`, and `session_shutdown` events and call
+the appropriate `rd` commands. The command SHALL be idempotent: re-running when
+the file content is already identical SHALL make no change and SHALL report the
+file as already up to date.
 
 #### Scenario: First-time install creates the extension file
 
-- **WHEN** the user runs `rd hooks install pi` and
-  `~/.pi/agent/extensions/radr.ts` does not exist
+- **WHEN** the user runs `rd install pi` and `~/.pi/agent/extensions/radr.ts`
+  does not exist
 - **THEN** the file is created with handlers for all four events and the command
   prints a summary prefixed with `+`
 
 #### Scenario: Idempotent re-install reports no change
 
-- **WHEN** the user runs `rd hooks install pi` a second time and the file
-  content is already identical to what would be generated
+- **WHEN** the user runs `rd install pi` a second time and the file content is
+  already identical to what would be generated
 - **THEN** no write is performed and the command prints the file as already up
   to date (prefixed with `=`)
 
 #### Scenario: Install overwrites a stale extension file
 
 - **WHEN** `~/.pi/agent/extensions/radr.ts` exists but its content differs from
-  the current generated content (e.g. from an older version of `rd`)
-- **THEN** the file is overwritten with the new content and the command prints
-  the file as updated (prefixed with `~`)
+  the current generated content (e.g. from an older version of `rd`, including
+  one that still generates `rd set-state`/`rd clear-state` calls)
+- **THEN** the file is overwritten with the new content (using `rd state set`/
+  `rd state clear`) and the command prints the file as updated (prefixed with
+  `~`)
 
 #### Scenario: Install creates the extensions directory if absent
 
 - **WHEN** `~/.pi/agent/extensions/` does not exist
-- **THEN** `rd hooks install pi` creates the directory before writing `radr.ts`,
-  and the command exits 0
+- **THEN** `rd install pi` creates the directory before writing `radr.ts`, and
+  the command exits 0
