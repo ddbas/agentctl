@@ -1,60 +1,60 @@
 ## 1. CLI wiring rename (`src/main.rs`)
 
-- [ ] 1.1 Rename `Commands::State { subcommand: StateSubcommand }` to
+- [x] 1.1 Rename `Commands::State { subcommand: StateSubcommand }` to
       `Commands::Agent { subcommand: AgentSubcommand }`, updating the doc
       comment on the variant if needed.
-- [ ] 1.2 Rename `StateSubcommand` enum to `AgentSubcommand` and replace the
+- [x] 1.2 Rename `StateSubcommand` enum to `AgentSubcommand` and replace the
       `Set`/`Clear` variants with `Status { state, harness, pane }` (state value
       as a positional argument, not nested under a `set` verb) and
       `Clear { pane }`. Update `Clear`'s doc comment to describe it as
       whole-session cleanup (removes the status file and any other per-agent
       artifacts), not just "clear the state."
-- [ ] 1.3 Update the `run()` match arms dispatching to
+- [x] 1.3 Update the `run()` match arms dispatching to
       `commands::set_state::run` / `commands::clear_state::run` to match on
       `Commands::Agent { subcommand: AgentSubcommand::Status { .. } }` /
       `AgentSubcommand::Clear { .. }`.
-- [ ] 1.4 Update any inline help text/doc comments referencing
+- [x] 1.4 Update any inline help text/doc comments referencing
       `rd state     set`/`rd state clear` to say
       `rd agent status`/`rd agent clear`.
-- [ ] 1.5 (Optional, naming consistency) Rename `src/commands/set_state.rs` /
+- [x] 1.5 (Optional, naming consistency) Rename `src/commands/set_state.rs` /
       `src/commands/clear_state.rs` to `src/commands/agent_status.rs` /
       `src/commands/agent_clear.rs`, updating `mod` declarations and call sites;
       no change to internal logic.
 
 ## 2. Hook generation and migration logic (`src/commands/hooks.rs`)
 
-- [ ] 2.1 Update `RADR_CLAUDE_HOOKS` command strings from `rd state set ...` /
+- [x] 2.1 Update `RADR_CLAUDE_HOOKS` command strings from `rd state set ...` /
       `rd state clear` to `rd agent status ...` / `rd agent clear` for all eight
       entries.
-- [ ] 2.2 Update `PI_EXTENSION_CONTENT` so the generated TypeScript calls
+- [x] 2.2 Update `PI_EXTENSION_CONTENT` so the generated TypeScript calls
       `rd("agent", "status", ...)` / `rd("agent", "clear")` instead of
       `rd("state", "set", ...)` / `rd("state", "clear")`.
-- [ ] 2.3 Widen `is_radr_command` to also recognize `rd state set ` (prefix) and
+- [x] 2.3 Widen `is_radr_command` to also recognize `rd state set ` (prefix) and
       `rd state clear` as a superseded/migratable form, alongside the existing
       `rd set-state `/`rd clear-state` recognition and the new canonical
       `rd agent status `/`rd agent clear`.
-- [ ] 2.4 Verify `get_single_radr_command`, the install migration pass, and the
+- [x] 2.4 Verify `get_single_radr_command`, the install migration pass, and the
       uninstall removal pass require no further changes now that
       `is_radr_command` recognizes all three generations (they should work
       unmodified since they already key off `is_radr_command`).
-- [ ] 2.5 Update the doc comment above `is_radr_command` describing which
+- [x] 2.5 Update the doc comment above `is_radr_command` describing which
       command forms it recognizes to mention the third generation
       (`rd agent status`/`rd agent clear`).
 
 ## 3. Update existing tests for the new command name
 
-- [ ] 3.1 Update `tests/state_commands.rs` (or rename to
+- [x] 3.1 Update `tests/state_commands.rs` (or rename to
       `tests/agent_commands.rs` if it tests the
       `rd agent status`/`rd agent     clear` CLI surface directly) to invoke
       `rd agent status <state>`/ `rd agent clear` instead of
       `rd state set <state>`/`rd state clear`.
-- [ ] 3.2 Update `tests/hooks.rs` assertions expecting `rd state set ...` /
+- [x] 3.2 Update `tests/hooks.rs` assertions expecting `rd state set ...` /
       `rd state clear` in generated Claude settings / pi extension content to
       expect `rd agent status ...` / `rd agent clear`.
-- [ ] 3.3 Update `tests/help_command.rs` expectations for the `rd --help` /
+- [x] 3.3 Update `tests/help_command.rs` expectations for the `rd --help` /
       `rd agent --help` output text, including the `status`/`clear` subcommand
       names and updated `clear` help description (whole-session cleanup).
-- [ ] 3.4 Update unit tests inside `src/commands/hooks.rs` (e.g.
+- [x] 3.4 Update unit tests inside `src/commands/hooks.rs` (e.g.
       `extension_content_has_all_four_handlers`,
       `install_claude_*_has_correct_matcher`,
       `install_claude_async_flags_are_correct`, and any test asserting on
@@ -63,16 +63,16 @@
 
 ## 4. Migration test coverage for the new generation
 
-- [ ] 4.1 Add a Claude install migration test (mirroring
+- [x] 4.1 Add a Claude install migration test (mirroring
       `install_claude_migrates_pre_rename_command_strings`) that pre-populates
       `settings.json` with `rd state set ...` / `rd state     clear` entries and
       asserts `rd install claude` rewrites them to `rd agent status ...` /
       `rd agent clear` with no duplicates.
-- [ ] 4.2 Add a Claude uninstall test (mirroring
+- [x] 4.2 Add a Claude uninstall test (mirroring
       `uninstall_claude_removes_pre_rename_legacy_entries`) that pre-populates
       `settings.json` with `rd state set ...` / `rd state     clear` entries and
       asserts `rd uninstall claude` recognizes and removes them.
-- [ ] 4.3 Add a pi install test (mirroring `install_pi_overwrites_stale_file`)
+- [x] 4.3 Add a pi install test (mirroring `install_pi_overwrites_stale_file`)
       asserting that a stale `radr.ts` generated by the previous rename
       (containing `rd("state", "set", ...)` / `rd("state", "clear")`) is
       overwritten with the new `rd("agent", "status", ...)` /
@@ -80,17 +80,17 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run the full test suite (`mise run test` or equivalent Cargo test
+- [x] 5.1 Run the full test suite (`mise run test` or equivalent Cargo test
       task) and confirm all tests pass.
-- [ ] 5.2 Manually run `rd agent status idle`, `rd agent status working`,
+- [x] 5.2 Manually run `rd agent status idle`, `rd agent status working`,
       `rd agent status done`, `rd agent status blocked`, and
       `rd agent     clear` inside a tmux pane to confirm behavior is unchanged
       from the old `rd state set`/`rd state clear` commands.
-- [ ] 5.3 Manually run `rd install pi` and `rd install claude` against a
+- [x] 5.3 Manually run `rd install pi` and `rd install claude` against a
       throwaway `~/.pi`/`~/.claude` (or test fixtures) pre-populated with the
       old `rd state set`/`rd state clear` hook entries, and confirm the
       migration/summary output reports them as removed/superseded and replaced.
-- [ ] 5.4 Update any README/docs/help text outside the spec that still
+- [x] 5.4 Update any README/docs/help text outside the spec that still
       references `rd state set`/`rd state clear` as user-facing examples,
       including any mention of a future `rd agent log` command to confirm it's
       documented as reserved/not-yet-implemented.

@@ -1,10 +1,10 @@
-//! `rd state set` — write the current agent state to the state file.
+//! `rd agent status` — write the current agent state to the state file.
 
 use anyhow::Result;
 
 use crate::state::{AgentState, write_state};
 
-/// Accepted state values for `rd state set`.
+/// Accepted state values for `rd agent status`.
 fn parse_state(s: &str) -> Option<AgentState> {
     match s {
         "idle" => Some(AgentState::Idle),
@@ -15,7 +15,7 @@ fn parse_state(s: &str) -> Option<AgentState> {
     }
 }
 
-/// Entry point for `rd state set <state> [--harness <h>] [--pane <id>]`.
+/// Entry point for `rd agent status <state> [--harness <h>] [--pane <id>]`.
 ///
 /// Resolution order for pane ID:
 ///   1. `--pane` flag
@@ -47,10 +47,17 @@ pub fn run(state_str: String, harness: Option<String>, pane: Option<String>) -> 
 mod tests {
     use super::*;
     use crate::state::{AgentState, read_agent_info_from, read_state_from, state_file_path_in};
+    use std::sync::Mutex;
+
+    /// Serializes tests that mutate the process-global `XDG_DATA_HOME`
+    /// environment variable, since `cargo test` runs tests in parallel
+    /// threads by default and concurrent `set_var`/`remove_var` calls race.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     // $TMUX_PANE set → correct state written (we use --pane to avoid env manipulation)
     #[test]
     fn pane_flag_writes_correct_state() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -82,6 +89,7 @@ mod tests {
     // --harness flag → harness field populated correctly
     #[test]
     fn harness_flag_written_to_state_file() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -102,6 +110,7 @@ mod tests {
     // --harness omitted → "unknown" written to harness field
     #[test]
     fn harness_omitted_defaults_to_unknown() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -117,6 +126,7 @@ mod tests {
     // --pane flag overrides TMUX_PANE
     #[test]
     fn pane_flag_overrides_env_pane() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());

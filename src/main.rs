@@ -88,20 +88,20 @@ enum Commands {
     },
 
     /// Manage agent state.
-    State {
+    Agent {
         #[command(subcommand)]
-        subcommand: StateSubcommand,
+        subcommand: AgentSubcommand,
     },
 }
 
 #[derive(Subcommand)]
-enum StateSubcommand {
+enum AgentSubcommand {
     /// Write the current agent state to the state file.
     ///
     /// Reads `$TMUX_PANE` from the environment to identify the current pane.
     /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
     /// supplied — suitable for calling from hooks that may run outside tmux.
-    Set {
+    Status {
         /// New state. Accepted values: idle, working, done, blocked.
         #[arg(value_name = "STATE")]
         state: String,
@@ -116,11 +116,12 @@ enum StateSubcommand {
         pane: Option<String>,
     },
 
-    /// Remove the state file for the current agent pane.
+    /// Whole-session cleanup for the current agent pane.
     ///
-    /// Reads `$TMUX_PANE` from the environment. Exits 0 silently when
-    /// `$TMUX_PANE` is not set and `--pane` is not supplied, or when no
-    /// state file exists for the pane.
+    /// Removes the status file and any other per-agent artifacts recorded
+    /// for the pane. Reads `$TMUX_PANE` from the environment. Exits 0
+    /// silently when `$TMUX_PANE` is not set and `--pane` is not supplied, or
+    /// when no state file exists for the pane.
     Clear {
         /// Override the pane ID instead of reading `$TMUX_PANE`.
         #[arg(long, value_name = "PANE_ID")]
@@ -169,20 +170,20 @@ fn run() -> anyhow::Result<()> {
         Some(Commands::Uninstall { harness }) => {
             commands::hooks::run_uninstall(harness)?;
         }
-        Some(Commands::State {
+        Some(Commands::Agent {
             subcommand:
-                StateSubcommand::Set {
+                AgentSubcommand::Status {
                     state,
                     harness,
                     pane,
                 },
         }) => {
-            commands::set_state::run(state, harness, pane)?;
+            commands::agent_status::run(state, harness, pane)?;
         }
-        Some(Commands::State {
-            subcommand: StateSubcommand::Clear { pane },
+        Some(Commands::Agent {
+            subcommand: AgentSubcommand::Clear { pane },
         }) => {
-            commands::clear_state::run(pane)?;
+            commands::agent_clear::run(pane)?;
         }
     }
 
