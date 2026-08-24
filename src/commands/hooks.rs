@@ -216,7 +216,7 @@ struct ClaudeHookDef {
     async_: bool,
 }
 
-/// The eight radr hook entries to register in `~/.claude/settings.json`.
+/// The ten radr hook entries to register in `~/.claude/settings.json`.
 const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "SessionStart",
@@ -243,15 +243,27 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
         async_: true,
     },
     ClaudeHookDef {
+        event: "PreToolUse",
+        matcher: Some("Monitor"),
+        command: "rd agent watch arm --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "PostToolUse",
+        matcher: Some("Monitor"),
+        command: "rd agent watch resolve --harness claude",
+        async_: true,
+    },
+    ClaudeHookDef {
         event: "Stop",
         matcher: None,
-        command: "rd agent status done --harness claude",
+        command: "rd agent stop --harness claude",
         async_: true,
     },
     ClaudeHookDef {
         event: "StopFailure",
         matcher: None,
-        command: "rd agent status done --harness claude",
+        command: "rd agent stop --harness claude",
         async_: true,
     },
     ClaudeHookDef {
@@ -279,6 +291,8 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
 fn is_radr_command(cmd: &str) -> bool {
     cmd.starts_with("rd agent status ")
         || cmd == "rd agent clear"
+        || cmd.starts_with("rd agent stop")
+        || cmd.starts_with("rd agent watch ")
         || cmd.starts_with("rd state set ")
         || cmd == "rd state clear"
         || cmd.starts_with("rd set-state ")
@@ -533,7 +547,7 @@ fn build_claude_hook_entry(hook: &ClaudeHookDef) -> serde_json::Value {
 /// - `=` entry was already correct — no change
 /// - `-` entry was superseded and removed
 pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String)]) -> String {
-    let mut lines = vec!["Installed radr hooks for claude (8 entries):".to_string()];
+    let mut lines = vec!["Installed radr hooks for claude (10 entries):".to_string()];
 
     // Show removed (superseded) entries first so they're visible.
     for (event, cmd) in removed {
@@ -903,11 +917,12 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
         let hooks = &parsed["hooks"];
 
+        // PreToolUse and PostToolUse each have two radr entries (the
+        // pre-existing generic/blocked entries plus the Monitor-matched
+        // arm/resolve entries); all other events have exactly one.
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
-            "PostToolUse",
-            "PreToolUse",
             "Stop",
             "StopFailure",
             "Notification",
@@ -917,6 +932,16 @@ mod tests {
                 .as_array()
                 .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
             assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
+        }
+        for event in &["PreToolUse", "PostToolUse"] {
+            let arr = hooks[event]
+                .as_array()
+                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+            assert_eq!(
+                arr.len(),
+                2,
+                "hooks.{event} should have exactly two entries"
+            );
         }
     }
 
@@ -947,13 +972,12 @@ mod tests {
             "content should be identical"
         );
 
-        // No duplicate entries — all 8 events, each exactly once.
+        // No duplicate entries — all 8 events, each exactly once except
+        // PreToolUse and PostToolUse which have two radr entries each.
         let parsed: serde_json::Value = serde_json::from_str(&content_after_second).unwrap();
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
-            "PostToolUse",
-            "PreToolUse",
             "Stop",
             "StopFailure",
             "Notification",
@@ -963,6 +987,14 @@ mod tests {
             assert_eq!(
                 arr.len(),
                 1,
+                "hooks.{event} should have no duplicates after second install"
+            );
+        }
+        for event in &["PreToolUse", "PostToolUse"] {
+            let arr = parsed["hooks"][event].as_array().unwrap();
+            assert_eq!(
+                arr.len(),
+                2,
                 "hooks.{event} should have no duplicates after second install"
             );
         }
@@ -1077,7 +1109,7 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_plus_for_new_entries() {
-        let statuses = vec![HookStatus::New; 8];
+        let statuses = vec![HookStatus::New; 10];
         let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
             assert!(
@@ -1089,7 +1121,7 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_equals_for_existing_entries() {
-        let statuses = vec![HookStatus::Unchanged; 8];
+        let statuses = vec![HookStatus::Unchanged; 10];
         let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
             assert!(
@@ -1101,7 +1133,7 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_tilde_for_updated_entries() {
-        let statuses = vec![HookStatus::Updated; 8];
+        let statuses = vec![HookStatus::Updated; 10];
         let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
             assert!(
@@ -1113,7 +1145,7 @@ mod tests {
 
     #[test]
     fn format_claude_summary_shows_removed_entries_with_dash() {
-        let statuses = vec![HookStatus::Unchanged; 8];
+        let statuses = vec![HookStatus::Unchanged; 10];
         let removed = vec![(
             "PreToolUse".to_string(),
             "rd agent status working --harness claude".to_string(),
@@ -1488,7 +1520,100 @@ mod tests {
         assert_eq!(cmd, "rd agent status working --harness claude");
     }
 
-    // ── task 3.8: StopFailure entry ───────────────────────────────────────────
+    // ── Monitor watch detection: PreToolUse/PostToolUse entries ──────────────
+
+    #[test]
+    fn install_claude_adds_monitor_pretooluse_arm_entry() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let pretooluse = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+
+        let arm_entry = pretooluse.iter().find(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("rd agent watch arm --harness claude")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        let entry = arm_entry.expect("should have a Monitor-matched arm PreToolUse entry");
+        assert_eq!(
+            entry.get("matcher").and_then(|v| v.as_str()),
+            Some("Monitor"),
+            "Monitor arm entry should have matcher Monitor"
+        );
+    }
+
+    #[test]
+    fn install_claude_adds_monitor_posttooluse_resolve_entry() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+        install_claude_to(&dest).expect("install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let posttooluse = parsed["hooks"]["PostToolUse"].as_array().unwrap();
+
+        let resolve_entry = posttooluse.iter().find(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("rd agent watch resolve --harness claude")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        let entry = resolve_entry.expect("should have a Monitor-matched resolve PostToolUse entry");
+        assert_eq!(
+            entry.get("matcher").and_then(|v| v.as_str()),
+            Some("Monitor"),
+            "Monitor resolve entry should have matcher Monitor"
+        );
+    }
+
+    #[test]
+    fn install_claude_monitor_entries_idempotent_on_reinstall() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        install_claude_to(&dest).expect("first install");
+        install_claude_to(&dest).expect("second install");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        for (event, cmd) in [
+            ("PreToolUse", "rd agent watch arm --harness claude"),
+            ("PostToolUse", "rd agent watch resolve --harness claude"),
+        ] {
+            let arr = parsed["hooks"][event].as_array().unwrap();
+            let count = arr
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .get("hooks")
+                        .and_then(|h| h.as_array())
+                        .map(|hs| {
+                            hs.iter()
+                                .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(cmd))
+                        })
+                        .unwrap_or(false)
+                })
+                .count();
+            assert_eq!(count, 1, "{event} should have exactly one {cmd} entry");
+        }
+    }
 
     #[test]
     fn install_claude_stopfailure_has_done_command_async_and_no_matcher() {
@@ -1509,7 +1634,7 @@ mod tests {
         // Command.
         assert_eq!(
             hook.get("command").and_then(|v| v.as_str()),
-            Some("rd agent status done --harness claude")
+            Some("rd agent stop --harness claude")
         );
         // Async.
         assert_eq!(
@@ -1611,6 +1736,57 @@ mod tests {
         assert!(
             parsed.get("hooks").is_none(),
             "hooks key should be pruned once empty"
+        );
+    }
+
+    #[test]
+    fn uninstall_claude_removes_monitor_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        let existing = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Monitor",
+                        "hooks": [{ "type": "command", "async": true, "command": "rd agent watch arm --harness claude" }]
+                    },
+                    {
+                        "hooks": [{ "type": "command", "command": "my-custom-tool" }]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "Monitor",
+                        "hooks": [{ "type": "command", "async": true, "command": "rd agent watch resolve --harness claude" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // PostToolUse had only the Monitor entry — should be pruned entirely.
+        assert!(
+            parsed["hooks"].get("PostToolUse").is_none(),
+            "PostToolUse should be pruned once its only entry (Monitor resolve) is removed"
+        );
+
+        // PreToolUse should keep only the custom, non-radr hook.
+        let pretooluse = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(
+            pretooluse.len(),
+            1,
+            "only the custom PreToolUse hook should remain"
+        );
+        assert_eq!(
+            pretooluse[0]["hooks"][0]["command"].as_str(),
+            Some("my-custom-tool")
         );
     }
 

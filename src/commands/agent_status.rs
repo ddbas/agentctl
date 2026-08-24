@@ -11,6 +11,7 @@ fn parse_state(s: &str) -> Option<AgentState> {
         "working" => Some(AgentState::Working),
         "done" => Some(AgentState::Done),
         "blocked" => Some(AgentState::Blocked),
+        "snoozed" => Some(AgentState::Snoozed),
         _ => None,
     }
 }
@@ -24,7 +25,7 @@ fn parse_state(s: &str) -> Option<AgentState> {
 pub fn run(state_str: String, harness: Option<String>, pane: Option<String>) -> Result<()> {
     let state = parse_state(&state_str).ok_or_else(|| {
         anyhow::anyhow!(
-            "unknown state '{}'; accepted values: idle, working, done, blocked",
+            "unknown state '{}'; accepted values: idle, working, done, blocked, snoozed",
             state_str
         )
     })?;
@@ -47,17 +48,12 @@ pub fn run(state_str: String, harness: Option<String>, pane: Option<String>) -> 
 mod tests {
     use super::*;
     use crate::state::{AgentState, read_agent_info_from, read_state_from, state_file_path_in};
-    use std::sync::Mutex;
-
-    /// Serializes tests that mutate the process-global `XDG_DATA_HOME`
-    /// environment variable, since `cargo test` runs tests in parallel
-    /// threads by default and concurrent `set_var`/`remove_var` calls race.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
     // $TMUX_PANE set → correct state written (we use --pane to avoid env manipulation)
     #[test]
     fn pane_flag_writes_correct_state() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = crate::state::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -89,7 +85,9 @@ mod tests {
     // --harness flag → harness field populated correctly
     #[test]
     fn harness_flag_written_to_state_file() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = crate::state::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -110,7 +108,9 @@ mod tests {
     // --harness omitted → "unknown" written to harness field
     #[test]
     fn harness_omitted_defaults_to_unknown() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = crate::state::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -126,7 +126,9 @@ mod tests {
     // --pane flag overrides TMUX_PANE
     #[test]
     fn pane_flag_overrides_env_pane() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = crate::state::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
@@ -146,5 +148,27 @@ mod tests {
     fn unknown_state_returns_error() {
         let result = run("flying".to_owned(), None, Some("%1".to_owned()));
         assert!(result.is_err());
+    }
+
+    // snoozed state string → writes AgentState::Snoozed
+    #[test]
+    fn snoozed_state_writes_snoozed() {
+        let _guard = crate::state::ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            "snoozed".to_owned(),
+            Some("claude".to_owned()),
+            Some("%12".to_owned()),
+        )
+        .expect("run");
+        assert_eq!(read_state_from(tmp.path(), "%12"), AgentState::Snoozed);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
     }
 }

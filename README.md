@@ -39,7 +39,7 @@ ones (see "Agent state tracking" below).
 ### `rd agent status <state>`
 
 Write the current agent state to a file. Intended to be called from agent
-harness hooks. Accepted values: `idle`, `working`, `done`, `blocked`.
+harness hooks. Accepted values: `idle`, `working`, `done`, `blocked`, `snoozed`.
 
 ```bash
 rd agent status working --harness claude
@@ -168,15 +168,16 @@ permission-prompt lifecycle event.
 
 ### State model
 
-Each agent pane can be in one of five states:
+Each agent pane can be in one of six states:
 
-| State     | Meaning                             |
-| --------- | ----------------------------------- |
-| `idle`    | Waiting for user input              |
-| `working` | Actively processing a task          |
-| `done`    | Task complete, awaiting next prompt |
-| `blocked` | Waiting for external input/action   |
-| `unknown` | No state file, or state unreadable  |
+| State     | Meaning                                                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `idle`    | Waiting for user input                                                                                                     |
+| `working` | Actively processing a task                                                                                                 |
+| `done`    | Task complete, awaiting next prompt                                                                                        |
+| `blocked` | Waiting for external input/action                                                                                          |
+| `snoozed` | Not producing visible output, but an armed self-resuming mechanism (e.g. a background watch) will wake it up automatically |
+| `unknown` | No state file, or state unreadable                                                                                         |
 
 ### File layout
 

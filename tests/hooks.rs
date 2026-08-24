@@ -232,7 +232,6 @@ async fn hooks_install_claude_creates_settings_file() {
     for event in &[
         "SessionStart",
         "UserPromptSubmit",
-        "PreToolUse",
         "Stop",
         "Notification",
         "SessionEnd",
@@ -241,6 +240,18 @@ async fn hooks_install_claude_creates_settings_file() {
             .as_array()
             .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
         assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
+    }
+    // PreToolUse and PostToolUse each have two radr entries (the existing
+    // generic/blocked entries plus the Monitor-matched arm/resolve entries).
+    for event in &["PreToolUse", "PostToolUse"] {
+        let arr = hooks[event]
+            .as_array()
+            .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+        assert_eq!(
+            arr.len(),
+            2,
+            "hooks.{event} should have exactly two entries"
+        );
     }
 
     // stdout should contain '+' for new entries.

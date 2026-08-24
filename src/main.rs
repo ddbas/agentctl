@@ -102,7 +102,7 @@ enum AgentSubcommand {
     /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
     /// supplied — suitable for calling from hooks that may run outside tmux.
     Status {
-        /// New state. Accepted values: idle, working, done, blocked.
+        /// New state. Accepted values: idle, working, done, blocked, snoozed.
         #[arg(value_name = "STATE")]
         state: String,
 
@@ -123,6 +123,59 @@ enum AgentSubcommand {
     /// silently when `$TMUX_PANE` is not set and `--pane` is not supplied, or
     /// when no state file exists for the pane.
     Clear {
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+    },
+
+    /// Write `done` or `snoozed` depending on whether a background watch is
+    /// currently armed for the pane.
+    ///
+    /// Intended for the `Stop`/`StopFailure` Claude hooks in place of an
+    /// unconditional `rd agent status done`. Reads `$TMUX_PANE` from the
+    /// environment. Exits 0 silently when `$TMUX_PANE` is not set and
+    /// `--pane` is not supplied.
+    Stop {
+        /// Harness name to write to the state file (e.g. `claude`).
+        /// Defaults to `"unknown"` when omitted.
+        #[arg(long, value_name = "HARNESS")]
+        harness: Option<String>,
+
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+    },
+
+    /// Manage the armed-watch marker for a self-resuming background
+    /// mechanism (e.g. Claude's Monitor tool).
+    Watch {
+        #[command(subcommand)]
+        subcommand: AgentWatchSubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentWatchSubcommand {
+    /// Record that a background watch has been armed for the current pane.
+    ///
+    /// Intended for a `PreToolUse` hook matched to the arming tool (e.g.
+    /// Claude's `Monitor` tool). Reads `$TMUX_PANE` from the environment.
+    /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
+    /// supplied.
+    Arm {
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+    },
+
+    /// Resolve whether an armed watch has ended, clearing the marker if so.
+    ///
+    /// Intended for the corresponding `PostToolUse` hook. Reads the hook's
+    /// JSON payload from stdin to decide; ambiguous or unparsable payloads
+    /// leave the marker armed. Reads `$TMUX_PANE` from the environment.
+    /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
+    /// supplied.
+    Resolve {
         /// Override the pane ID instead of reading `$TMUX_PANE`.
         #[arg(long, value_name = "PANE_ID")]
         pane: Option<String>,
@@ -184,6 +237,27 @@ fn run() -> anyhow::Result<()> {
             subcommand: AgentSubcommand::Clear { pane },
         }) => {
             commands::agent_clear::run(pane)?;
+        }
+        Some(Commands::Agent {
+            subcommand: AgentSubcommand::Stop { harness, pane },
+        }) => {
+            commands::agent_stop::run(harness, pane)?;
+        }
+        Some(Commands::Agent {
+            subcommand:
+                AgentSubcommand::Watch {
+                    subcommand: AgentWatchSubcommand::Arm { pane },
+                },
+        }) => {
+            commands::agent_watch::run_arm(pane)?;
+        }
+        Some(Commands::Agent {
+            subcommand:
+                AgentSubcommand::Watch {
+                    subcommand: AgentWatchSubcommand::Resolve { pane },
+                },
+        }) => {
+            commands::agent_watch::run_resolve(pane)?;
         }
     }
 

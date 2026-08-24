@@ -27,7 +27,7 @@ pub enum SortKey {
     Session,
     /// Pane position: window index first, then pane index.
     Pane,
-    /// Agent state priority: Blocked < Done < Working < Idle < Unknown.
+    /// Agent state priority: Blocked < Working < Snoozed < Done < Idle < Unknown.
     State,
     /// Last state-file update timestamp. Newest first by default.
     #[default]
@@ -810,6 +810,7 @@ mod tests {
         write_state_to(tmp.path(), "%3", "claude", AgentState::Blocked).unwrap();
         write_state_to(tmp.path(), "%4", "claude", AgentState::Working).unwrap();
         write_state_to(tmp.path(), "%5", "claude", AgentState::Done).unwrap();
+        write_state_to(tmp.path(), "%6", "claude", AgentState::Snoozed).unwrap();
         let map = load_state_map_from(tmp.path());
 
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
@@ -817,7 +818,8 @@ mod tests {
         let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
         let p4 = pane_with_id("claude", "dev", 0, 3, "%4");
         let p5 = pane_with_id("claude", "dev", 0, 4, "%5");
-        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5];
+        let p6 = pane_with_id("claude", "dev", 0, 5, "%6");
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5, &p6];
         sort_panes(&mut refs, SortKey::State, false, &map);
 
         let states: Vec<AgentState> = refs.iter().map(|p| map[&p.pane_id].state).collect();
@@ -825,8 +827,9 @@ mod tests {
             states,
             vec![
                 AgentState::Blocked,
-                AgentState::Done,
                 AgentState::Working,
+                AgentState::Snoozed,
+                AgentState::Done,
                 AgentState::Idle,
                 AgentState::Unknown,
             ]

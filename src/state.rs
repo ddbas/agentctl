@@ -22,19 +22,25 @@ pub enum AgentState {
     Working,
     Done,
     Blocked,
+    /// Not currently producing visible output, but an armed, self-resuming
+    /// mechanism (e.g. a background watch or listener) will wake it up
+    /// automatically without new human input.
+    Snoozed,
     #[default]
     Unknown,
 }
 
 impl AgentState {
-    /// Canonical sort priority: `Blocked(0) < Done(1) < Working(2) < Idle(3) < Unknown(4)`.
+    /// Canonical sort priority:
+    /// `Blocked(0) < Working(1) < Snoozed(2) < Done(3) < Idle(4) < Unknown(5)`.
     fn priority(self) -> u8 {
         match self {
             AgentState::Blocked => 0,
-            AgentState::Done => 1,
-            AgentState::Working => 2,
-            AgentState::Idle => 3,
-            AgentState::Unknown => 4,
+            AgentState::Working => 1,
+            AgentState::Snoozed => 2,
+            AgentState::Done => 3,
+            AgentState::Idle => 4,
+            AgentState::Unknown => 5,
         }
     }
 }
@@ -58,6 +64,7 @@ impl fmt::Display for AgentState {
             AgentState::Working => write!(f, "working"),
             AgentState::Done => write!(f, "done"),
             AgentState::Blocked => write!(f, "blocked"),
+            AgentState::Snoozed => write!(f, "snoozed"),
             AgentState::Unknown => write!(f, "unknown"),
         }
     }
@@ -107,6 +114,14 @@ pub fn state_file_path_in(base: &Path, pane_id: &str) -> PathBuf {
     agent_dir_in(base, pane_id).join("state.json")
 }
 
+/// Return the path of the armed-watch marker file for the given pane under
+/// `base`.
+///
+/// `<base>/radr/agents/<pane-id>/monitor.json`
+pub fn watch_marker_path_in(base: &Path, pane_id: &str) -> PathBuf {
+    agent_dir_in(base, pane_id).join("monitor.json")
+}
+
 /// Return the directory for the given pane's state files using the XDG base.
 pub fn agent_dir(pane_id: &str) -> PathBuf {
     agent_dir_in(&xdg_data_home(), pane_id)
@@ -115,6 +130,12 @@ pub fn agent_dir(pane_id: &str) -> PathBuf {
 /// Return the path of the state file for the given pane using the XDG base.
 pub fn state_file_path(pane_id: &str) -> PathBuf {
     state_file_path_in(&xdg_data_home(), pane_id)
+}
+
+/// Return the path of the armed-watch marker file for the given pane using
+/// the XDG base.
+pub fn watch_marker_path(pane_id: &str) -> PathBuf {
+    watch_marker_path_in(&xdg_data_home(), pane_id)
 }
 
 // ── StateStore API (explicit base) ────────────────────────────────────────────
@@ -183,6 +204,68 @@ pub fn delete_state_in(base: &Path, pane_id: &str) -> Result<()> {
     Ok(())
 }
 
+// ── Armed-watch marker API (explicit base) ────────────────────────────────────
+
+/// Record that a background watch (e.g. Claude's Monitor tool) is armed for
+/// `pane_id` under `base`. Creates the pane's state directory if needed and
+/// writes (or overwrites) the marker file. Idempotent: calling this again
+/// while already armed is a no-op in effect.
+pub fn arm_watch_in(base: &Path, pane_id: &str) -> Result<()> {
+    let dir = agent_dir_in(base, pane_id);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("create state dir: {}", dir.display()))?;
+
+    let marker = json_marker_body();
+    let final_path = watch_marker_path_in(base, pane_id);
+    let tmp_path = agent_dir_in(base, pane_id).join("monitor.json.tmp");
+
+    std::fs::write(&tmp_path, &marker)
+        .with_context(|| format!("write tmp marker file: {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, &final_path)
+        .with_context(|| format!("rename marker file: {}", final_path.display()))?;
+
+    Ok(())
+}
+
+fn json_marker_body() -> String {
+    format!("{{\"armed_at\":\"{}\"}}", Utc::now().to_rfc3339())
+}
+
+/// Returns `true` if a background watch is currently armed for `pane_id`
+/// under `base` (i.e. the marker file exists).
+pub fn is_watch_armed_in(base: &Path, pane_id: &str) -> bool {
+    watch_marker_path_in(base, pane_id).exists()
+}
+
+/// Clear the armed-watch marker for `pane_id` under `base`. No-op when the
+/// marker does not exist.
+pub fn clear_watch_marker_in(base: &Path, pane_id: &str) -> Result<()> {
+    let path = watch_marker_path_in(base, pane_id);
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .with_context(|| format!("remove marker file: {}", path.display()))?;
+    }
+    Ok(())
+}
+
+// ── Armed-watch marker API (XDG base) ─────────────────────────────────────────
+
+/// Record that a background watch is armed for `pane_id` using the XDG base.
+pub fn arm_watch(pane_id: &str) -> Result<()> {
+    arm_watch_in(&xdg_data_home(), pane_id)
+}
+
+/// Returns `true` if a background watch is currently armed for `pane_id`
+/// using the XDG base.
+pub fn is_watch_armed(pane_id: &str) -> bool {
+    is_watch_armed_in(&xdg_data_home(), pane_id)
+}
+
+/// Clear the armed-watch marker for `pane_id` using the XDG base.
+pub fn clear_watch_marker(pane_id: &str) -> Result<()> {
+    clear_watch_marker_in(&xdg_data_home(), pane_id)
+}
+
 /// Glob all `state.json` files under `<base>/radr/agents/` and return parsed
 /// [`AgentInfo`] values. Files that cannot be read or parsed are skipped.
 pub fn list_agent_infos_in(base: &Path) -> Vec<AgentInfo> {
@@ -236,6 +319,17 @@ pub fn list_agent_infos() -> Vec<AgentInfo> {
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
+
+// ── Shared test env mutex ───────────────────────────────────────────
+
+/// Serializes tests across the whole crate that mutate process-global
+/// environment variables (`XDG_DATA_HOME`, `TMUX_PANE`), since `cargo test`
+/// runs tests from every module in the same process by default and
+/// concurrent `set_var`/`remove_var` calls from different modules would
+/// otherwise race. Any test module that calls `std::env::set_var` on a
+/// shared variable must lock this mutex for the duration of the mutation.
+#[cfg(test)]
+pub static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {
@@ -306,8 +400,9 @@ mod tests {
     #[test]
     fn agent_state_blocked_is_minimum() {
         for other in [
-            AgentState::Done,
             AgentState::Working,
+            AgentState::Snoozed,
+            AgentState::Done,
             AgentState::Idle,
             AgentState::Unknown,
         ] {
@@ -322,8 +417,9 @@ mod tests {
     fn agent_state_unknown_is_maximum() {
         for other in [
             AgentState::Blocked,
-            AgentState::Done,
             AgentState::Working,
+            AgentState::Snoozed,
+            AgentState::Done,
             AgentState::Idle,
         ] {
             assert!(
@@ -334,11 +430,24 @@ mod tests {
     }
 
     #[test]
+    fn agent_state_snoozed_sorts_below_working_and_blocked() {
+        assert!(AgentState::Snoozed > AgentState::Working);
+        assert!(AgentState::Snoozed > AgentState::Blocked);
+    }
+
+    #[test]
+    fn agent_state_snoozed_sorts_above_done_and_idle() {
+        assert!(AgentState::Snoozed < AgentState::Done);
+        assert!(AgentState::Snoozed < AgentState::Idle);
+    }
+
+    #[test]
     fn agent_state_full_ascending_order() {
         let mut states = vec![
             AgentState::Unknown,
             AgentState::Idle,
             AgentState::Blocked,
+            AgentState::Snoozed,
             AgentState::Working,
             AgentState::Done,
         ];
@@ -347,8 +456,9 @@ mod tests {
             states,
             vec![
                 AgentState::Blocked,
-                AgentState::Done,
                 AgentState::Working,
+                AgentState::Snoozed,
+                AgentState::Done,
                 AgentState::Idle,
                 AgentState::Unknown,
             ]
@@ -363,7 +473,82 @@ mod tests {
         assert_eq!(AgentState::Working.to_string(), "working");
         assert_eq!(AgentState::Done.to_string(), "done");
         assert_eq!(AgentState::Blocked.to_string(), "blocked");
+        assert_eq!(AgentState::Snoozed.to_string(), "snoozed");
         assert_eq!(AgentState::Unknown.to_string(), "unknown");
+    }
+
+    // ── AgentState serde ──────────────────────────────────────────────────────
+
+    #[test]
+    fn agent_state_snoozed_serde_round_trip() {
+        let json = serde_json::to_string(&AgentState::Snoozed).expect("serialize");
+        assert_eq!(json, "\"snoozed\"");
+        let parsed: AgentState = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, AgentState::Snoozed);
+    }
+
+    #[test]
+    fn write_and_read_snoozed_state_round_trip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%13", "claude", AgentState::Snoozed).expect("write_state");
+        assert_eq!(read_state_from(tmp.path(), "%13"), AgentState::Snoozed);
+    }
+
+    #[test]
+    fn snoozed_state_is_overwritten_by_working_transition() {
+        // Simulates a subsequent PostToolUse/UserPromptSubmit hook firing
+        // after a Stop wrote `snoozed`: the pane's state is overwritten with
+        // `working`, so `Snoozed` is never a stuck/terminal state.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%14", "claude", AgentState::Snoozed).expect("write snoozed");
+        assert_eq!(read_state_from(tmp.path(), "%14"), AgentState::Snoozed);
+        write_state_to(tmp.path(), "%14", "claude", AgentState::Working).expect("write working");
+        assert_eq!(read_state_from(tmp.path(), "%14"), AgentState::Working);
+    }
+
+    // ── Armed-watch marker ────────────────────────────────────────────────────
+
+    #[test]
+    fn arm_watch_creates_marker_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(!is_watch_armed_in(tmp.path(), "%20"));
+        arm_watch_in(tmp.path(), "%20").expect("arm_watch");
+        assert!(is_watch_armed_in(tmp.path(), "%20"));
+        assert!(watch_marker_path_in(tmp.path(), "%20").exists());
+    }
+
+    #[test]
+    fn arm_watch_is_idempotent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        arm_watch_in(tmp.path(), "%20").expect("arm first");
+        arm_watch_in(tmp.path(), "%20").expect("arm second");
+        assert!(is_watch_armed_in(tmp.path(), "%20"));
+    }
+
+    #[test]
+    fn clear_watch_marker_removes_marker() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        arm_watch_in(tmp.path(), "%20").expect("arm");
+        assert!(is_watch_armed_in(tmp.path(), "%20"));
+        clear_watch_marker_in(tmp.path(), "%20").expect("clear");
+        assert!(!is_watch_armed_in(tmp.path(), "%20"));
+    }
+
+    #[test]
+    fn clear_watch_marker_noop_when_absent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        clear_watch_marker_in(tmp.path(), "%99").expect("clear absent");
+    }
+
+    #[test]
+    fn delete_state_removes_watch_marker_too() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%21", "claude", AgentState::Snoozed).expect("write");
+        arm_watch_in(tmp.path(), "%21").expect("arm");
+        assert!(is_watch_armed_in(tmp.path(), "%21"));
+        delete_state_in(tmp.path(), "%21").expect("delete");
+        assert!(!is_watch_armed_in(tmp.path(), "%21"));
+        assert!(!state_file_path_in(tmp.path(), "%21").exists());
     }
 
     // ── list_agent_infos ──────────────────────────────────────────────────────
