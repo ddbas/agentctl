@@ -29,22 +29,24 @@ the following steps in order:
 If tmux is unreachable the reconciliation steps above are skipped entirely (no
 state files are deleted) and the command exits 0 with no output.
 
-Each output line SHALL contain four left-aligned columns:
-`<agent-name>  <session-name>  <window-index>.<pane-index>  <state>`. The state
-column SHALL display the current `AgentState` for the agent (as lowercase
-string), or `unknown` if the pane has no state file or a contradictory one. When
-the pane's state file has a non-zero `active_tools` count, the state column
-SHALL additionally append a single space followed by the count and the word
-`tool` (singular, when `active_tools == 1`) or `tools` (plural, when
-`active_tools > 1`) — e.g. `working 1 tool` or `working 3 tools`. When
-`active_tools` is `0`, absent, or the state is `unknown`, no such suffix is
-appended and the state column shows only the state word.
+Each output line SHALL contain five left-aligned columns:
+`<agent-name>  <session-name>  <window-index>.<pane-index>  <state>  <active-tools>`.
+The state column SHALL display the current `AgentState` for the agent (as
+lowercase string), or `unknown` if the pane has no state file or a contradictory
+one. The fifth column, `<active-tools>`, SHALL show the pane's `active_tools`
+count from its state file as `N tool` (singular, when `active_tools == 1`) or
+`N tools` (plural, when `active_tools > 1`) — e.g. `1 tool` or `3 tools`. When
+`active_tools` is `0`, absent, or the pane's state is `unknown`, the fifth
+column SHALL be empty and no trailing delimiter SHALL be printed after the
+`state` column for that row (i.e. the line ends at `state` with no dangling
+whitespace).
 
 Column widths SHALL be computed using **Unicode terminal display width** (the
 number of terminal columns a string occupies), not byte length or Unicode scalar
-count. Each column SHALL be padded to the maximum display width in that column
-plus two spaces, so that all rows are visually aligned in a fixed-width
-terminal.
+count. Each column, including the boundary between `state` and the fifth column,
+SHALL be padded to the maximum display width in that column plus two spaces —
+the same delimiter convention used between every other column pair — so that all
+rows are visually aligned in a fixed-width terminal.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -57,17 +59,19 @@ terminal.
 #### Scenario: Output is columnar and left-aligned
 
 - **WHEN** two or more matching panes are printed
-- **THEN** all four columns (agent, session, window.pane, state) are
-  left-aligned, each padded to the display width of the longest value in that
-  column plus two spaces, where display width is measured in terminal columns
+- **THEN** all five columns (agent, session, window.pane, state, active-tools)
+  are left-aligned, each padded to the display width of the longest value in
+  that column plus two spaces, where display width is measured in terminal
+  columns
 
 #### Scenario: Agent name appears in the first column
 
 - **WHEN** matching panes are displayed
 - **THEN** the first column contains the agent process name (`claude` or `pi`),
   the second column contains the tmux session name, the third column contains
-  the `window_index.pane_index` in the form `N.M`, and the fourth column
-  contains the agent state in lowercase
+  the `window_index.pane_index` in the form `N.M`, the fourth column contains
+  the agent state in lowercase, and the fifth column contains the active tool
+  count (or is empty)
 
 #### Scenario: No matching panes
 
@@ -80,24 +84,36 @@ terminal.
 - **WHEN** the user runs `rd list` and no tmux server is active
 - **THEN** the command exits with code 0 and produces no output
 
-#### Scenario: State column shows the singular suffix for exactly one active tool
+#### Scenario: Fifth column shows the singular form for exactly one active tool
 
 - **WHEN** a pane's state is `working` and its state file has `active_tools: 1`
-- **THEN** that pane's state column reads `working 1 tool`
+- **THEN** that pane's state column reads `working` and the fifth column reads
+  `1 tool`, separated by the same two-space delimiter used between the other
+  columns
 
-#### Scenario: State column shows the plural suffix for more than one active tool
+#### Scenario: Fifth column shows the plural form for more than one active tool
 
 - **WHEN** a pane's state is `working` and its state file has `active_tools: 3`
-- **THEN** that pane's state column reads `working 3 tools`
+- **THEN** that pane's state column reads `working` and the fifth column reads
+  `3 tools`
 
-#### Scenario: State column omits the suffix when no tools are active
+#### Scenario: Fifth column is empty when no tools are active
 
 - **WHEN** a pane's state is `working` and its state file has `active_tools: 0`
   (or the field is absent)
-- **THEN** that pane's state column reads `working` with no tool-count suffix
+- **THEN** the fifth column is empty and the line ends at `working` with no
+  trailing delimiter or whitespace
 
-#### Scenario: Unknown state never shows a tool-count suffix
+#### Scenario: Unknown state never shows an active tool count
 
 - **WHEN** a pane has no matching state file (state is `unknown`)
-- **THEN** that pane's state column reads `unknown` with no tool-count suffix,
-  regardless of any stale `active_tools` value
+- **THEN** the fifth column is empty and the line ends at `unknown`, regardless
+  of any stale `active_tools` value
+
+#### Scenario: Fifth column uses the same two-space delimiter as other columns
+
+- **WHEN** two panes are printed, one with `active_tools: 1` and one with
+  `active_tools: 0`
+- **THEN** the non-empty fifth column is separated from the `state` column by
+  the maximum `state` column width plus two spaces, identically to how the
+  `state` column is separated from the `window.pane` column

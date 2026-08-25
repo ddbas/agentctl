@@ -14,8 +14,10 @@ are wired up. This change adds a second, independent side effect to the same two
 events (mutating a counter) and wires the pi extension to call them on every
 tool call, regardless of `--type`.
 
-`rd list` (`src/commands/list.rs::format_panes`) renders the state column from
-`AgentInfo.status` alone; it needs to also read the new counter.
+`rd list` (`src/commands/list.rs::format_panes`) renders four columns — `agent`,
+`session`, `window.pane`, `state` — each separated by the max column width plus
+two spaces. It needs a fifth column for the tool count, using the same two-space
+delimiter convention as the existing four.
 
 ## Goals / Non-Goals
 
@@ -33,8 +35,10 @@ tool call, regardless of `--type`.
 - Wire the pi extension to call `TOOL_CALL_START` / `TOOL_CALL_RESULT` on pi's
   `tool_call` / `tool_result` lifecycle events, using `event.toolCallId` as the
   `--id`.
-- Extend `rd list`'s state column to append ` N tool` / ` N tools` when
-  `active_tools > 0`, and nothing when it is `0`.
+- Add a fifth `rd list` column, separated from the `state` column by the same
+  two-space delimiter used between all other columns, showing `N tool` /
+  `N tools` when `active_tools > 0` and empty (no trailing delimiter) when it is
+  `0`.
 - Deserialize old `state.json` files (written before this change) without
   `active_tools` as `0`, via `#[serde(default)]`.
 
@@ -82,13 +86,16 @@ tool call, regardless of `--type`.
    incremented/decremented value on `TOOL_CALL_START`/`TOOL_CALL_RESULT`, and
    the current value unchanged on `RUN_STARTED`/`RUN_FINISHED`.
 
-5. **Display format**: ` 1 tool` (singular) vs. ` N tools` (plural, `N > 1`),
-   appended directly to the existing state token with a single space, omitted
-   entirely at `0`. This matches the example in the proposal (`working 1 tool`,
-   `working 3 tools`, `working`) and keeps the common case (`0` in-flight tool
-   calls, which is most of the time an agent is `idle` or between tool calls)
-   visually identical to today's output — no new column, no width regression for
-   panes with `0` active tools.
+5. **A fifth column, not a suffix on the state word.** `rd list` already uses a
+   consistent "pad to max width + two spaces" delimiter between its four
+   columns; the tool count is added as a fifth column following that exact same
+   convention (`1 tool` / `N tools`) rather than concatenated onto the state
+   word with a single space. This keeps the delimiter uniform across every
+   column boundary and keeps the state column's own width (and thus its
+   alignment) independent of whether any given row has an active tool count.
+   When `active_tools == 0` (or the pane's state is `unknown`), the fifth column
+   is empty and the line is right-trimmed so no dangling delimiter is printed
+   after `state` for that row.
 
 6. **pi extension wiring uses `event.toolCallId` as `--id`.** This is already a
    required, stable per-call identifier available on both `tool_call` and

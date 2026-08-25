@@ -43,18 +43,22 @@
 
 ## 4. rd list rendering
 
-- [ ] 4.1 In `src/commands/list.rs::format_panes`, after resolving each pane's
-      state string, append ` N tool` (singular, `active_tools == 1`) or
-      ` N tools` (plural, `active_tools > 1`) when the pane has a matching,
-      non-contradictory state file with `active_tools > 0`; append nothing when
-      `active_tools` is `0`, absent, or the pane's state is `unknown`.
-- [ ] 4.2 Confirm column-width padding in `format_panes` is computed from the
-      final (possibly suffixed) state string, so alignment still works with the
-      longer `working N tools` values.
-- [ ] 4.3 Add unit tests: singular suffix (`working 1 tool`), plural suffix
-      (`working 3 tools`), no suffix at `active_tools == 0`, no suffix for
-      `unknown` state even if a stale `active_tools` value is present, and
-      column alignment across mixed rows with and without a suffix.
+- [ ] 4.1 In `src/commands/list.rs::format_panes`, add a fifth column value per
+      pane: `N tool` (singular, `active_tools == 1`) or `N tools` (plural,
+      `active_tools > 1`) when the pane has a matching, non-contradictory state
+      file with `active_tools > 0`; empty string when `active_tools` is `0`,
+      absent, or the pane's state is `unknown`.
+- [ ] 4.2 Pad the `state` column to its own max width plus two spaces (the same
+      delimiter convention already used between the other columns), then append
+      the fifth column's value; right-trim each rendered line so rows with an
+      empty fifth column have no dangling delimiter/whitespace after `state`.
+- [ ] 4.3 Add unit tests: singular fifth column (`... working  1 tool`), plural
+      fifth column (`... working  3 tools`), empty fifth column at
+      `active_tools == 0` (line ends cleanly at `state` with no trailing
+      whitespace), empty fifth column for `unknown` state even if a stale
+      `active_tools` value is present, and column alignment (via the same
+      two-space delimiter) across mixed rows with and without a fifth-column
+      value.
 
 ## 5. Verification
 
