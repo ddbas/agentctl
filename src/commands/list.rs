@@ -7,8 +7,10 @@
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
+use std::io::IsTerminal;
 use std::process::Command;
 
+use owo_colors::OwoColorize;
 use unicode_width::UnicodeWidthStr;
 
 use anyhow::Result;
@@ -269,6 +271,25 @@ pub fn validate_state_files(state_map: &mut HashMap<String, AgentInfo>, live_pan
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
+/// Wrap `text` (the plain display text for `state`) in an ANSI foreground
+/// color escape sequence keyed to the `AgentState` value, or return it
+/// unchanged when `use_color` is `false` or `state` is [`AgentState::Unknown`].
+///
+/// Color mapping: `Idle` → bright black (grey), `Working` → yellow,
+/// `Blocked` → red, `Done` → green, `Unknown` → uncolored.
+fn colorize_state(state: AgentState, text: &str, use_color: bool) -> String {
+    if !use_color {
+        return text.to_string();
+    }
+    match state {
+        AgentState::Idle => text.fg::<owo_colors::colors::BrightBlack>().to_string(),
+        AgentState::Working => text.fg::<owo_colors::colors::Yellow>().to_string(),
+        AgentState::Blocked => text.fg::<owo_colors::colors::Red>().to_string(),
+        AgentState::Done => text.fg::<owo_colors::colors::Green>().to_string(),
+        AgentState::Unknown => text.to_string(),
+    }
+}
+
 /// Format a slice of agent pane references as columnar plain text.
 ///
 /// Produces one line per pane with five left-aligned columns:
@@ -278,7 +299,16 @@ pub fn validate_state_files(state_map: &mut HashMap<String, AgentInfo>, live_pan
 /// that column plus two spaces, and rows with an empty fifth column have no
 /// trailing delimiter/whitespace after `state`.  Returns an empty string when
 /// `panes` is empty.
-pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>) -> String {
+///
+/// When `use_color` is `true`, the state column is wrapped in an ANSI
+/// foreground color escape sequence keyed to the agent's state (see
+/// [`colorize_state`]); column widths are always computed from the plain
+/// (uncolored) state text, so the escape sequences never affect alignment.
+pub fn format_panes(
+    panes: &[&PaneEntry],
+    state_map: &HashMap<String, AgentInfo>,
+    use_color: bool,
+) -> String {
     if panes.is_empty() {
         return String::new();
     }
@@ -289,14 +319,15 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
         .map(|p| format!("{}.{}", p.window_index, p.pane_index))
         .collect();
 
-    // Resolve each pane's state string.
-    let states: Vec<String> = panes
+    // Resolve each pane's state enum and plain display string.
+    let states: Vec<(AgentState, String)> = panes
         .iter()
         .map(|p| {
-            state_map
+            let state = state_map
                 .get(&p.pane_id)
-                .map(|info| info.status.to_string())
-                .unwrap_or_else(|| AgentState::Unknown.to_string())
+                .map(|info| info.status)
+                .unwrap_or(AgentState::Unknown);
+            (state, state.to_string())
         })
         .collect();
 
@@ -305,8 +336,8 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
     let tool_counts: Vec<String> = panes
         .iter()
         .zip(states.iter())
-        .map(|(p, state)| {
-            if state == "unknown" {
+        .map(|(p, (state, _))| {
+            if *state == AgentState::Unknown {
                 return String::new();
             }
             let active_tools = state_map
@@ -324,7 +355,7 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
     let max_agent = panes.iter().map(|p| p.agent.width()).max().unwrap_or(0);
     let max_session = panes.iter().map(|p| p.session.width()).max().unwrap_or(0);
     let max_wp = window_pane.iter().map(|s| s.width()).max().unwrap_or(0);
-    let max_state = states.iter().map(|s| s.width()).max().unwrap_or(0);
+    let max_state = states.iter().map(|(_, s)| s.width()).max().unwrap_or(0);
 
     let col1 = max_agent + 2;
     let col2 = max_session + 2;
@@ -332,7 +363,7 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
     let col4 = max_state + 2;
 
     let mut output = String::new();
-    for (((pane, wp), state), tool_count) in panes
+    for (((pane, wp), (state, state_text)), tool_count) in panes
         .iter()
         .zip(window_pane.iter())
         .zip(states.iter())
@@ -341,7 +372,8 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
         let pad1 = col1 - pane.agent.width();
         let pad2 = col2 - pane.session.width();
         let pad3 = col3 - wp.width();
-        let pad4 = col4 - state.width();
+        let pad4 = col4 - state_text.width();
+        let rendered_state = colorize_state(*state, state_text, use_color);
         let mut line = format!(
             "{}{}{}{}{}{}{}",
             pane.agent,
@@ -350,7 +382,7 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
             " ".repeat(pad2),
             wp,
             " ".repeat(pad3),
-            state,
+            rendered_state,
         );
         if !tool_count.is_empty() {
             line.push_str(&" ".repeat(pad4));
@@ -439,7 +471,8 @@ pub fn run(server: Option<String>, sort_by: SortKey, reverse: bool) -> Result<()
 
     sort_panes(&mut agent_panes, sort_by, reverse, &state_map);
 
-    let output = format_panes(&agent_panes, &state_map);
+    let use_color = std::io::stdout().is_terminal();
+    let output = format_panes(&agent_panes, &state_map, use_color);
     print!("{output}");
 
     Ok(())
@@ -530,7 +563,7 @@ mod tests {
             pane_with_id("pi", "🌳 radr (list-sort)", 0, 0, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map());
+        let output = format_panes(&refs, &empty_state_map(), false);
 
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3);
@@ -568,7 +601,7 @@ mod tests {
             pane_with_id("pi", "work-session", 2, 3, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map());
+        let output = format_panes(&refs, &empty_state_map(), false);
 
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3, "expected 3 lines, got:\n{output}");
@@ -582,13 +615,13 @@ mod tests {
     fn format_panes_single_entry() {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map());
+        let output = format_panes(&refs, &empty_state_map(), false);
         assert_eq!(output, "claude  dev  0.0  unknown\n");
     }
 
     #[test]
     fn format_panes_empty_returns_empty_string() {
-        let output = format_panes(&[], &empty_state_map());
+        let output = format_panes(&[], &empty_state_map(), false);
         assert_eq!(output, "");
     }
 
@@ -600,7 +633,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map);
+        let output = format_panes(&refs, &state_map, false);
         assert!(
             output.contains("working"),
             "expected 'working' in: {output}"
@@ -618,7 +651,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map);
+        let output = format_panes(&refs, &state_map, false);
         assert_eq!(output, "claude  dev  0.0  working  1 tool\n");
     }
 
@@ -631,7 +664,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map);
+        let output = format_panes(&refs, &state_map, false);
         assert_eq!(output, "claude  dev  0.0  working  3 tools\n");
     }
 
@@ -643,7 +676,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map);
+        let output = format_panes(&refs, &state_map, false);
         assert_eq!(output, "claude  dev  0.0  working\n");
     }
 
@@ -653,7 +686,7 @@ mod tests {
         let state_map = empty_state_map();
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%missing")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map);
+        let output = format_panes(&refs, &state_map, false);
         assert_eq!(output, "claude  dev  0.0  unknown\n");
     }
 
@@ -670,11 +703,146 @@ mod tests {
             pane_with_id("pi", "dev", 0, 1, "%2"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map);
+        let output = format_panes(&refs, &state_map, false);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], "claude  dev  0.0  working  1 tool");
         assert_eq!(lines[1], "pi      dev  0.1  idle");
+    }
+
+    // ── colorize_state ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn colorize_state_use_color_false_returns_plain_text() {
+        for state in [
+            AgentState::Idle,
+            AgentState::Working,
+            AgentState::Blocked,
+            AgentState::Done,
+            AgentState::Unknown,
+        ] {
+            let text = state.to_string();
+            assert_eq!(colorize_state(state, &text, false), text);
+        }
+    }
+
+    #[test]
+    fn colorize_state_idle_is_bright_black() {
+        let out = colorize_state(AgentState::Idle, "idle", true);
+        assert_eq!(out, "\u{1b}[90midle\u{1b}[39m");
+    }
+
+    #[test]
+    fn colorize_state_working_is_yellow() {
+        let out = colorize_state(AgentState::Working, "working", true);
+        assert_eq!(out, "\u{1b}[33mworking\u{1b}[39m");
+    }
+
+    #[test]
+    fn colorize_state_blocked_is_red() {
+        let out = colorize_state(AgentState::Blocked, "blocked", true);
+        assert_eq!(out, "\u{1b}[31mblocked\u{1b}[39m");
+    }
+
+    #[test]
+    fn colorize_state_done_is_green() {
+        let out = colorize_state(AgentState::Done, "done", true);
+        assert_eq!(out, "\u{1b}[32mdone\u{1b}[39m");
+    }
+
+    #[test]
+    fn colorize_state_unknown_is_uncolored_even_with_use_color_true() {
+        let out = colorize_state(AgentState::Unknown, "unknown", true);
+        assert_eq!(out, "unknown");
+    }
+
+    // ── format_panes color wiring ────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_panes_use_color_true_wraps_state_in_ansi_codes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Idle).unwrap();
+        write_state_to(tmp.path(), "%2", "claude", AgentState::Working).unwrap();
+        write_state_to(tmp.path(), "%3", "claude", AgentState::Blocked).unwrap();
+        write_state_to(tmp.path(), "%4", "claude", AgentState::Done).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
+        let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
+        let p4 = pane_with_id("claude", "dev", 0, 3, "%4");
+        let p5 = pane_with_id("claude", "dev", 0, 4, "%5"); // no state file → unknown
+        let refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5];
+        let output = format_panes(&refs, &state_map, true);
+
+        assert!(output.contains("\u{1b}[90midle\u{1b}[39m"));
+        assert!(output.contains("\u{1b}[33mworking\u{1b}[39m"));
+        assert!(output.contains("\u{1b}[31mblocked\u{1b}[39m"));
+        assert!(output.contains("\u{1b}[32mdone\u{1b}[39m"));
+        // unknown remains uncolored
+        let unknown_line = output.lines().last().unwrap();
+        assert!(unknown_line.ends_with("unknown"));
+        assert!(!unknown_line.contains("\u{1b}["));
+    }
+
+    #[test]
+    fn format_panes_use_color_false_matches_pre_change_plain_output() {
+        let data = vec![
+            pane_with_id("claude", "my-session", 0, 0, "%1"),
+            pane_with_id("pi", "work-session", 1, 0, "%2"),
+            pane_with_id("pi", "work-session", 2, 3, "%3"),
+        ];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &empty_state_map(), false);
+
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines[0], "claude  my-session    0.0  unknown");
+        assert_eq!(lines[1], "pi      work-session  1.0  unknown");
+        assert_eq!(lines[2], "pi      work-session  2.3  unknown");
+        assert!(!output.contains("\u{1b}["));
+    }
+
+    #[test]
+    fn format_panes_color_does_not_break_alignment() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Idle).unwrap();
+        write_state_to(tmp.path(), "%2", "claude", AgentState::Blocked).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
+        let refs: Vec<&PaneEntry> = vec![&p1, &p2];
+
+        let colored = format_panes(&refs, &state_map, true);
+        let plain = format_panes(&refs, &state_map, false);
+
+        // Strip ANSI escape sequences from the colored output and compare
+        // display-column start offsets against the plain-text version.
+        fn strip_ansi(s: &str) -> String {
+            let mut out = String::new();
+            let mut chars = s.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c == '\u{1b}' {
+                    // Skip until 'm' terminator.
+                    for c2 in chars.by_ref() {
+                        if c2 == 'm' {
+                            break;
+                        }
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        }
+
+        let colored_lines: Vec<&str> = colored.lines().collect();
+        let plain_lines: Vec<&str> = plain.lines().collect();
+        assert_eq!(colored_lines.len(), plain_lines.len());
+        for (colored_line, plain_line) in colored_lines.iter().zip(plain_lines.iter()) {
+            let stripped = strip_ansi(colored_line);
+            assert_eq!(&stripped, plain_line);
+        }
     }
 
     // ── validate_state_files ───────────────────────────────────────────────────────────
