@@ -14,8 +14,8 @@
 - [ ] 2.1 Add `src/events_log.rs` with an `EventRecord` type (event name, `id`,
       optional `type`, `harness`, `pane_id`, timestamp) and an
       `append_event_to(base, pane_id, record)` function that appends one JSON
-      line to `<base>/radr/agents/<pane-id>/events-log.jsonl`, creating the
-      file/dir if absent
+      line to `<base>/radr/agents/<pane-id>/events.jsonl`, creating the file/dir
+      if absent
 - [ ] 2.2 Unit tests: first event creates the file with one line; second event
       appends without truncating; file/dir created when absent
 
@@ -107,9 +107,8 @@
       field across `tests/common/mod.rs` and elsewhere
 - [ ] 7.2 Manually install both harnesses in a scratch tmux pane, drive a full
       run (including a permission prompt / `AskUserQuestion`), and confirm
-      `state.json` shows the expected `status` transitions and
-      `events-log.jsonl` records every dispatched event, including
-      `SESSION_STARTED`
+      `state.json` shows the expected `status` transitions and `events.jsonl`
+      records every dispatched event, including `SESSION_STARTED`
 - [ ] 7.3 Update `README`/help text (`rd agent --help`, `Cli` doc comments) to
       describe `rd agent event` (including `SESSION_STARTED`) in place of
       `rd agent status`

@@ -41,7 +41,7 @@ calls).
   today's status transitions for either the `pi` or `claude` integration.
 - Rename `state.json`'s `state` field to `status`.
 - Persist every dispatched event, including `SESSION_STARTED`, to an append-only
-  `events-log.jsonl` alongside `state.json`.
+  `events.jsonl` alongside `state.json`.
 - Define concretely how `pi` and `claude` produce the required `id` (and, where
   relevant, `type`) fields for each event, since each harness has very different
   constraints (in-process extension vs. stateless per-hook processes).
@@ -50,8 +50,8 @@ calls).
 
 - Tracking or exposing `active_tool_calls` (deferred to a future change).
 - Changing `rd list`, `rd agent clear`, or stale-state validation behavior.
-- Replaying or otherwise programmatically consuming `events-log.jsonl` (write
-  path only, for now).
+- Replaying or otherwise programmatically consuming `events.jsonl` (write path
+  only, for now).
 - Reworking Claude's hook matcher set beyond what's needed to preserve current
   behavior (e.g. not instrumenting every tool call).
 
@@ -89,15 +89,15 @@ does per subcommand.
 `idle` no longer has a bespoke non-event command. `SESSION_STARTED` is added as
 a fifth event so that "a harness session began" is expressed the same way as
 every other fact radr tracks: dispatched via `rd agent event`, validated by
-clap, run through the FSM, and appended to `events-log.jsonl` like any other
-event. This replaces the `rd agent init` idea from an earlier draft of this
-proposal — everything now goes through one event-dispatching interface, with
+clap, run through the FSM, and appended to `events.jsonl` like any other event.
+This replaces the `rd agent init` idea from an earlier draft of this proposal —
+everything now goes through one event-dispatching interface, with
 `rd agent clear` (deletion, not a status value) remaining the sole exception,
 since it removes the pane's tracked state entirely rather than reporting a fact
 about it.
 
 `SESSION_STARTED --id <ID>` requires an `id` for consistency with every other
-event and so `events-log.jsonl` entries are uniformly correlatable (e.g. to a
+event and so `events.jsonl` entries are uniformly correlatable (e.g. to a
 harness's session id), even though `SESSION_STARTED` has no terminating
 counterpart to reconcile against.
 
@@ -122,8 +122,8 @@ left over from a crashed prior session), matching the old `rd agent status idle`
 behavior at `session_start`/`SessionStart`.
 
 `TOOL_CALL_START`/`TOOL_CALL_RESULT` with `type: custom` or no `type` are
-accepted (written to `events-log.jsonl`) but do not drive any status transition
-in this change — they exist for future use (e.g. counting active tool calls) and
+accepted (written to `events.jsonl`) but do not drive any status transition in
+this change — they exist for future use (e.g. counting active tool calls) and
 are no-ops for `status` today. An event that doesn't match a defined transition
 for the current state (e.g. a stray `TOOL_CALL_RESULT` when not `Blocked`) is a
 no-op for `status` (logged, not rejected), since hook delivery can race or
@@ -132,7 +132,7 @@ harness's hook chain.
 
 `id` is recorded on every event but, in this change, is not used to strictly
 reject mismatched start/end pairs — see Open Questions. It's threaded end-to-end
-(CLI → FSM input → `events-log.jsonl`) so a later change can add strict
+(CLI → FSM input → `events.jsonl`) so a later change can add strict
 reconciliation (e.g. rejecting a `TOOL_CALL_RESULT` whose `id` doesn't match the
 currently-open `TOOL_CALL_START`) without changing the CLI surface.
 
@@ -141,7 +141,7 @@ currently-open `TOOL_CALL_START`) without changing the CLI surface.
 and because the declarative transition-table style scales better as more
 events/states are added later.
 
-### 4. `state.json` and `events-log.jsonl` layout
+### 4. `state.json` and `events.jsonl` layout
 
 `state.json` keeps its existing fields except `state` → `status`:
 
@@ -154,9 +154,8 @@ events/states are added later.
 }
 ```
 
-`events-log.jsonl` lives at
-`$XDG_DATA_HOME/radr/agents/<pane-id>/events-log.jsonl`, one JSON object per
-line, e.g.:
+`events.jsonl` lives at `$XDG_DATA_HOME/radr/agents/<pane-id>/events.jsonl`, one
+JSON object per line, e.g.:
 
 ```json
 {"event":"SESSION_STARTED","id":"...","harness":"claude","pane_id":"%12","timestamp":"..."}
@@ -269,8 +268,8 @@ to be a real installation obstacle in practice.
 - **[Risk]** Leniency in the FSM (unknown/mismatched transitions are
   logged-but-ignored no-ops rather than errors) could mask a genuinely broken
   harness integration → **Mitigation**: every event is still written to
-  `events-log.jsonl` regardless of whether it drove a transition, so mismatches
-  are inspectable after the fact.
+  `events.jsonl` regardless of whether it drove a transition, so mismatches are
+  inspectable after the fact.
 - **[Trade-off]** Splitting `PostToolUse` into two hook registrations (matched +
   unmatched) instead of Claude's previous single unmatched registration adds one
   more entry to `rd install claude`'s generated settings. This is judged an
@@ -284,8 +283,8 @@ to be a real installation obstacle in practice.
    in place — no separate migration of on-disk files is needed since
    `rd agent clear` already deletes state on session end and `rd list`'s
    stale-state validation prunes anything else).
-2. Add `events-log.jsonl` writing, wired through the same write path as
-   `state.json` so every event append and status write happen together.
+2. Add `events.jsonl` writing, wired through the same write path as `state.json`
+   so every event append and status write happen together.
 3. Add `rd agent event <NAME>` (including `SESSION_STARTED`); remove
    `rd agent status`.
 4. Update `rd install pi` / `rd install claude` templates and their

@@ -84,7 +84,7 @@ machine SHALL apply the following transitions:
 - `Blocked` on `TOOL_CALL_RESULT` with `type: elicitation` → `Working`
 
 An event that does not match a defined transition for the pane's current status
-SHALL NOT change `status`, but SHALL still be appended to `events-log.jsonl`.
+SHALL NOT change `status`, but SHALL still be appended to `events.jsonl`.
 
 #### Scenario: SESSION_STARTED resets an idle pane to idle
 
@@ -157,28 +157,28 @@ SHALL NOT change `status`, but SHALL still be appended to `events-log.jsonl`.
   `TOOL_CALL_RESULT --id t4 --type elicitation` is dispatched (no corresponding
   `Blocked` status)
 - **THEN** the pane's `status` remains `idle` and the event is still appended to
-  `events-log.jsonl`
+  `events.jsonl`
 
-### Requirement: Every dispatched event is appended to events-log.jsonl
+### Requirement: Every dispatched event is appended to events.jsonl
 
 The system SHALL append every event dispatched via `rd agent event`, including
 `SESSION_STARTED`, as one JSON object per line to
-`$XDG_DATA_HOME/radr/agents/<pane-id>/events-log.jsonl`, creating the file and
-its parent directory if absent. Each logged line SHALL include at least the
-event name, `id`, `harness`, `pane_id`, and a timestamp; `TOOL_CALL_*` events
-SHALL include `type` when supplied.
+`$XDG_DATA_HOME/radr/agents/<pane-id>/events.jsonl`, creating the file and its
+parent directory if absent. Each logged line SHALL include at least the event
+name, `id`, `harness`, `pane_id`, and a timestamp; `TOOL_CALL_*` events SHALL
+include `type` when supplied.
 
 #### Scenario: First event creates the log file
 
 - **WHEN** `rd agent event SESSION_STARTED --id s1 --harness claude --pane %12`
-  is dispatched and no `events-log.jsonl` exists yet for `%12`
-- **THEN** `$XDG_DATA_HOME/radr/agents/%12/events-log.jsonl` is created
-  containing exactly one line describing the `SESSION_STARTED` event
+  is dispatched and no `events.jsonl` exists yet for `%12`
+- **THEN** `$XDG_DATA_HOME/radr/agents/%12/events.jsonl` is created containing
+  exactly one line describing the `SESSION_STARTED` event
 
 #### Scenario: Subsequent events are appended, not overwritten
 
 - **WHEN** a second event is dispatched for a pane that already has an
-  `events-log.jsonl` with prior lines
+  `events.jsonl` with prior lines
 - **THEN** the new event is appended as an additional line and all prior lines
   remain unchanged
 
@@ -186,7 +186,7 @@ SHALL include `type` when supplied.
 
 - **WHEN** an event is dispatched that does not match any FSM transition for the
   pane's current status
-- **THEN** the event is still appended to `events-log.jsonl`
+- **THEN** the event is still appended to `events.jsonl`
 
 ### Requirement: rd agent status is removed
 

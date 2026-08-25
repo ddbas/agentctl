@@ -32,8 +32,8 @@ pipeline exists.
   everything is now handled through the event dispatcher, with no separate
   non-event bootstrap command. Dispatching `SESSION_STARTED` (re)sets a pane's
   status to `idle` from any prior status (including a stale `working`/`blocked`
-  left over from a crashed session) and is recorded in `events-log.jsonl` like
-  every other event.
+  left over from a crashed session) and is recorded in `events.jsonl` like every
+  other event.
 - Introduce a finite state machine (using the `rust-fsm` crate) that consumes
   the five events and derives the existing
   `idle → working → blocked ⇄ working → done → working → …` status lifecycle,
@@ -46,8 +46,8 @@ pipeline exists.
   unambiguously now that the file will need to accommodate other,
   independently-tracked state in future changes (starting with active tool call
   counts). This change does not yet add any such additional field.
-- Add an append-only `events-log.jsonl` file alongside `state.json`
-  (`$XDG_DATA_HOME/radr/agents/<pane-id>/events-log.jsonl`) that records every
+- Add an append-only `events.jsonl` file alongside `state.json`
+  (`$XDG_DATA_HOME/radr/agents/<pane-id>/events.jsonl`) that records every
   dispatched event as one JSON object per line, for inspection and future
   replay/debugging. This is the first consumer of an events-log abstraction
   designed so more event-driven state can be added later without changing the
@@ -66,7 +66,7 @@ pipeline exists.
   tracked state derived from `TOOL_CALL_START`/`TOOL_CALL_RESULT` beyond
   deriving `blocked`/`working`.
 - Surfacing anything new in `rd list` output.
-- Replaying or otherwise consuming `events-log.jsonl` programmatically (it is
+- Replaying or otherwise consuming `events.jsonl` programmatically (it is
   written for manual inspection only in this change).
 
 ## Capabilities
@@ -76,7 +76,7 @@ pipeline exists.
 - `agent-events`: Event-dispatching CLI (`rd agent event <EVENT_NAME> ...`), the
   payload schema for `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
   `TOOL_CALL_START`, `TOOL_CALL_RESULT`, the FSM that derives `status` from the
-  event stream, and the `events-log.jsonl` append-only log.
+  event stream, and the `events.jsonl` append-only log.
 
 ### Modified Capabilities
 
@@ -98,7 +98,7 @@ pipeline exists.
   matching/upgrade logic for `rd agent status` command strings), `src/main.rs`
   (CLI wiring), `tests/agent_commands.rs`, `tests/common/mod.rs`.
 - New dependency: `rust-fsm`.
-- New on-disk artifact: `events-log.jsonl` next to `state.json` in each agent's
+- New on-disk artifact: `events.jsonl` next to `state.json` in each agent's
   state directory.
 - No change to `rd list`, `rd agent clear`, or the stale-state validation logic
   beyond reading the renamed `status` field.

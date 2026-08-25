@@ -173,7 +173,7 @@ branching logic is required inside `rd`.
 ### Requirement: SessionEnd hook calls rd agent clear
 
 The Claude `SessionEnd` hook SHALL invoke `rd agent clear` so the state file
-(and its `events-log.jsonl`) is removed when the session exits normally.
+(and its `events.jsonl`) is removed when the session exits normally.
 `rd agent clear` exits 0 silently when `$TMUX_PANE` is not set or when no state
 file exists.
 
@@ -181,7 +181,7 @@ file exists.
 
 - **WHEN** Claude fires the `SessionEnd` hook and `$TMUX_PANE` is set
 - **THEN** the state file at `$XDG_DATA_HOME/radr/agents/$TMUX_PANE/state.json`
-  and its `events-log.jsonl` sibling are deleted
+  and its `events.jsonl` sibling are deleted
 
 #### Scenario: SessionEnd is a no-op when no state file exists
 
