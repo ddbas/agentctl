@@ -1,32 +1,53 @@
-//! Integration tests for the `rd agent status` and `rd agent clear` subcommands.
+//! Integration tests for the `rd agent event` and `rd agent clear` subcommands.
 
 mod common;
 
-// ── rd agent status ──────────────────────────────────────────────────────────────
+// ── rd agent event ────────────────────────────────────────────────────────────
 
-/// `rd agent status working --harness claude --pane %42` should write a state
-/// file under `XDG_DATA_HOME` and exit 0.
+/// `rd agent event RUN_STARTED --id r1 --harness claude --pane %42` should
+/// write a state file under `XDG_DATA_HOME` and exit 0.
 #[tokio::test]
-async fn set_state_writes_state_file() {
+async fn run_started_writes_state_file() {
     let env = common::TmuxEnv::new().await;
 
-    let output = env
+    // A real harness always dispatches SESSION_STARTED before any RUN_STARTED;
+    // mirror that here so the FSM starts from `idle` rather than `unknown`.
+    let session_output = env
         .rd()
         .args([
             "agent",
-            "status",
-            "working",
+            "event",
+            "SESSION_STARTED",
+            "--id",
+            "s1",
             "--harness",
             "claude",
             "--pane",
             "%42",
         ])
         .output()
-        .expect("failed to spawn rd agent status");
+        .expect("failed to spawn rd agent event SESSION_STARTED");
+    assert!(session_output.status.success());
+
+    let output = env
+        .rd()
+        .args([
+            "agent",
+            "event",
+            "RUN_STARTED",
+            "--id",
+            "r1",
+            "--harness",
+            "claude",
+            "--pane",
+            "%42",
+        ])
+        .output()
+        .expect("failed to spawn rd agent event");
 
     assert!(
         output.status.success(),
-        "`rd agent status` should exit 0; stderr: {}",
+        "`rd agent event RUN_STARTED` should exit 0; stderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
 
@@ -42,19 +63,35 @@ async fn set_state_writes_state_file() {
         contents.contains("claude"),
         "state file should contain harness 'claude'; got: {contents}"
     );
+
+    let events_path = env.events_file_path("%42");
+    assert!(
+        events_path.exists(),
+        "events.jsonl should have been created"
+    );
+    let events_contents = std::fs::read_to_string(&events_path).expect("read events file");
+    assert!(events_contents.contains("RUN_STARTED"));
 }
 
-/// `rd agent status idle --pane %10` without `--harness` should write `"unknown"`
-/// as the harness field.
+/// `rd agent event SESSION_STARTED --id s1 --pane %10` without `--harness`
+/// should write `"unknown"` as the harness field, and status `idle`.
 #[tokio::test]
-async fn set_state_defaults_harness_to_unknown() {
+async fn session_started_defaults_harness_to_unknown() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
         .rd()
-        .args(["agent", "status", "idle", "--pane", "%10"])
+        .args([
+            "agent",
+            "event",
+            "SESSION_STARTED",
+            "--id",
+            "s1",
+            "--pane",
+            "%10",
+        ])
         .output()
-        .expect("failed to spawn rd agent status");
+        .expect("failed to spawn rd agent event");
 
     assert!(output.status.success());
 
@@ -63,24 +100,28 @@ async fn set_state_defaults_harness_to_unknown() {
         contents.contains(r#""unknown""#),
         "harness field should be 'unknown'; got: {contents}"
     );
+    assert!(
+        contents.contains("idle"),
+        "status field should be 'idle'; got: {contents}"
+    );
 }
 
-/// `rd agent status` with `$TMUX_PANE` unset and no `--pane` flag should exit 0
+/// `rd agent event` with `$TMUX_PANE` unset and no `--pane` flag should exit 0
 /// silently without creating any state file.
 #[tokio::test]
-async fn set_state_no_pane_exits_silently() {
+async fn no_pane_exits_silently() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
         .rd()
-        .args(["agent", "status", "idle"])
+        .args(["agent", "event", "SESSION_STARTED", "--id", "s1"])
         .env_remove("TMUX_PANE")
         .output()
-        .expect("failed to spawn rd agent status");
+        .expect("failed to spawn rd agent event");
 
     assert!(
         output.status.success(),
-        "`rd agent status` should exit 0 silently when TMUX_PANE is unset"
+        "`rd agent event` should exit 0 silently when TMUX_PANE is unset"
     );
     assert!(
         output.stdout.is_empty() && output.stderr.is_empty(),
@@ -97,20 +138,141 @@ async fn set_state_no_pane_exits_silently() {
     );
 }
 
-/// `rd agent status <unknown>` should exit non-zero with an error message.
+/// `rd agent event <unknown-name>` should exit non-zero with an error message.
 #[tokio::test]
-async fn set_state_unknown_state_exits_nonzero() {
+async fn unknown_event_name_exits_nonzero() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
         .rd()
-        .args(["agent", "status", "flying", "--pane", "%1"])
+        .args(["agent", "event", "FLYING", "--id", "x", "--pane", "%1"])
         .output()
-        .expect("failed to spawn rd agent status");
+        .expect("failed to spawn rd agent event");
 
     assert!(
         !output.status.success(),
-        "`rd agent status` should exit non-zero for unknown state"
+        "`rd agent event` should exit non-zero for unknown event name"
+    );
+}
+
+/// `rd agent event RUN_STARTED --id r1 --type custom` should exit non-zero
+/// since `RUN_STARTED` does not accept `--type`.
+#[tokio::test]
+async fn type_on_run_started_exits_nonzero() {
+    let env = common::TmuxEnv::new().await;
+
+    let output = env
+        .rd()
+        .args([
+            "agent",
+            "event",
+            "RUN_STARTED",
+            "--id",
+            "r1",
+            "--type",
+            "custom",
+            "--pane",
+            "%1",
+        ])
+        .output()
+        .expect("failed to spawn rd agent event");
+
+    assert!(!output.status.success(), "RUN_STARTED should reject --type");
+}
+
+/// `rd agent event` without `--id` should exit non-zero and write nothing.
+#[tokio::test]
+async fn missing_id_exits_nonzero_and_writes_nothing() {
+    let env = common::TmuxEnv::new().await;
+
+    let output = env
+        .rd()
+        .args(["agent", "event", "RUN_STARTED", "--pane", "%77"])
+        .output()
+        .expect("failed to spawn rd agent event");
+
+    assert!(!output.status.success(), "missing --id should be rejected");
+    assert!(
+        !env.state_file_path("%77").exists(),
+        "no state file should be written when --id is missing"
+    );
+}
+
+/// The full session/run/blocked/run lifecycle produces the expected statuses.
+#[tokio::test]
+async fn full_lifecycle_transitions_through_expected_statuses() {
+    let env = common::TmuxEnv::new().await;
+    let pane = "%55";
+
+    let dispatch = |args: Vec<&str>| {
+        let mut full = vec!["agent", "event"];
+        full.extend(args);
+        full.push("--pane");
+        full.push(pane);
+        env.rd().args(full).output().expect("spawn rd agent event")
+    };
+
+    assert!(
+        dispatch(vec!["SESSION_STARTED", "--id", "s1"])
+            .status
+            .success()
+    );
+    assert!(
+        std::fs::read_to_string(env.state_file_path(pane))
+            .unwrap()
+            .contains("idle")
+    );
+
+    assert!(dispatch(vec!["RUN_STARTED", "--id", "r1"]).status.success());
+    assert!(
+        std::fs::read_to_string(env.state_file_path(pane))
+            .unwrap()
+            .contains("working")
+    );
+
+    assert!(
+        dispatch(vec![
+            "TOOL_CALL_START",
+            "--id",
+            "t1",
+            "--type",
+            "elicitation"
+        ])
+        .status
+        .success()
+    );
+    assert!(
+        std::fs::read_to_string(env.state_file_path(pane))
+            .unwrap()
+            .contains("blocked")
+    );
+
+    assert!(
+        dispatch(vec![
+            "TOOL_CALL_RESULT",
+            "--id",
+            "t1",
+            "--type",
+            "elicitation"
+        ])
+        .status
+        .success()
+    );
+    assert!(
+        std::fs::read_to_string(env.state_file_path(pane))
+            .unwrap()
+            .contains("working")
+    );
+
+    assert!(
+        dispatch(vec!["RUN_FINISHED", "--id", "r1"])
+            .status
+            .success()
+    );
+    assert!(
+        std::fs::read_to_string(env.state_file_path(pane))
+            .unwrap()
+            .contains("done")
     );
 }
 
@@ -121,12 +283,20 @@ async fn set_state_unknown_state_exits_nonzero() {
 async fn clear_state_removes_existing_state_file() {
     let env = common::TmuxEnv::new().await;
 
-    // Write a state file first via agent status.
+    // Write a state file first via agent event.
     let write_out = env
         .rd()
-        .args(["agent", "status", "done", "--pane", "%42"])
+        .args([
+            "agent",
+            "event",
+            "RUN_FINISHED",
+            "--id",
+            "r1",
+            "--pane",
+            "%42",
+        ])
         .output()
-        .expect("spawn agent status");
+        .expect("spawn agent event");
     assert!(write_out.status.success());
     assert!(env.state_file_path("%42").exists());
 
@@ -145,6 +315,10 @@ async fn clear_state_removes_existing_state_file() {
     assert!(
         !env.state_file_path("%42").exists(),
         "state file should have been deleted by rd agent clear"
+    );
+    assert!(
+        !env.events_file_path("%42").exists(),
+        "events.jsonl should have been deleted alongside state.json"
     );
 }
 

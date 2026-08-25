@@ -40,16 +40,22 @@ function rd(...args: string[]): void {
 }
 
 export default function (pi: ExtensionAPI) {
+  let runId: string | undefined;
+
   pi.on("session_start", async () => {
-    rd("agent", "status", "idle", "--harness", "pi");
+    const sessionId = crypto.randomUUID();
+    rd("agent", "event", "SESSION_STARTED", "--id", sessionId, "--harness", "pi");
   });
 
   pi.on("before_agent_start", async () => {
-    rd("agent", "status", "working", "--harness", "pi");
+    runId = crypto.randomUUID();
+    rd("agent", "event", "RUN_STARTED", "--id", runId, "--harness", "pi");
   });
 
   pi.on("agent_settled", async () => {
-    rd("agent", "status", "done", "--harness", "pi");
+    if (runId) {
+      rd("agent", "event", "RUN_FINISHED", "--id", runId, "--harness", "pi");
+    }
   });
 
   pi.on("session_shutdown", async () => {
@@ -185,9 +191,9 @@ fn print_pi_summary(dest: &Path, status: FileStatus) {
         FileStatus::New | FileStatus::Updated => {
             let prefix = if status == FileStatus::New { "+" } else { "~" };
             println!("  {prefix} {path_display}");
-            println!("    session_start        → rd agent status idle --harness pi");
-            println!("    before_agent_start   → rd agent status working --harness pi");
-            println!("    agent_settled        → rd agent status done --harness pi");
+            println!("    session_start        → rd agent event SESSION_STARTED --harness pi");
+            println!("    before_agent_start   → rd agent event RUN_STARTED --harness pi");
+            println!("    agent_settled        → rd agent event RUN_FINISHED --harness pi");
             println!("    session_shutdown     → rd agent clear");
         }
         FileStatus::Unchanged => {
@@ -216,48 +222,58 @@ struct ClaudeHookDef {
     async_: bool,
 }
 
-/// The eight radr hook entries to register in `~/.claude/settings.json`.
+/// The nine radr hook entries to register in `~/.claude/settings.json`.
+///
+/// Every command reads the hook's JSON payload from stdin via `jq` and
+/// forwards the extracted field as `--id` to `rd agent event`/`rd agent
+/// clear`, per `specs/claude-state-hooks/spec.md`.
 const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "SessionStart",
         matcher: Some("startup|resume|clear"),
-        command: "rd agent status idle --harness claude",
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#,
         async_: false,
     },
     ClaudeHookDef {
         event: "UserPromptSubmit",
         matcher: None,
-        command: "rd agent status working --harness claude",
-        async_: true,
-    },
-    ClaudeHookDef {
-        event: "PostToolUse",
-        matcher: None,
-        command: "rd agent status working --harness claude",
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
         event: "PreToolUse",
         matcher: Some("AskUserQuestion|ExitPlanMode"),
-        command: "rd agent status blocked --harness claude",
+        command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
-        event: "Stop",
-        matcher: None,
-        command: "rd agent status done --harness claude",
+        event: "PostToolUse",
+        matcher: Some("AskUserQuestion|ExitPlanMode"),
+        command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
-        event: "StopFailure",
+        event: "PostToolUse",
         matcher: None,
-        command: "rd agent status done --harness claude",
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
         event: "Notification",
         matcher: Some("permission_prompt"),
-        command: "rd agent status blocked --harness claude",
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude"#,
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "Stop",
+        matcher: None,
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"#,
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "StopFailure",
+        matcher: None,
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
@@ -270,15 +286,17 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
 
 /// Returns `true` if `cmd` is a radr-managed command.
 ///
-/// Radr commands match the current command forms (`rd agent status ` prefix
-/// or `rd agent clear`), the intermediate pre-rename forms (`rd state set `
-/// prefix or `rd state clear`), or the earliest pre-rename forms
-/// (`rd set-state ` prefix or `rd clear-state`), so installs from an older
-/// `rd` binary — of either vintage — are still recognized and cleaned up
-/// during migration.
+/// Radr commands match the current shell-snippet forms (containing
+/// `rd agent event `) or `rd agent clear`, the previous imperative forms
+/// (`rd agent status ` prefix), the intermediate pre-rename forms (`rd state
+/// set ` prefix or `rd state clear`), or the earliest pre-rename forms (`rd
+/// set-state ` prefix or `rd clear-state`), so installs from an older `rd`
+/// binary — of any vintage — are still recognized and cleaned up during
+/// migration.
 fn is_radr_command(cmd: &str) -> bool {
-    cmd.starts_with("rd agent status ")
+    cmd.contains("rd agent event ")
         || cmd == "rd agent clear"
+        || cmd.starts_with("rd agent status ")
         || cmd.starts_with("rd state set ")
         || cmd == "rd state clear"
         || cmd.starts_with("rd set-state ")
@@ -533,7 +551,7 @@ fn build_claude_hook_entry(hook: &ClaudeHookDef) -> serde_json::Value {
 /// - `=` entry was already correct — no change
 /// - `-` entry was superseded and removed
 pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String)]) -> String {
-    let mut lines = vec!["Installed radr hooks for claude (8 entries):".to_string()];
+    let mut lines = vec!["Installed radr hooks for claude (9 entries):".to_string()];
 
     // Show removed (superseded) entries first so they're visible.
     for (event, cmd) in removed {
@@ -556,6 +574,7 @@ pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String
             hook.command, async_label
         ));
     }
+    lines.push("(requires `jq` on PATH to parse hook payloads)".to_string());
     lines.join("\n")
 }
 
@@ -798,13 +817,53 @@ mod tests {
             "stale state-generation file should be overwritten with the new agent-generation content"
         );
         assert!(
-            content.contains(r#"rd("agent", "status", "idle", "--harness", "pi")"#),
-            "overwritten content should call rd agent status"
+            content.contains(r#"rd("agent", "event", "SESSION_STARTED", "#),
+            "overwritten content should call rd agent event"
         );
         assert!(
             content.contains(r#"rd("agent", "clear")"#),
             "overwritten content should call rd agent clear"
         );
+    }
+
+    // ── task 5.2: overwrites a stale file generated by the `agent status` era ──
+
+    #[test]
+    fn install_pi_overwrites_stale_agent_status_file() {
+        let tmp = TempDir::new().unwrap();
+        let dest = ext_path(&tmp);
+
+        // Stale content mirroring what an `rd install pi` from the previous
+        // `status`-generation would have written (calls
+        // `rd("agent", "status", ...)`).
+        let stale = r#"export default function (pi) {
+  pi.on("session_start", async () => {
+    rd("agent", "status", "idle", "--harness", "pi");
+  });
+  pi.on("before_agent_start", async () => {
+    rd("agent", "status", "working", "--harness", "pi");
+  });
+  pi.on("agent_settled", async () => {
+    rd("agent", "status", "done", "--harness", "pi");
+  });
+  pi.on("session_shutdown", async () => {
+    rd("agent", "clear");
+  });
+}
+"#;
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, stale).unwrap();
+
+        install_pi_to(&dest).expect("install over stale agent-status file");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        assert_eq!(
+            content, PI_EXTENSION_CONTENT,
+            "stale agent-status file should be overwritten with the new event-generation content"
+        );
+        assert!(content.contains(r#"rd("agent", "event", "SESSION_STARTED", "#));
+        assert!(content.contains(r#"rd("agent", "event", "RUN_STARTED", "#));
+        assert!(content.contains(r#"rd("agent", "event", "RUN_FINISHED", "#));
     }
     // ── task 2.4: creates directory when missing ──────────────────────────────
 
@@ -834,8 +893,10 @@ mod tests {
             "should handle session_start"
         );
         assert!(
-            PI_EXTENSION_CONTENT.contains(r#"rd("agent", "status", "idle", "--harness", "pi")"#),
-            "session_start should call rd agent status idle"
+            PI_EXTENSION_CONTENT.contains(
+                r#"rd("agent", "event", "SESSION_STARTED", "--id", sessionId, "--harness", "pi")"#
+            ),
+            "session_start should call rd agent event SESSION_STARTED"
         );
 
         assert!(
@@ -843,8 +904,10 @@ mod tests {
             "should handle before_agent_start"
         );
         assert!(
-            PI_EXTENSION_CONTENT.contains(r#"rd("agent", "status", "working", "--harness", "pi")"#),
-            "before_agent_start should call rd agent status working"
+            PI_EXTENSION_CONTENT.contains(
+                r#"rd("agent", "event", "RUN_STARTED", "--id", runId, "--harness", "pi")"#
+            ),
+            "before_agent_start should call rd agent event RUN_STARTED"
         );
 
         assert!(
@@ -852,8 +915,10 @@ mod tests {
             "should handle agent_settled"
         );
         assert!(
-            PI_EXTENSION_CONTENT.contains(r#"rd("agent", "status", "done", "--harness", "pi")"#),
-            "agent_settled should call rd agent status done"
+            PI_EXTENSION_CONTENT.contains(
+                r#"rd("agent", "event", "RUN_FINISHED", "--id", runId, "--harness", "pi")"#
+            ),
+            "agent_settled should call rd agent event RUN_FINISHED"
         );
 
         assert!(
@@ -906,7 +971,6 @@ mod tests {
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
-            "PostToolUse",
             "PreToolUse",
             "Stop",
             "StopFailure",
@@ -918,6 +982,17 @@ mod tests {
                 .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
             assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
         }
+
+        // PostToolUse is registered twice: matched (interactive tools) and
+        // unmatched (closes out permission-prompt blocks).
+        let post_tool_use = hooks["PostToolUse"]
+            .as_array()
+            .expect("hooks.PostToolUse should be an array");
+        assert_eq!(
+            post_tool_use.len(),
+            2,
+            "hooks.PostToolUse should have exactly two entries (matched + unmatched)"
+        );
     }
 
     // ── task 3.2: idempotent re-run ──────────────────────────────────────────
@@ -947,12 +1022,13 @@ mod tests {
             "content should be identical"
         );
 
-        // No duplicate entries — all 8 events, each exactly once.
+        // No duplicate entries — every event, each exactly once, except
+        // PostToolUse which is registered twice by design (matched +
+        // unmatched).
         let parsed: serde_json::Value = serde_json::from_str(&content_after_second).unwrap();
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
-            "PostToolUse",
             "PreToolUse",
             "Stop",
             "StopFailure",
@@ -966,6 +1042,12 @@ mod tests {
                 "hooks.{event} should have no duplicates after second install"
             );
         }
+        let post_tool_use = parsed["hooks"]["PostToolUse"].as_array().unwrap();
+        assert_eq!(
+            post_tool_use.len(),
+            2,
+            "hooks.PostToolUse should have exactly two entries (matched + unmatched) after second install"
+        );
     }
 
     // ── task 2.3: merges with existing non-radr hooks ────────────────────────
@@ -1024,8 +1106,10 @@ mod tests {
                 .and_then(|h| h.as_array())
                 .map(|hs| {
                     hs.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str())
-                            == Some("rd agent status working --harness claude")
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("rd agent event RUN_STARTED"))
+                            .unwrap_or(false)
                     })
                 })
                 .unwrap_or(false)
@@ -1077,9 +1161,12 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_plus_for_new_entries() {
-        let statuses = vec![HookStatus::New; 8];
+        let statuses = vec![HookStatus::New; RADR_CLAUDE_HOOKS.len()];
         let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
+            if line.starts_with('(') {
+                continue; // trailing jq note line
+            }
             assert!(
                 line.trim_start().starts_with('+'),
                 "line should start with '+' for new entry: {line}"
@@ -1089,9 +1176,12 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_equals_for_existing_entries() {
-        let statuses = vec![HookStatus::Unchanged; 8];
+        let statuses = vec![HookStatus::Unchanged; RADR_CLAUDE_HOOKS.len()];
         let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
+            if line.starts_with('(') {
+                continue; // trailing jq note line
+            }
             assert!(
                 line.trim_start().starts_with('='),
                 "line should start with '=' for existing entry: {line}"
@@ -1101,9 +1191,12 @@ mod tests {
 
     #[test]
     fn format_claude_summary_uses_tilde_for_updated_entries() {
-        let statuses = vec![HookStatus::Updated; 8];
+        let statuses = vec![HookStatus::Updated; RADR_CLAUDE_HOOKS.len()];
         let summary = format_claude_summary(&statuses, &[]);
         for line in summary.lines().skip(1) {
+            if line.starts_with('(') {
+                continue; // trailing jq note line
+            }
             assert!(
                 line.trim_start().starts_with('~'),
                 "line should start with '~' for updated entry: {line}"
@@ -1113,7 +1206,7 @@ mod tests {
 
     #[test]
     fn format_claude_summary_shows_removed_entries_with_dash() {
-        let statuses = vec![HookStatus::Unchanged; 8];
+        let statuses = vec![HookStatus::Unchanged; RADR_CLAUDE_HOOKS.len()];
         let removed = vec![(
             "PreToolUse".to_string(),
             "rd agent status working --harness claude".to_string(),
@@ -1230,15 +1323,17 @@ mod tests {
                 .and_then(|h| h.as_array())
                 .map(|hs| {
                     hs.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str())
-                            == Some("rd agent status blocked --harness claude")
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("rd agent event TOOL_CALL_START"))
+                            .unwrap_or(false)
                     })
                 })
                 .unwrap_or(false)
         });
         assert!(
             has_blocked,
-            "new AskUserQuestion|ExitPlanMode → blocked entry should be present"
+            "new AskUserQuestion|ExitPlanMode → TOOL_CALL_START entry should be present"
         );
     }
 
@@ -1316,11 +1411,11 @@ mod tests {
 
         assert_eq!(
             parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            "rd agent status idle --harness claude"
+            r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#
         );
         assert_eq!(
             parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
-            "rd agent status working --harness claude"
+            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#
         );
         assert_eq!(
             parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
@@ -1329,7 +1424,7 @@ mod tests {
     }
 
     // ── task 4.1: migration — intermediate `rd state set`/`rd state clear` ───
-    // command strings are upgraded to `rd agent status`/`rd agent clear`.
+    // command strings are upgraded to `rd agent event`/`rd agent clear`.
 
     #[test]
     fn install_claude_migrates_state_command_strings() {
@@ -1401,12 +1496,108 @@ mod tests {
 
         assert_eq!(
             parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            "rd agent status idle --harness claude"
+            r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#
         );
         assert_eq!(
             parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
-            "rd agent status working --harness claude"
+            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#
         );
+        assert_eq!(
+            parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
+            "rd agent clear"
+        );
+    }
+
+    // ── task 6.2: migration — `rd agent status`/`rd agent clear` legacy forms ──
+    // are upgraded to `rd agent event`/`rd agent clear`.
+
+    #[test]
+    fn install_claude_migrates_agent_status_command_strings() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with radr hook entries using the `rd agent status` /
+        // `rd agent clear` command strings, as an `rd` binary installed after
+        // the `state`→`agent` rename but before this `status`→`event` rename
+        // would have written.
+        let existing = serde_json::json!({
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume|clear",
+                        "hooks": [{ "type": "command", "command": "rd agent status idle --harness claude" }]
+                    }
+                ],
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": "rd agent status working --harness claude" }]
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": "rd agent status done --harness claude" }]
+                    }
+                ],
+                "SessionEnd": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent clear" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        for event in &["SessionStart", "UserPromptSubmit", "Stop"] {
+            let arr = parsed["hooks"][event]
+                .as_array()
+                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+
+            let has_old_style = arr.iter().any(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|hs| {
+                        hs.iter().any(|h| {
+                            h.get("command")
+                                .and_then(|c| c.as_str())
+                                .map(|c| c.starts_with("rd agent status "))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            });
+            assert!(
+                !has_old_style,
+                "hooks.{event} should have no rd agent status command strings remaining"
+            );
+
+            assert_eq!(
+                arr.len(),
+                1,
+                "hooks.{event} should have exactly one entry (no duplicates) after migration"
+            );
+        }
+
+        assert_eq!(
+            parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#
+        );
+        assert_eq!(
+            parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#
+        );
+        assert_eq!(
+            parsed["hooks"]["Stop"][0]["hooks"][0]["command"],
+            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"#
+        );
+        // SessionEnd's `rd agent clear` is already the current form, so it
+        // should remain unchanged (Unchanged status, not re-added).
         assert_eq!(
             parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
             "rd agent clear"
@@ -1449,8 +1640,10 @@ mod tests {
                 .and_then(|h| h.as_array())
                 .map(|hs| {
                     hs.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str())
-                            == Some("rd agent status blocked --harness claude")
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("rd agent event TOOL_CALL_START"))
+                            .unwrap_or(false)
                     })
                 })
                 .unwrap_or(false)
@@ -1466,32 +1659,47 @@ mod tests {
     // ── task 3.7: PostToolUse entry ───────────────────────────────────────────
 
     #[test]
-    fn install_claude_posttooluse_has_working_command_and_no_matcher() {
+    fn install_claude_posttooluse_has_two_entries_matched_and_unmatched() {
         let tmp = TempDir::new().unwrap();
         let dest = claude_settings_path(&tmp);
         install_claude_to(&dest).expect("install");
 
         let content = fs::read_to_string(&dest).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        let entry = &parsed["hooks"]["PostToolUse"][0];
+        let entries = parsed["hooks"]["PostToolUse"]
+            .as_array()
+            .expect("PostToolUse should be an array");
+        assert_eq!(entries.len(), 2, "PostToolUse should have two entries");
 
-        // No matcher field (fires on all tool completions).
-        assert!(
-            entry.get("matcher").is_none(),
-            "PostToolUse entry should have no matcher"
-        );
-        // Command is rd agent status working.
-        let cmd = entry["hooks"][0]
+        let matched = entries
+            .iter()
+            .find(|e| {
+                e.get("matcher").and_then(|m| m.as_str()) == Some("AskUserQuestion|ExitPlanMode")
+            })
+            .expect("should have a matched PostToolUse entry");
+        let matched_cmd = matched["hooks"][0]
             .get("command")
             .and_then(|v| v.as_str())
-            .expect("PostToolUse hook should have a command");
-        assert_eq!(cmd, "rd agent status working --harness claude");
+            .expect("matched PostToolUse hook should have a command");
+        assert!(matched_cmd.contains("rd agent event TOOL_CALL_RESULT"));
+        assert!(matched_cmd.contains("--type elicitation"));
+
+        let unmatched = entries
+            .iter()
+            .find(|e| e.get("matcher").is_none())
+            .expect("should have an unmatched PostToolUse entry");
+        let unmatched_cmd = unmatched["hooks"][0]
+            .get("command")
+            .and_then(|v| v.as_str())
+            .expect("unmatched PostToolUse hook should have a command");
+        assert!(unmatched_cmd.contains("rd agent event TOOL_CALL_RESULT"));
+        assert!(unmatched_cmd.contains("perm-"));
     }
 
     // ── task 3.8: StopFailure entry ───────────────────────────────────────────
 
     #[test]
-    fn install_claude_stopfailure_has_done_command_async_and_no_matcher() {
+    fn install_claude_stopfailure_has_run_finished_command_async_and_no_matcher() {
         let tmp = TempDir::new().unwrap();
         let dest = claude_settings_path(&tmp);
         install_claude_to(&dest).expect("install");
@@ -1507,10 +1715,11 @@ mod tests {
         );
         let hook = &entry["hooks"][0];
         // Command.
-        assert_eq!(
-            hook.get("command").and_then(|v| v.as_str()),
-            Some("rd agent status done --harness claude")
-        );
+        let cmd = hook
+            .get("command")
+            .and_then(|v| v.as_str())
+            .expect("StopFailure hook should have a command");
+        assert!(cmd.contains("rd agent event RUN_FINISHED"));
         // Async.
         assert_eq!(
             hook.get("async"),
@@ -1725,6 +1934,42 @@ mod tests {
         assert!(
             parsed.get("hooks").is_none(),
             "hooks key should be pruned once all intermediate rd state legacy entries are removed"
+        );
+    }
+
+    // ── task 6.2: uninstall recognizes `rd agent status` legacy entries ──────
+
+    #[test]
+    fn uninstall_claude_removes_agent_status_legacy_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        let existing = serde_json::json!({
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume|clear",
+                        "hooks": [{ "type": "command", "command": "rd agent status idle --harness claude" }]
+                    }
+                ],
+                "SessionEnd": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent clear" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert!(
+            parsed.get("hooks").is_none(),
+            "hooks key should be pruned once all rd agent status legacy entries are removed"
         );
     }
 

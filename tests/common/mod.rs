@@ -294,13 +294,13 @@ impl TmuxEnv {
     /// Write a state file for the given pane under this env's XDG directory.
     ///
     /// The state is a minimal JSON file: `{"pane_id": ..., "harness": ...,
-    /// "state": ..., "updated_at": ...}`.  The file is written on the HOST at
+    /// "status": ..., "updated_at": ...}`.  The file is written on the HOST at
     /// `xdg_path/radr/agents/<pane_id>/state.json`.
-    pub fn write_state_file(&self, pane_id: &str, harness: &str, state: &str) {
+    pub fn write_state_file(&self, pane_id: &str, harness: &str, status: &str) {
         let dir = self.xdg_path.join("radr").join("agents").join(pane_id);
         std::fs::create_dir_all(&dir).expect("create agent dir");
         let json = format!(
-            r#"{{"pane_id":"{pane_id}","harness":"{harness}","state":"{state}","updated_at":"2026-01-01T00:00:00Z"}}"#
+            r#"{{"pane_id":"{pane_id}","harness":"{harness}","status":"{status}","updated_at":"2026-01-01T00:00:00Z"}}"#
         );
         std::fs::write(dir.join("state.json"), json).expect("write state file");
     }
@@ -313,5 +313,15 @@ impl TmuxEnv {
             .join("agents")
             .join(pane_id)
             .join("state.json")
+    }
+
+    /// Return the path of the events log file for the given pane under this
+    /// env's XDG directory.
+    pub fn events_file_path(&self, pane_id: &str) -> PathBuf {
+        self.xdg_path
+            .join("radr")
+            .join("agents")
+            .join(pane_id)
+            .join("events.jsonl")
     }
 }
