@@ -4,10 +4,13 @@
 
 The `list` subcommand SHALL accept a `--columns` flag (short: `-c`) whose value
 is a comma-delimited, ordered list of column names. Accepted column names SHALL
-be exactly the same vocabulary, spelling, and casing as the `--sort-by` flag's
-accepted values: `agent`, `session`, `pane`, `status`, `updatedAt`. The output
-SHALL render exactly the columns listed, in the exact order given, including
-repeated column names if the user repeats a name.
+be: `agent`, `session`, `pane`, `status`, `updatedAt`, `activeTools`. This
+vocabulary is a **strict superset** of the `--sort-by` flag's accepted values
+(`agent`, `session`, `pane`, `status`, `updatedAt`) — `activeTools` is a valid
+`--columns` value but is deliberately **not** a valid `--sort-by` value (see the
+`list-sorting` capability). The output SHALL render exactly the columns listed,
+in the exact order given, including repeated column names if the user repeats a
+name.
 
 #### Scenario: Custom column subset and order
 
@@ -32,30 +35,41 @@ repeated column names if the user repeats a name.
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing the valid column names
 
-#### Scenario: --columns and --sort-by share one vocabulary
+#### Scenario: --columns accepts every --sort-by value
 
 - **WHEN** a name is a valid value for `--sort-by`
 - **THEN** the same name (identical spelling and casing) is also a valid value
-  for `--columns`, and vice versa
+  for `--columns`
+
+#### Scenario: activeTools is valid for --columns but not for --sort-by
+
+- **WHEN** the user runs `rd list --columns activeTools`
+- **THEN** the command succeeds and each row's `activeTools` column is rendered
+- **WHEN** the user instead runs `rd list --sort-by activeTools`
+- **THEN** the command exits with a non-zero exit code and prints an error
+  message listing only the valid `--sort-by` values (`agent`, `session`, `pane`,
+  `status`, `updatedAt`), not `activeTools`
 
 ### Requirement: Default column set when --columns is omitted
 
 When `--columns` is not supplied, the `list` subcommand SHALL render the columns
-`agent`, `session`, `pane`, `status` in that order — matching the output
-produced prior to the introduction of `--columns`, aside from the `status`
-column's name (previously called `state`).
+`agent`, `session`, `pane`, `status`, `activeTools` in that order — matching the
+output produced prior to the introduction of `--columns`, aside from the
+`status` column's name (previously called `state`) and the `activeTools`
+column's name (previously an unnamed, unconditional fifth column).
 
 #### Scenario: Default output unchanged in content and order
 
 - **WHEN** the user runs `rd list` without `--columns`
-- **THEN** each output row contains four columns, in order: agent name, session
-  name, `window.pane`, and status
+- **THEN** each output row contains five columns, in order: agent name, session
+  name, `window.pane`, status, and active-tool count
 
 #### Scenario: Help text shows the default column list
 
 - **WHEN** the user runs `rd list --help`
 - **THEN** the `--columns` flag's help text displays its default value as the
-  literal, comma-delimited string a user would type: `agent,session,pane,status`
+  literal, comma-delimited string a user would type:
+  `agent,session,pane,status,activeTools`
 
 ### Requirement: updatedAt column renders a timestamp
 
@@ -76,6 +90,91 @@ render as an empty string for that row.
 - **WHEN** the user runs `rd list --columns agent,updatedAt` and a matching pane
   has no state file
 - **THEN** the `updatedAt` column for that row is an empty string
+
+### Requirement: activeTools column renders the in-flight tool-call count
+
+The `activeTools` column SHALL render the pane's `active_tools` count from its
+state file as `N tool` (singular, when `active_tools == 1`) or `N tools`
+(plural, when `active_tools > 1`). When `active_tools` is `0`, absent, or the
+pane's `status` is `unknown`, the `activeTools` column SHALL render as an empty
+string for that row. This is unchanged, pre-existing rendering behavior,
+formalized here as a named, selectable column rather than an unconditional fifth
+column.
+
+#### Scenario: Singular active tool count
+
+- **WHEN** the user runs `rd list` (or with `activeTools` in `--columns`) and a
+  pane's status is `working` with `active_tools: 1`
+- **THEN** that row's `activeTools` column reads `1 tool`
+
+#### Scenario: Plural active tool count
+
+- **WHEN** the user runs `rd list` (or with `activeTools` in `--columns`) and a
+  pane's status is `working` with `active_tools: 3`
+- **THEN** that row's `activeTools` column reads `3 tools`
+
+#### Scenario: Zero, absent, or unknown-status active tool count is empty
+
+- **WHEN** a pane's `active_tools` is `0`, absent, or its status is `unknown`
+- **THEN** that row's `activeTools` column is an empty string
+
+### Requirement: Status column is colorized independent of its position
+
+When standard output is a terminal, the `list` subcommand SHALL render the cell
+at whichever column position holds `status` in the effective (default or
+`--columns`-selected) column list wrapped in an ANSI foreground color escape
+sequence keyed to the agent's state (grey for `idle`, yellow for `working`, red
+for `blocked`, green for `done`, no color for `unknown`), identically regardless
+of that column's position or whether `status` is repeated. Only `status` cells
+are ever colorized; all other columns are always rendered as plain text. When
+standard output is **not** a terminal, every column — including `status` — SHALL
+be rendered as plain, uncolored text. Column widths SHALL always be computed
+from each cell's plain (uncolored) text, so coloring never affects alignment.
+
+#### Scenario: Status colorized regardless of column position
+
+- **WHEN** the user runs `rd list --columns status,agent` with stdout attached
+  to a terminal and a matching pane's status is `working`
+- **THEN** the first column's `working` text is wrapped in the yellow ANSI color
+  escape sequence, and the second column (`agent`) is never colorized
+
+#### Scenario: Repeated status columns are each colorized
+
+- **WHEN** the user runs `rd list --columns status,agent,status` with stdout
+  attached to a terminal
+- **THEN** both `status` columns for a given row are wrapped in the same color
+  escape sequence for that row's state
+
+#### Scenario: No coloring when stdout is not a terminal
+
+- **WHEN** the user runs `rd list` with stdout redirected to a file or piped to
+  another process, regardless of `--columns`
+- **THEN** no column, including `status`, contains ANSI escape sequences
+
+### Requirement: Trailing whitespace is trimmed from each rendered row
+
+The `list` subcommand SHALL trim any trailing whitespace from each rendered row
+after all selected columns for that row are padded to their column widths and
+joined with the two-space delimiter. This generalizes the pre-existing behavior
+where a row whose last column is empty (e.g. `activeTools` when
+zero/absent/unknown) produces no dangling delimiter or whitespace at the end of
+the line, to apply regardless of which column ends up last in a `--columns`
+selection.
+
+#### Scenario: Trailing whitespace trimmed for the default column set
+
+- **WHEN** the user runs `rd list` without `--columns` and a pane's status is
+  `working` with `active_tools: 0` (so the last column, `activeTools`, is empty
+  for that row)
+- **THEN** that row's line ends immediately after `working` with no trailing
+  delimiter or whitespace
+
+#### Scenario: Trailing whitespace trimmed for a custom last column
+
+- **WHEN** the user runs `rd list --columns agent,updatedAt` and a pane has no
+  state file (so `updatedAt`, the last selected column, is empty for that row)
+- **THEN** that row's line ends immediately after the agent name with no
+  trailing delimiter or whitespace
 
 ### Requirement: Column alignment applies uniformly regardless of selected columns
 

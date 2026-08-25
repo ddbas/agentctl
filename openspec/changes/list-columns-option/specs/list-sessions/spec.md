@@ -23,28 +23,28 @@ the following steps in order:
    `--reverse` (defaulting to `updatedAt` descending) to the filtered pane list
    before rendering.
 6. **Select and render columns** — render the columns specified by `--columns`,
-   or the default column set (`agent`, `session`, `pane`, `status`) when
-   `--columns` is omitted, one line per live agent pane. A pane with no matching
-   state file, or whose state file is contradictory (step 4), displays `unknown`
-   in the `status` column.
+   or the default column set (`agent`, `session`, `pane`, `status`,
+   `activeTools`) when `--columns` is omitted, one line per live agent pane. A
+   pane with no matching state file, or whose state file is contradictory (step
+   4), displays `unknown` in the `status` column.
 
 If tmux is unreachable the reconciliation steps above are skipped entirely (no
 state files are deleted) and the command exits 0 with no output.
 
-By default (no `--columns` given), each output line SHALL contain four
+By default (no `--columns` given), each output line SHALL contain five
 left-aligned columns:
-`<agent-name>  <session-name>  <window-index>.<pane-index> <status>`. The
-`status` column SHALL display the current `AgentState` for the agent (as
+`<agent-name>  <session-name>  <window-index>.<pane-index>  <status>  <active-tools>`.
+The `status` column SHALL display the current `AgentState` for the agent (as
 lowercase string), or `unknown` if the pane has no state file or a contradictory
-one. The full set of selectable columns, their names, and `--columns`-driven
-customization are defined by the `list-columns` capability.
+one. The full set of selectable columns, their names, per-column rendering rules
+(including `activeTools`'s `N tool`/`N tools`/empty format and `updatedAt`'s RFC
+3339 format), status-column coloring, the trailing-whitespace trimming rule, and
+`--columns`-driven customization are defined by the `list-columns` capability.
 
 Column widths SHALL be computed using **Unicode terminal display width** (the
 number of terminal columns a string occupies), not byte length or Unicode scalar
-count. Each column SHALL be padded to the maximum display width in that column
-plus two spaces, so that all rows are visually aligned in a fixed-width
-terminal. This behaviour is unchanged by the introduction of `--columns` and
-MUST NOT regress; the precise, testable alignment rules (two-space separation,
+count. This behaviour is unchanged by the introduction of `--columns` and MUST
+NOT regress; the precise, testable alignment rules (two-space separation,
 per-column width equal to its widest cell, identical start position across rows)
 are defined by the `list-columns` capability and apply regardless of which
 columns are selected.
@@ -60,17 +60,19 @@ columns are selected.
 #### Scenario: Default output is columnar and left-aligned
 
 - **WHEN** two or more matching panes are printed with no `--columns` flag
-- **THEN** all four default columns (agent, session, window.pane, status) are
-  left-aligned, each padded to the display width of the longest value in that
-  column plus two spaces, where display width is measured in terminal columns
+- **THEN** all five default columns (agent, session, window.pane, status,
+  activeTools) are left-aligned, each padded to the display width of the longest
+  value in that column plus two spaces, where display width is measured in
+  terminal columns
 
 #### Scenario: Agent name appears in the first column by default
 
 - **WHEN** matching panes are displayed with no `--columns` flag
 - **THEN** the first column contains the agent process name (`claude` or `pi`),
   the second column contains the tmux session name, the third column contains
-  the `window_index.pane_index` in the form `N.M`, and the fourth column
-  contains the agent status in lowercase
+  the `window_index.pane_index` in the form `N.M`, the fourth column contains
+  the agent status in lowercase, and the fifth column contains the active tool
+  count (or is empty)
 
 #### Scenario: No matching panes
 
@@ -93,7 +95,7 @@ columns are selected.
 #### Scenario: Agent status is reflected in list output
 
 - **WHEN** the user runs `rd list` and a matching pane has a valid state file
-  with `"state": "working"`
+  with `"status": "working"`
 - **THEN** the `status` column for that pane shows `working`
 
 #### Scenario: Stale state file deleted when pane no longer exists

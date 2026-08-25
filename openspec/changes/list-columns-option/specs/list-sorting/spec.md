@@ -4,9 +4,11 @@
 
 The `list` subcommand SHALL accept a `--sort-by` flag that controls which
 property is used to sort the output rows. Accepted values are: `agent`,
-`session`, `pane`, `status`, `updatedAt`. This vocabulary SHALL be identical
-(same names, same casing) to the vocabulary accepted by the `--columns` flag.
-The default value when the flag is omitted SHALL be `updatedAt`.
+`session`, `pane`, `status`, `updatedAt`. This vocabulary SHALL use the same
+names and casing as the corresponding subset of the `--columns` flag's
+vocabulary; unlike `--columns`, `--sort-by` does **not** accept `activeTools`
+(see the dedicated requirement below). The default value when the flag is
+omitted SHALL be `updatedAt`.
 
 #### Scenario: Default sort is by updatedAt descending
 
@@ -57,6 +59,21 @@ The default value when the flag is omitted SHALL be `updatedAt`.
 - **WHEN** the user runs `rd list --sort-by foobar`
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing valid values
+
+### Requirement: activeTools is not a valid --sort-by value
+
+`--sort-by` SHALL NOT accept `activeTools` as a value, even though it is a valid
+`--columns` value (see the `list-columns` capability). This is a deliberate,
+documented divergence between the two flags' vocabularies: no requirement
+defines a sort ordering for the in-flight tool-call count, so `--sort-by`'s
+vocabulary remains the five values above.
+
+#### Scenario: --sort-by activeTools is rejected
+
+- **WHEN** the user runs `rd list --sort-by activeTools`
+- **THEN** the command exits with a non-zero exit code and prints an error
+  message listing only the five valid `--sort-by` values (`agent`, `session`,
+  `pane`, `status`, `updatedAt`) — `activeTools` is not listed as accepted
 
 ### Requirement: sort_panes helper function
 
