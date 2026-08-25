@@ -301,3 +301,104 @@ async fn list_unknown_harness_state_file_not_deleted() {
         "state file with harness='unknown' should NOT be deleted by rd list"
     );
 }
+
+// ── --columns end to end ─────────────────────────────────────────────────────
+
+/// `rd list --columns ...` with no agent panes should still exit 0 with no
+/// output, exercising the flag's plumbing without requiring a live pane.
+#[tokio::test]
+async fn list_columns_flag_with_no_panes_exits_zero_with_no_output() {
+    let env = common::TmuxEnv::new().await;
+
+    let output = env
+        .rd()
+        .args(["list", "--columns", "status,agent,updatedAt,activeTools"])
+        .output()
+        .expect("failed to spawn rd list --columns");
+
+    assert!(
+        output.status.success(),
+        "`rd list --columns ...` should exit 0 when no agent panes exist; stderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(output.stdout.is_empty());
+}
+
+/// `rd list --sort-by status/updatedAt/activeTools` with no agent panes
+/// should still exit 0, exercising the renamed/new sort keys' plumbing.
+#[tokio::test]
+async fn list_sort_by_new_keys_with_no_panes_exits_zero() {
+    let env = common::TmuxEnv::new().await;
+
+    for key in ["status", "updatedAt", "activeTools"] {
+        let output = env
+            .rd()
+            .args(["list", "--sort-by", key])
+            .output()
+            .unwrap_or_else(|_| panic!("failed to spawn rd list --sort-by {key}"));
+
+        assert!(
+            output.status.success(),
+            "`rd list --sort-by {key}` should exit 0; stderr: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
+
+/// Old kebab-case/`state`-named `--sort-by` values are rejected outright now
+/// that the vocabulary has been renamed to `status`/`updatedAt`.
+#[tokio::test]
+async fn list_sort_by_old_names_rejected() {
+    let env = common::TmuxEnv::new().await;
+
+    for key in ["state", "updated-at"] {
+        let output = env
+            .rd()
+            .args(["list", "--sort-by", key])
+            .output()
+            .unwrap_or_else(|_| panic!("failed to spawn rd list --sort-by {key}"));
+
+        assert!(
+            !output.status.success(),
+            "`rd list --sort-by {key}` should be rejected",
+        );
+    }
+}
+
+/// End-to-end `rd list --columns` with a custom subset/order (including
+/// `activeTools` and `updatedAt`) against a live agent pane with a state file.
+///
+/// **macOS Docker Desktop skip**: see note in
+/// `list_agent_pane_with_state_file_shows_state`.
+#[tokio::test]
+#[ignore = "requires host → container Unix socket access (fails on macOS Docker Desktop)"]
+async fn list_columns_custom_subset_and_order_end_to_end() {
+    let env = common::TmuxEnv::new().await;
+
+    let pane_id = env.create_fake_agent_pane("claude").await;
+    env.write_state_file(&pane_id, "claude", "working");
+
+    let output = env
+        .rd()
+        .args(["list", "--columns", "status,agent,activeTools,updatedAt"])
+        .output()
+        .expect("failed to spawn rd list --columns");
+
+    assert!(
+        output.status.success(),
+        "`rd list --columns ...` should exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next().expect("expected one output line");
+    // status column comes first now.
+    assert!(
+        line.trim_start().starts_with("working"),
+        "expected status column first; got:\n{line}"
+    );
+    assert!(
+        line.contains("claude"),
+        "expected agent column; got:\n{line}"
+    );
+}
