@@ -2,8 +2,10 @@
 //!
 //! Shells out to `tmux list-panes -a` and prints one line per pane whose
 //! `pane_current_command` exactly matches a known agent name (`claude` or
-//! `pi`).  Output is columnar plain text with five left-aligned columns:
-//! `<agent-name>  <session-name>  <window-index>.<pane-index>  <state>  <active-tools>`.
+//! `pi`).  Output is columnar plain text; by default five left-aligned
+//! columns are shown: `<agent-name>  <session-name>  <window-index>.<pane-index>
+//!  <status>  <active-tools>`.  The rendered columns can be customized via
+//! `--columns`/`-c` (see [`Field`] and [`DEFAULT_COLUMNS`]).
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -18,11 +20,13 @@ use chrono::{DateTime, Utc};
 
 use crate::state::{AgentInfo, AgentState, delete_state_in, list_agent_infos_in};
 
-// ── SortKey ──────────────────────────────────────────────────────────────────
+// ── Field ────────────────────────────────────────────────────────────────────
 
-/// The property to sort `rd list` output by.
-#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum, Default)]
-pub enum SortKey {
+/// The shared vocabulary of properties accepted by both `--sort-by` and
+/// `--columns`. Every value accepted by one flag is accepted by the other,
+/// using the identical camelCase spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
+pub enum Field {
     /// Agent harness name, lexicographically.
     Agent,
     /// Tmux session name, lexicographically.
@@ -30,24 +34,51 @@ pub enum SortKey {
     /// Pane position: window index first, then pane index.
     Pane,
     /// Agent state priority: Blocked < Done < Working < Idle < Unknown.
-    State,
-    /// Last state-file update timestamp. Newest first by default.
+    Status,
+    /// Last state-file update timestamp. Newest first by default when sorted.
     #[default]
-    #[value(name = "updated-at")]
+    #[value(name = "updatedAt")]
     UpdatedAt,
+    /// In-flight tool-call count. Busiest first by default when sorted.
+    #[value(name = "activeTools")]
+    ActiveTools,
 }
 
-impl std::fmt::Display for SortKey {
+impl std::fmt::Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SortKey::Agent => write!(f, "agent"),
-            SortKey::Session => write!(f, "session"),
-            SortKey::Pane => write!(f, "pane"),
-            SortKey::State => write!(f, "state"),
-            SortKey::UpdatedAt => write!(f, "updated-at"),
+            Field::Agent => write!(f, "agent"),
+            Field::Session => write!(f, "session"),
+            Field::Pane => write!(f, "pane"),
+            Field::Status => write!(f, "status"),
+            Field::UpdatedAt => write!(f, "updatedAt"),
+            Field::ActiveTools => write!(f, "activeTools"),
         }
     }
 }
+
+/// The columns rendered when `--columns` is omitted, matching the output
+/// shipped prior to the introduction of `--columns` (aside from the
+/// `state` → `status` and unnamed-fifth-column → `activeTools` renames).
+///
+/// Exposed for tests and as the source of truth kept in sync with
+/// [`DEFAULT_COLUMNS_STR`] (the clap `--columns` default). The CLI's actual
+/// default column set at runtime is enforced via `--columns`'s clap
+/// `default_value`, which is derived from this same set.
+#[allow(dead_code)]
+pub const DEFAULT_COLUMNS: &[Field] = &[
+    Field::Agent,
+    Field::Session,
+    Field::Pane,
+    Field::Status,
+    Field::ActiveTools,
+];
+
+/// The literal, comma-delimited string form of [`DEFAULT_COLUMNS`], used as
+/// the `--columns` flag's clap `default_value` so `--help` shows the actual
+/// default. Kept in sync with `DEFAULT_COLUMNS` by the
+/// `default_columns_str_matches_default_columns_const` test.
+pub const DEFAULT_COLUMNS_STR: &str = "agent,session,pane,status,activeTools";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -290,105 +321,118 @@ fn colorize_state(state: AgentState, text: &str, use_color: bool) -> String {
     }
 }
 
+/// Resolve a pane's `active_tools` count, treating panes with no state file
+/// or whose status is `unknown` as `0`.
+fn active_tools_of(pane: &PaneEntry, state_map: &HashMap<String, AgentInfo>) -> u32 {
+    match state_map.get(&pane.pane_id) {
+        Some(info) if info.status != AgentState::Unknown => info.active_tools,
+        _ => 0,
+    }
+}
+
+/// Resolve the plain (uncolored) cell value for `field` for a single pane.
+fn cell_value(
+    pane: &PaneEntry,
+    status: AgentState,
+    state_map: &HashMap<String, AgentInfo>,
+    field: Field,
+) -> String {
+    match field {
+        Field::Agent => pane.agent.clone(),
+        Field::Session => pane.session.clone(),
+        Field::Pane => format!("{}.{}", pane.window_index, pane.pane_index),
+        Field::Status => status.to_string(),
+        Field::UpdatedAt => state_map
+            .get(&pane.pane_id)
+            .map(|info| info.updated_at.to_rfc3339())
+            .unwrap_or_default(),
+        Field::ActiveTools => {
+            if status == AgentState::Unknown {
+                return String::new();
+            }
+            match active_tools_of(pane, state_map) {
+                0 => String::new(),
+                1 => "1 tool".to_owned(),
+                n => format!("{n} tools"),
+            }
+        }
+    }
+}
+
 /// Format a slice of agent pane references as columnar plain text.
 ///
-/// Produces one line per pane with five left-aligned columns:
-/// `agent`, `session`, `window_index.pane_index`, `state`, and the active
-/// tool count (`N tool` / `N tools`, empty when zero, absent, or the pane's
-/// state is `unknown`).  Each column is padded to the maximum value width in
-/// that column plus two spaces, and rows with an empty fifth column have no
-/// trailing delimiter/whitespace after `state`.  Returns an empty string when
-/// `panes` is empty.
+/// Produces one line per pane, rendering exactly the columns listed in
+/// `columns`, in the given order (duplicates rendered as repeated columns,
+/// no deduplication). Each column is padded to the maximum Unicode display
+/// width of its values across all rows, plus two spaces of separation; after
+/// all columns for a row are padded and joined, any trailing whitespace is
+/// trimmed from that row's line. Returns an empty string when `panes` is
+/// empty.
 ///
-/// When `use_color` is `true`, the state column is wrapped in an ANSI
-/// foreground color escape sequence keyed to the agent's state (see
-/// [`colorize_state`]); column widths are always computed from the plain
-/// (uncolored) state text, so the escape sequences never affect alignment.
+/// When `use_color` is `true`, whichever column position(s) hold
+/// [`Field::Status`] are wrapped in an ANSI foreground color escape sequence
+/// keyed to the agent's state (see [`colorize_state`]); column widths are
+/// always computed from the plain (uncolored) text, so the escape sequences
+/// never affect alignment.
 pub fn format_panes(
     panes: &[&PaneEntry],
     state_map: &HashMap<String, AgentInfo>,
     use_color: bool,
+    columns: &[Field],
 ) -> String {
     if panes.is_empty() {
         return String::new();
     }
 
-    // Pre-compute the window.pane strings so we can measure their width too.
-    let window_pane: Vec<String> = panes
-        .iter()
-        .map(|p| format!("{}.{}", p.window_index, p.pane_index))
-        .collect();
-
-    // Resolve each pane's state enum and plain display string.
-    let states: Vec<(AgentState, String)> = panes
+    // Resolve each pane's status once (used for the `status` column, the
+    // `activeTools` column, and status colorization).
+    let statuses: Vec<AgentState> = panes
         .iter()
         .map(|p| {
-            let state = state_map
+            state_map
                 .get(&p.pane_id)
                 .map(|info| info.status)
-                .unwrap_or(AgentState::Unknown);
-            (state, state.to_string())
+                .unwrap_or(AgentState::Unknown)
         })
         .collect();
 
-    // Resolve each pane's active-tools column value: empty when the state is
-    // `unknown` or `active_tools == 0`/absent.
-    let tool_counts: Vec<String> = panes
+    // Compute each row's plain (uncolored) cell values for every requested column.
+    let rows: Vec<Vec<String>> = panes
         .iter()
-        .zip(states.iter())
-        .map(|(p, (state, _))| {
-            if *state == AgentState::Unknown {
-                return String::new();
-            }
-            let active_tools = state_map
-                .get(&p.pane_id)
-                .map(|info| info.active_tools)
-                .unwrap_or(0);
-            match active_tools {
-                0 => String::new(),
-                1 => "1 tool".to_owned(),
-                n => format!("{n} tools"),
-            }
+        .zip(statuses.iter())
+        .map(|(pane, status)| {
+            columns
+                .iter()
+                .map(|field| cell_value(pane, *status, state_map, *field))
+                .collect()
         })
         .collect();
 
-    let max_agent = panes.iter().map(|p| p.agent.width()).max().unwrap_or(0);
-    let max_session = panes.iter().map(|p| p.session.width()).max().unwrap_or(0);
-    let max_wp = window_pane.iter().map(|s| s.width()).max().unwrap_or(0);
-    let max_state = states.iter().map(|(_, s)| s.width()).max().unwrap_or(0);
-
-    let col1 = max_agent + 2;
-    let col2 = max_session + 2;
-    let col3 = max_wp + 2;
-    let col4 = max_state + 2;
+    // Per-column width = widest cell's display width in that column.
+    let mut widths = vec![0usize; columns.len()];
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.width());
+        }
+    }
 
     let mut output = String::new();
-    for (((pane, wp), (state, state_text)), tool_count) in panes
-        .iter()
-        .zip(window_pane.iter())
-        .zip(states.iter())
-        .zip(tool_counts.iter())
-    {
-        let pad1 = col1 - pane.agent.width();
-        let pad2 = col2 - pane.session.width();
-        let pad3 = col3 - wp.width();
-        let pad4 = col4 - state_text.width();
-        let rendered_state = colorize_state(*state, state_text, use_color);
-        let mut line = format!(
-            "{}{}{}{}{}{}{}",
-            pane.agent,
-            " ".repeat(pad1),
-            pane.session,
-            " ".repeat(pad2),
-            wp,
-            " ".repeat(pad3),
-            rendered_state,
-        );
-        if !tool_count.is_empty() {
-            line.push_str(&" ".repeat(pad4));
-            line.push_str(tool_count);
+    for (row, status) in rows.iter().zip(statuses.iter()) {
+        let mut line = String::new();
+        for (i, field) in columns.iter().enumerate() {
+            let cell = &row[i];
+            let rendered = if *field == Field::Status {
+                colorize_state(*status, cell, use_color)
+            } else {
+                cell.clone()
+            };
+            line.push_str(&rendered);
+            if i + 1 < columns.len() {
+                let pad = widths[i] + 2 - cell.width();
+                line.push_str(&" ".repeat(pad));
+            }
         }
-        output.push_str(&line);
+        output.push_str(line.trim_end());
         output.push('\n');
     }
     output
@@ -398,10 +442,10 @@ pub fn format_panes(
 
 /// Sort `panes` in-place by `key`.
 ///
-/// The natural direction for each key is ascending (lowest value first), except
-/// [`SortKey::UpdatedAt`] whose natural direction is descending (newest first)
-/// to match the idiomatic behaviour of time-sorted CLI tools (`ls -t`,
-/// `git log`).
+/// The natural direction for each key is ascending (lowest value first),
+/// except [`Field::UpdatedAt`] and [`Field::ActiveTools`], whose natural
+/// direction is descending (newest/busiest first) to match the idiomatic
+/// behaviour of time- and activity-sorted CLI tools (`ls -t`, `git log`).
 ///
 /// Passing `reverse = true` flips whatever the natural direction is.
 ///
@@ -409,12 +453,12 @@ pub fn format_panes(
 /// relative order.
 pub fn sort_panes(
     panes: &mut Vec<&PaneEntry>,
-    key: SortKey,
+    key: Field,
     reverse: bool,
     state_map: &HashMap<String, AgentInfo>,
 ) {
     panes.sort_by(|a, b| match key {
-        SortKey::State => {
+        Field::Status => {
             let sa = state_map
                 .get(&a.pane_id)
                 .map(|i| i.status)
@@ -425,13 +469,13 @@ pub fn sort_panes(
                 .unwrap_or(AgentState::Unknown);
             sa.cmp(&sb)
         }
-        SortKey::Agent => a.agent.cmp(&b.agent),
-        SortKey::Session => a.session.cmp(&b.session),
-        SortKey::Pane => a
+        Field::Agent => a.agent.cmp(&b.agent),
+        Field::Session => a.session.cmp(&b.session),
+        Field::Pane => a
             .window_index
             .cmp(&b.window_index)
             .then(a.pane_index.cmp(&b.pane_index)),
-        SortKey::UpdatedAt => {
+        Field::UpdatedAt => {
             // Natural direction: newest first (descending by timestamp).
             let ta = state_map
                 .get(&a.pane_id)
@@ -442,6 +486,12 @@ pub fn sort_panes(
                 .map(|i| i.updated_at)
                 .unwrap_or(DateTime::<Utc>::MIN_UTC);
             tb.cmp(&ta) // note: tb before ta = descending
+        }
+        Field::ActiveTools => {
+            // Natural direction: busiest first (descending by active_tools).
+            let ca = active_tools_of(a, state_map);
+            let cb = active_tools_of(b, state_map);
+            cb.cmp(&ca) // note: cb before ca = descending
         }
     });
     if reverse {
@@ -457,7 +507,12 @@ pub fn sort_panes(
 /// 1. `--server` / `-s` CLI flag
 /// 2. `RD_TMUX_SOCKET` environment variable (used by the test harness)
 /// 3. Default tmux server (no `-S` flag)
-pub fn run(server: Option<String>, sort_by: SortKey, reverse: bool) -> Result<()> {
+pub fn run(
+    server: Option<String>,
+    sort_by: Field,
+    reverse: bool,
+    columns: Vec<Field>,
+) -> Result<()> {
     let server = server.or_else(|| std::env::var("RD_TMUX_SOCKET").ok());
 
     let panes = tmux_panes(server.as_deref())?;
@@ -472,7 +527,7 @@ pub fn run(server: Option<String>, sort_by: SortKey, reverse: bool) -> Result<()
     sort_panes(&mut agent_panes, sort_by, reverse, &state_map);
 
     let use_color = std::io::stdout().is_terminal();
-    let output = format_panes(&agent_panes, &state_map, use_color);
+    let output = format_panes(&agent_panes, &state_map, use_color, &columns);
     print!("{output}");
 
     Ok(())
@@ -563,7 +618,7 @@ mod tests {
             pane_with_id("pi", "🌳 radr (list-sort)", 0, 0, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map(), false);
+        let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
 
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3);
@@ -601,7 +656,7 @@ mod tests {
             pane_with_id("pi", "work-session", 2, 3, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map(), false);
+        let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
 
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3, "expected 3 lines, got:\n{output}");
@@ -615,13 +670,13 @@ mod tests {
     fn format_panes_single_entry() {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map(), false);
+        let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
         assert_eq!(output, "claude  dev  0.0  unknown\n");
     }
 
     #[test]
     fn format_panes_empty_returns_empty_string() {
-        let output = format_panes(&[], &empty_state_map(), false);
+        let output = format_panes(&[], &empty_state_map(), false, DEFAULT_COLUMNS);
         assert_eq!(output, "");
     }
 
@@ -633,7 +688,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map, false);
+        let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         assert!(
             output.contains("working"),
             "expected 'working' in: {output}"
@@ -651,7 +706,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map, false);
+        let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         assert_eq!(output, "claude  dev  0.0  working  1 tool\n");
     }
 
@@ -664,7 +719,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map, false);
+        let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         assert_eq!(output, "claude  dev  0.0  working  3 tools\n");
     }
 
@@ -676,7 +731,7 @@ mod tests {
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map, false);
+        let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         assert_eq!(output, "claude  dev  0.0  working\n");
     }
 
@@ -686,7 +741,7 @@ mod tests {
         let state_map = empty_state_map();
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%missing")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map, false);
+        let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         assert_eq!(output, "claude  dev  0.0  unknown\n");
     }
 
@@ -703,11 +758,206 @@ mod tests {
             pane_with_id("pi", "dev", 0, 1, "%2"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &state_map, false);
+        let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], "claude  dev  0.0  working  1 tool");
         assert_eq!(lines[1], "pi      dev  0.1  idle");
+    }
+
+    // ── DEFAULT_COLUMNS_STR / DEFAULT_COLUMNS consistency ─────────────────
+
+    #[test]
+    fn default_columns_str_matches_default_columns_const() {
+        let computed: String = DEFAULT_COLUMNS
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(computed, DEFAULT_COLUMNS_STR);
+    }
+
+    // ── --columns: subset, order, duplicates, invalid values ────────────────
+
+    #[test]
+    fn format_panes_columns_subset_and_custom_order() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map, false, &[Field::Status, Field::Agent]);
+        assert_eq!(output, "working  claude\n");
+    }
+
+    #[test]
+    fn format_panes_columns_single_column() {
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &empty_state_map(), false, &[Field::Agent]);
+        assert_eq!(output, "claude\n");
+    }
+
+    #[test]
+    fn format_panes_columns_duplicate_field_renders_twice() {
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(
+            &refs,
+            &empty_state_map(),
+            false,
+            &[Field::Agent, Field::Agent],
+        );
+        assert_eq!(output, "claude  claude\n");
+    }
+
+    #[test]
+    fn invalid_columns_value_rejected_by_clap() {
+        let result =
+            <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--columns", "bogus"]);
+        assert!(
+            result.is_err(),
+            "expected clap error for unknown --columns value"
+        );
+    }
+
+    #[test]
+    fn columns_and_sort_by_share_identical_vocabulary() {
+        for value in [
+            "agent",
+            "session",
+            "pane",
+            "status",
+            "updatedAt",
+            "activeTools",
+        ] {
+            let sort_result =
+                <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--sort-by", value]);
+            let columns_result =
+                <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--columns", value]);
+            assert!(sort_result.is_ok(), "--sort-by {value} should be accepted");
+            assert!(
+                columns_result.is_ok(),
+                "--columns {value} should be accepted"
+            );
+        }
+    }
+
+    // ── updatedAt rendering ───────────────────────────────────────────────────
+
+    #[test]
+    fn format_panes_updated_at_renders_rfc3339_when_state_file_exists() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+        let expected = state_map["%1"].updated_at.to_rfc3339();
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map, false, &[Field::Agent, Field::UpdatedAt]);
+        assert_eq!(output, format!("claude  {expected}\n"));
+    }
+
+    #[test]
+    fn format_panes_updated_at_empty_when_no_state_file() {
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%missing")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(
+            &refs,
+            &empty_state_map(),
+            false,
+            &[Field::Agent, Field::UpdatedAt],
+        );
+        // Trailing whitespace trim removes the empty last column entirely.
+        assert_eq!(output, "claude\n");
+    }
+
+    // ── generalized status coloring at arbitrary positions ──────────────────
+
+    #[test]
+    fn format_panes_status_colorized_when_not_in_default_position() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map, true, &[Field::Status, Field::Agent]);
+        assert!(output.starts_with("\u{1b}[33mworking\u{1b}[39m"));
+        // Only the status column is colorized; agent is never colorized.
+        let after_status = output.trim_end().rsplit("  ").next().unwrap();
+        assert_eq!(after_status, "claude");
+    }
+
+    #[test]
+    fn format_panes_repeated_status_columns_each_colorized() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%1", "claude", AgentState::Blocked).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(
+            &refs,
+            &state_map,
+            true,
+            &[Field::Status, Field::Agent, Field::Status],
+        );
+        let occurrences = output.matches("\u{1b}[31mblocked\u{1b}[39m").count();
+        assert_eq!(
+            occurrences, 2,
+            "expected both status columns colorized: {output}"
+        );
+    }
+
+    // ── generalized trailing whitespace trim for a custom last column ───────
+
+    #[test]
+    fn format_panes_trims_trailing_whitespace_for_custom_last_column() {
+        let data = vec![
+            pane_with_id("claude", "dev", 0, 0, "%missing1"),
+            pane_with_id("pi", "dev", 0, 1, "%missing2"),
+        ];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(
+            &refs,
+            &empty_state_map(),
+            false,
+            &[Field::Agent, Field::UpdatedAt],
+        );
+        for line in output.lines() {
+            assert_eq!(
+                line,
+                line.trim_end(),
+                "line has trailing whitespace: {line:?}"
+            );
+        }
+    }
+
+    // ── alignment regression for arbitrary --columns selections ─────────────
+
+    #[test]
+    fn format_panes_alignment_holds_for_custom_columns_selection() {
+        let data = vec![
+            pane_with_id("claude", "dotfiles", 0, 0, "%1"),
+            pane_with_id("pi", "🌳 radr (claude-hooks)", 0, 0, "%2"),
+        ];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(
+            &refs,
+            &empty_state_map(),
+            false,
+            &[Field::Session, Field::Agent],
+        );
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 2);
+
+        fn agent_display_col(line: &str) -> usize {
+            let start = line.rfind(|c: char| c == ' ').map(|i| i + 1).unwrap_or(0);
+            UnicodeWidthStr::width(&line[..start])
+        }
+        assert_eq!(agent_display_col(lines[0]), agent_display_col(lines[1]));
     }
 
     // ── colorize_state ───────────────────────────────────────────────────────────────────
@@ -773,7 +1023,7 @@ mod tests {
         let p4 = pane_with_id("claude", "dev", 0, 3, "%4");
         let p5 = pane_with_id("claude", "dev", 0, 4, "%5"); // no state file → unknown
         let refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5];
-        let output = format_panes(&refs, &state_map, true);
+        let output = format_panes(&refs, &state_map, true, DEFAULT_COLUMNS);
 
         assert!(output.contains("\u{1b}[90midle\u{1b}[39m"));
         assert!(output.contains("\u{1b}[33mworking\u{1b}[39m"));
@@ -793,7 +1043,7 @@ mod tests {
             pane_with_id("pi", "work-session", 2, 3, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
-        let output = format_panes(&refs, &empty_state_map(), false);
+        let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
 
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[0], "claude  my-session    0.0  unknown");
@@ -813,8 +1063,8 @@ mod tests {
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
         let refs: Vec<&PaneEntry> = vec![&p1, &p2];
 
-        let colored = format_panes(&refs, &state_map, true);
-        let plain = format_panes(&refs, &state_map, false);
+        let colored = format_panes(&refs, &state_map, true, DEFAULT_COLUMNS);
+        let plain = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
 
         // Strip ANSI escape sequences from the colored output and compare
         // display-column start offsets against the plain-text version.
@@ -986,7 +1236,7 @@ mod tests {
             ("%3", AgentState::Done, t(2000)),
         ]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
-        sort_panes(&mut refs, SortKey::UpdatedAt, false, &map);
+        sort_panes(&mut refs, Field::UpdatedAt, false, &map);
         // Newest first: p2 (3000) > p3 (2000) > p1 (1000)
         assert_eq!(
             refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
@@ -1000,7 +1250,7 @@ mod tests {
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2"); // no state file
         let map = state_map_with_times(&[("%1", AgentState::Idle, t(1000))]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
-        sort_panes(&mut refs, SortKey::UpdatedAt, false, &map);
+        sort_panes(&mut refs, Field::UpdatedAt, false, &map);
         // p1 has a real timestamp; p2 gets MIN_UTC → sorts last
         assert_eq!(refs[0].pane_id, "%1");
         assert_eq!(refs[1].pane_id, "%2");
@@ -1015,7 +1265,7 @@ mod tests {
             ("%2", AgentState::Idle, t(3000)),
         ]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
-        sort_panes(&mut refs, SortKey::UpdatedAt, true, &map);
+        sort_panes(&mut refs, Field::UpdatedAt, true, &map);
         // Reversed: oldest first → p1 (1000) before p2 (3000)
         assert_eq!(refs[0].pane_id, "%1");
         assert_eq!(refs[1].pane_id, "%2");
@@ -1028,7 +1278,7 @@ mod tests {
         let p1 = pane_with_id("pi", "dev", 0, 0, "%1");
         let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
-        sort_panes(&mut refs, SortKey::Agent, false, &empty_state_map());
+        sort_panes(&mut refs, Field::Agent, false, &empty_state_map());
         assert_eq!(refs[0].agent, "claude");
         assert_eq!(refs[1].agent, "pi");
     }
@@ -1038,7 +1288,7 @@ mod tests {
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
-        sort_panes(&mut refs, SortKey::Agent, true, &empty_state_map());
+        sort_panes(&mut refs, Field::Agent, true, &empty_state_map());
         assert_eq!(refs[0].agent, "pi");
         assert_eq!(refs[1].agent, "claude");
     }
@@ -1051,7 +1301,7 @@ mod tests {
         let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
         let p3 = pane_with_id("pi", "alpha", 0, 2, "%3");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
-        sort_panes(&mut refs, SortKey::Session, false, &empty_state_map());
+        sort_panes(&mut refs, Field::Session, false, &empty_state_map());
         assert_eq!(
             refs.iter().map(|p| p.session.as_str()).collect::<Vec<_>>(),
             vec!["alpha", "dev", "work"]
@@ -1067,7 +1317,7 @@ mod tests {
         let p3 = pane_with_id("claude", "dev", 1, 0, "%3");
         let p4 = pane_with_id("pi", "dev", 0, 0, "%4");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4];
-        sort_panes(&mut refs, SortKey::Pane, false, &empty_state_map());
+        sort_panes(&mut refs, Field::Pane, false, &empty_state_map());
         // Expected: window 0 pane 0, window 0 pane 5, window 1 pane 0, window 1 pane 2
         assert_eq!(
             refs.iter()
@@ -1095,7 +1345,7 @@ mod tests {
         let p4 = pane_with_id("claude", "dev", 0, 3, "%4");
         let p5 = pane_with_id("claude", "dev", 0, 4, "%5");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5];
-        sort_panes(&mut refs, SortKey::State, false, &map);
+        sort_panes(&mut refs, Field::Status, false, &map);
 
         let states: Vec<AgentState> = refs.iter().map(|p| map[&p.pane_id].status).collect();
         assert_eq!(
@@ -1122,10 +1372,76 @@ mod tests {
         let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
         let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
-        sort_panes(&mut refs, SortKey::State, true, &map);
+        sort_panes(&mut refs, Field::Status, true, &map);
 
         assert_eq!(map[refs[0].pane_id.as_str()].status, AgentState::Unknown);
         assert_eq!(map[refs[2].pane_id.as_str()].status, AgentState::Blocked);
+    }
+
+    // ── 5.7: --sort-by activeTools ────────────────────────────────────────────
+
+    /// Build a state map from (pane_id, state, active_tools) tuples.
+    fn state_map_with_tools(entries: &[(&str, AgentState, u32)]) -> HashMap<String, AgentInfo> {
+        entries
+            .iter()
+            .map(|(id, state, active_tools)| {
+                let info = AgentInfo {
+                    pane_id: id.to_string(),
+                    harness: "claude".to_string(),
+                    status: *state,
+                    updated_at: chrono::Utc::now(),
+                    active_tools: *active_tools,
+                };
+                (id.to_string(), info)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sort_panes_active_tools_descending_busiest_first() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
+        let p3 = pane_with_id("claude", "dev", 0, 2, "%3"); // no state file
+        let map = state_map_with_tools(&[
+            ("%1", AgentState::Working, 1),
+            ("%2", AgentState::Working, 5),
+        ]);
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
+        sort_panes(&mut refs, Field::ActiveTools, false, &map);
+        // Busiest first: %2 (5) > %1 (1) > %3 (no state file → 0)
+        assert_eq!(
+            refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
+            vec!["%2", "%1", "%3"]
+        );
+    }
+
+    #[test]
+    fn sort_panes_active_tools_reverse_quietest_first() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
+        let map = state_map_with_tools(&[
+            ("%1", AgentState::Working, 1),
+            ("%2", AgentState::Working, 5),
+        ]);
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
+        sort_panes(&mut refs, Field::ActiveTools, true, &map);
+        assert_eq!(refs[0].pane_id, "%1");
+        assert_eq!(refs[1].pane_id, "%2");
+    }
+
+    #[test]
+    fn sort_panes_active_tools_unknown_status_treated_as_zero() {
+        let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
+        let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
+        // %2 has active_tools set, but status unknown → treated as 0.
+        let map = state_map_with_tools(&[
+            ("%1", AgentState::Working, 1),
+            ("%2", AgentState::Unknown, 9),
+        ]);
+        let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
+        sort_panes(&mut refs, Field::ActiveTools, false, &map);
+        assert_eq!(refs[0].pane_id, "%1");
+        assert_eq!(refs[1].pane_id, "%2");
     }
 
     // ── Stability ───────────────────────────────────────────────────────────────────
@@ -1137,7 +1453,7 @@ mod tests {
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
         let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
-        sort_panes(&mut refs, SortKey::Session, false, &empty_state_map());
+        sort_panes(&mut refs, Field::Session, false, &empty_state_map());
         // All "dev" — original order preserved
         assert_eq!(
             refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),

@@ -24,14 +24,38 @@ rd install <harness>          # install harness hooks (pi, claude)
 
 Queries every pane across all tmux sessions via `tmux list-panes -a` and prints
 one line per pane whose foreground process is a known agent harness (`claude` or
-`pi`). Output is four left-aligned columns:
+`pi`). By default, output has five left-aligned columns:
 
 ```
-<agent-name>  <session-name>  <window>.<pane>  <status>
+<agent-name>  <session-name>  <window>.<pane>  <status>  <activeTools>
 ```
 
 The `status` column shows the agent's last derived status, or `unknown` if no
-state file exists for that pane.
+state file exists for that pane. The `activeTools` column shows the number of
+in-flight tool calls (`N tool`/`N tools`), empty when zero, absent, or when
+`status` is `unknown`.
+
+Use `--columns`/`-c` to choose which columns are rendered and in what order, as
+a comma-delimited list:
+
+```bash
+rd list --columns agent,status          # only agent and status
+rd list --columns status,agent,updatedAt
+```
+
+Valid column names (identical vocabulary to `--sort-by`): `agent`, `session`,
+`pane`, `status`, `updatedAt`, `activeTools`. `updatedAt` renders the agent's
+last state-file update timestamp in RFC 3339 UTC form (e.g.
+`2024-06-01T14:32:05+00:00`), empty when no state file exists.
+
+Use `--sort-by` to control ordering (default: `updatedAt`, newest first).
+`--sort-by activeTools` sorts numerically, busiest agents first by default. Pass
+`--reverse` to flip the natural direction of either flag's key.
+
+> **Breaking change**: the old `--sort-by state` and `--sort-by updated-at`
+> values have been renamed to `status` and `updatedAt` respectively, to match
+> the shared camelCase vocabulary used by `--columns`. Scripts using the old
+> spellings must be updated.
 
 As a side effect, `rd list` validates persisted state files and deletes stale
 ones (see "Agent state tracking" below).

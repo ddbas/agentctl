@@ -37,8 +37,9 @@ enum Commands {
     ///
     /// Queries every pane across all tmux sessions via `tmux list-panes -a`
     /// and prints one line per pane whose foreground process is a known agent
-    /// harness (`claude` or `pi`).  Output is four left-aligned columns:
-    /// `<agent>  <session>  <window>.<pane>  <state>`.
+    /// harness (`claude` or `pi`).  By default, output has five left-aligned
+    /// columns: `<agent>  <session>  <window>.<pane>  <status>  <activeTools>`.
+    /// The rendered columns can be customized via `--columns`/`-c`.
     ///
     /// `node` panes are resolved to `pi` when the pane's shell has a direct
     /// child process whose argv[0] basename is `pi`.
@@ -54,18 +55,30 @@ enum Commands {
         server: Option<String>,
 
         /// Sort output by this property.
-        /// Valid values: state, agent, session, pane, updated-at.
+        /// Valid values: agent, session, pane, status, updatedAt, activeTools.
         #[arg(
             long = "sort-by",
             value_name = "KEY",
-            default_value_t = commands::list::SortKey::UpdatedAt
+            default_value_t = commands::list::Field::UpdatedAt
         )]
-        sort_by: commands::list::SortKey,
+        sort_by: commands::list::Field,
 
         /// Reverse the sort order.
-        /// For `updated-at` (the default key) this means oldest-active first.
+        /// For `updatedAt` (the default key) this means oldest-active first.
         #[arg(short = 'r', long)]
         reverse: bool,
+
+        /// Comma-delimited, ordered list of columns to render.
+        /// Valid values: agent, session, pane, status, updatedAt, activeTools.
+        /// Order and duplicates are preserved (no deduplication).
+        #[arg(
+            short = 'c',
+            long = "columns",
+            value_name = "COLUMNS",
+            value_delimiter = ',',
+            default_value = commands::list::DEFAULT_COLUMNS_STR
+        )]
+        columns: Vec<commands::list::Field>,
     },
 
     /// Install radr on a harness.
@@ -265,8 +278,9 @@ fn run() -> anyhow::Result<()> {
             server,
             sort_by,
             reverse,
+            columns,
         }) => {
-            commands::list::run(server, sort_by, reverse)?;
+            commands::list::run(server, sort_by, reverse, columns)?;
         }
         Some(Commands::Install { harness }) => {
             commands::hooks::run_install(harness)?;
