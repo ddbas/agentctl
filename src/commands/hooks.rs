@@ -203,7 +203,7 @@ fn print_pi_summary(dest: &Path, status: FileStatus) {
 }
 
 /// Replace the home directory prefix with `~` for human-readable output.
-fn tilde_collapse(path: &Path) -> String {
+pub(crate) fn tilde_collapse(path: &Path) -> String {
     if let Some(home) = dirs::home_dir()
         && let Ok(rel) = path.strip_prefix(&home)
     {
