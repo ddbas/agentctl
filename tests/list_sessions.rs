@@ -4,6 +4,13 @@
 //! with an isolated Docker container running `alpine:latest` + `tmux`.  The
 //! container's tmux server is accessible from the host via `RD_TMUX_SOCKET`.
 //! State files are isolated via `XDG_DATA_HOME` pointing at a per-test dir.
+//!
+//! Every test spawns `rd` via [`std::process::Command::output`], which
+//! captures stdout through an OS pipe rather than a pseudo-terminal. Per
+//! `rd list`'s TTY-detection logic (`std::io::stdout().is_terminal()`),
+//! `use_color` is therefore always `false` here, so assertions below can
+//! safely compare against plain, uncolored text without stripping ANSI
+//! escape sequences.
 
 mod common;
 
