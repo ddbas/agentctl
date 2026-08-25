@@ -5,25 +5,28 @@
 The system SHALL provide
 `rd agent event <EVENT_NAME> [--id <ID>] [--type <TYPE>] [--harness <HARNESS>] [--pane <PANE_ID>]`
 as nested clap subcommands, one per supported event name. Supported event names
-are `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and `TOOL_CALL_RESULT`.
+are `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and
+`TOOL_CALL_RESULT`.
 
 #### Scenario: Unknown event name is rejected
 
 - **WHEN** `rd agent event` is invoked with a name that is not one of
-  `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, `TOOL_CALL_RESULT`
+  `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
+  `TOOL_CALL_RESULT`
 - **THEN** the command exits non-zero with an error identifying the accepted
   event names
 
-### Requirement: id is required on all four events
+### Requirement: id is required on all five events
 
 Every event dispatched via `rd agent event` SHALL require a non-empty `--id`
-value. `id` uniquely identifies the event's subject (a run ID for `RUN_*`
-events, a tool-call ID for `TOOL_CALL_*` events) so that a terminating event can
-later be reconciled with its corresponding starting event.
+value. `id` uniquely identifies the event's subject (a session ID for
+`SESSION_STARTED`, a run ID for `RUN_*` events, a tool-call ID for `TOOL_CALL_*`
+events) so that a terminating event can later be reconciled with its
+corresponding starting event where one exists.
 
 #### Scenario: Missing id is rejected
 
-- **WHEN** any of the four `rd agent event` subcommands is invoked without
+- **WHEN** any of the five `rd agent event` subcommands is invoked without
   `--id`
 - **THEN** the command exits non-zero with a usage error, and no state or log
   changes are made
@@ -31,8 +34,8 @@ later be reconciled with its corresponding starting event.
 ### Requirement: type is optional and only accepted on TOOL*CALL*\* events
 
 `TOOL_CALL_START` and `TOOL_CALL_RESULT` SHALL accept an optional `--type` flag
-with accepted values `custom` and `elicitation`. `RUN_STARTED` and
-`RUN_FINISHED` SHALL NOT accept a `--type` flag.
+with accepted values `custom` and `elicitation`. `SESSION_STARTED`,
+`RUN_STARTED`, and `RUN_FINISHED` SHALL NOT accept a `--type` flag.
 
 #### Scenario: TOOL_CALL_START accepts type elicitation
 
@@ -53,6 +56,12 @@ with accepted values `custom` and `elicitation`. `RUN_STARTED` and
 - **THEN** the command exits non-zero with a usage error, since `RUN_STARTED`
   does not accept `--type`
 
+#### Scenario: type on SESSION_STARTED is rejected
+
+- **WHEN** `rd agent event SESSION_STARTED --id <id> --type custom` is invoked
+- **THEN** the command exits non-zero with a usage error, since
+  `SESSION_STARTED` does not accept `--type`
+
 #### Scenario: Invalid type value is rejected
 
 - **WHEN** `rd agent event TOOL_CALL_START --id <id> --type bogus` is invoked
@@ -67,6 +76,7 @@ crate) with states `Idle`, `Working`, `Blocked`, `Done`. `Idle` SHALL be the
 machine's declared start state and `Done` SHALL be its declared end state. The
 machine SHALL apply the following transitions:
 
+- Any status on `SESSION_STARTED` → `Idle`
 - `Idle` on `RUN_STARTED` → `Working`
 - `Done` on `RUN_STARTED` → `Working`
 - `Working` on `RUN_FINISHED` → `Done`
@@ -75,6 +85,30 @@ machine SHALL apply the following transitions:
 
 An event that does not match a defined transition for the pane's current status
 SHALL NOT change `status`, but SHALL still be appended to `events-log.jsonl`.
+
+#### Scenario: SESSION_STARTED resets an idle pane to idle
+
+- **WHEN** a pane's `status` is `idle` and `SESSION_STARTED --id s1` is
+  dispatched
+- **THEN** the pane's `status` remains `idle`
+
+#### Scenario: SESSION_STARTED resets a working pane to idle
+
+- **WHEN** a pane's `status` is `working` and `SESSION_STARTED --id s2` is
+  dispatched
+- **THEN** the pane's `status` becomes `idle`
+
+#### Scenario: SESSION_STARTED resets a blocked pane to idle
+
+- **WHEN** a pane's `status` is `blocked` and `SESSION_STARTED --id s3` is
+  dispatched
+- **THEN** the pane's `status` becomes `idle`
+
+#### Scenario: SESSION_STARTED resets a done pane to idle
+
+- **WHEN** a pane's `status` is `done` and `SESSION_STARTED --id s4` is
+  dispatched
+- **THEN** the pane's `status` becomes `idle`
 
 #### Scenario: RUN_STARTED moves idle pane to working
 
@@ -127,18 +161,19 @@ SHALL NOT change `status`, but SHALL still be appended to `events-log.jsonl`.
 
 ### Requirement: Every dispatched event is appended to events-log.jsonl
 
-The system SHALL append every event dispatched via `rd agent event` as one JSON
-object per line to `$XDG_DATA_HOME/radr/agents/<pane-id>/events-log.jsonl`,
-creating the file and its parent directory if absent. Each logged line SHALL
-include at least the event name, `id`, `harness`, `pane_id`, and a timestamp;
-`TOOL_CALL_*` events SHALL include `type` when supplied.
+The system SHALL append every event dispatched via `rd agent event`, including
+`SESSION_STARTED`, as one JSON object per line to
+`$XDG_DATA_HOME/radr/agents/<pane-id>/events-log.jsonl`, creating the file and
+its parent directory if absent. Each logged line SHALL include at least the
+event name, `id`, `harness`, `pane_id`, and a timestamp; `TOOL_CALL_*` events
+SHALL include `type` when supplied.
 
 #### Scenario: First event creates the log file
 
-- **WHEN** `rd agent event RUN_STARTED --id r1 --harness claude --pane %12` is
-  dispatched and no `events-log.jsonl` exists yet for `%12`
+- **WHEN** `rd agent event SESSION_STARTED --id s1 --harness claude --pane %12`
+  is dispatched and no `events-log.jsonl` exists yet for `%12`
 - **THEN** `$XDG_DATA_HOME/radr/agents/%12/events-log.jsonl` is created
-  containing exactly one line describing the `RUN_STARTED` event
+  containing exactly one line describing the `SESSION_STARTED` event
 
 #### Scenario: Subsequent events are appended, not overwritten
 
@@ -153,38 +188,18 @@ include at least the event name, `id`, `harness`, `pane_id`, and a timestamp;
   pane's current status
 - **THEN** the event is still appended to `events-log.jsonl`
 
-### Requirement: rd agent init sets status to idle outside the event pipeline
-
-The system SHALL provide
-`rd agent init [--harness <HARNESS>] [--pane <PANE_ID>]`, which writes
-`status: idle` to the pane's `state.json` directly, independent of the FSM and
-without appending to `events-log.jsonl`. Pane ID resolution SHALL follow the
-same order as `rd agent clear`: `--pane` flag, then `$TMUX_PANE`, then silent
-exit 0 when neither is available.
-
-#### Scenario: rd agent init writes idle status
-
-- **WHEN** `rd agent init --harness pi --pane %12` is invoked
-- **THEN** `state.json` for `%12` is written with `"status": "idle"` and the
-  current `updated_at` timestamp, and no line is appended to `events-log.jsonl`
-
-#### Scenario: rd agent init overwrites any prior status
-
-- **WHEN** a pane's `state.json` currently has `"status": "blocked"` (e.g. left
-  over from a crashed session) and `rd agent init` is invoked for that pane
-- **THEN** `state.json` is overwritten with `"status": "idle"`
-
-#### Scenario: rd agent init is a no-op outside tmux
-
-- **WHEN** `rd agent init` is invoked with `$TMUX_PANE` unset and no `--pane`
-  flag
-- **THEN** the command exits 0 and makes no changes to the filesystem
-
 ### Requirement: rd agent status is removed
 
-The system SHALL NOT provide an `rd agent status` subcommand.
+The system SHALL NOT provide an `rd agent status` subcommand, and SHALL NOT
+provide a separate non-event `rd agent init` command; session bootstrap to
+`idle` SHALL be performed exclusively via `rd agent event SESSION_STARTED`.
 
 #### Scenario: rd agent status no longer exists
 
 - **WHEN** `rd agent status idle` (or any other value) is invoked
+- **THEN** the command exits non-zero as an unrecognized subcommand
+
+#### Scenario: rd agent init no longer exists
+
+- **WHEN** `rd agent init` is invoked
 - **THEN** the command exits non-zero as an unrecognized subcommand

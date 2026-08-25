@@ -1,11 +1,12 @@
 ## MODIFIED Requirements
 
-### Requirement: session_start event calls rd agent init
+### Requirement: session_start event calls rd agent event SESSION_STARTED
 
-The pi extension SHALL invoke `rd agent init --harness pi` when the
+The pi extension SHALL invoke
+`rd agent event SESSION_STARTED --id <sessionId> --harness pi` when the
 `session_start` event fires, so that the agent's state file is written to
 `$XDG_DATA_HOME/radr/agents/$TMUX_PANE/state.json` with `"status": "idle"`.
-`rd agent init` exits 0 silently when `$TMUX_PANE` is not set.
+`rd agent event` exits 0 silently when `$TMUX_PANE` is not set.
 
 #### Scenario: session_start fires inside tmux
 
@@ -61,17 +62,16 @@ the correct signal for the `done` status.
   before the final settlement, i.e. intermediate `agent_end` events do not
   trigger `RUN_FINISHED`)
 
-### Requirement: rd agent init, rd agent event, and rd agent clear are no-ops outside tmux
+### Requirement: rd agent event and rd agent clear are no-ops outside tmux
 
-`rd agent init`, every `rd agent event <NAME>` subcommand, and `rd agent clear`
-SHALL exit with code 0 and write nothing when `$TMUX_PANE` is not set and
-`--pane` is not supplied.
+Every `rd agent event <NAME>` subcommand and `rd agent clear` SHALL exit with
+code 0 and write nothing when `$TMUX_PANE` is not set and `--pane` is not
+supplied.
 
 #### Scenario: Extension fires outside tmux
 
-- **WHEN** any pi event fires and the extension calls `rd agent init`,
-  `rd agent event <NAME>`, or `rd agent clear` with `$TMUX_PANE` unset and no
-  `--pane` flag
+- **WHEN** any pi event fires and the extension calls `rd agent event <NAME>` or
+  `rd agent clear` with `$TMUX_PANE` unset and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
 ### Requirement: rd install pi generates the pi extension file
@@ -79,9 +79,9 @@ SHALL exit with code 0 and write nothing when `$TMUX_PANE` is not set and
 The `rd install pi` subcommand SHALL write the radr TypeScript extension to
 `~/.pi/agent/extensions/radr.ts`. The file SHALL subscribe to `session_start`,
 `before_agent_start`, `agent_settled`, and `session_shutdown` events and call
-the appropriate `rd agent init` / `rd agent event` / `rd agent clear` commands.
-The command SHALL be idempotent: re-running when the file content is already
-identical SHALL make no change and SHALL report the file as already up to date.
+the appropriate `rd agent event` / `rd agent clear` commands. The command SHALL
+be idempotent: re-running when the file content is already identical SHALL make
+no change and SHALL report the file as already up to date.
 
 #### Scenario: First-time install creates the extension file
 
@@ -102,10 +102,11 @@ identical SHALL make no change and SHALL report the file as already up to date.
 - **WHEN** `~/.pi/agent/extensions/radr.ts` exists but its content differs from
   the current generated content (e.g. from an older version of `rd`, including
   one that still generates `rd set-state`/`rd clear-state`,
-  `rd state set`/`rd state clear`, or `rd agent status`/`rd agent clear` calls)
-- **THEN** the file is overwritten with the new content (using `rd agent init` /
-  `rd agent event` / `rd agent clear`) and the command prints the file as
-  updated (prefixed with `~`)
+  `rd state set`/`rd state clear`, or `rd agent status`/`rd agent init`/
+  `rd agent clear` calls)
+- **THEN** the file is overwritten with the new content (using `rd agent event`
+  / `rd agent clear`) and the command prints the file as updated (prefixed with
+  `~`)
 
 #### Scenario: Install creates the extensions directory if absent
 

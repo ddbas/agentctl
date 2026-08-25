@@ -18,26 +18,30 @@
   was blocked).
 
 This change replaces the direct "set this status" call in both integrations with
-an event-dispatching interface (`rd agent event <NAME> ...`) plus a small
-non-event bootstrap command (`rd agent init`), and adds a `rust-fsm` state
-machine inside `rd` that derives `status` from the event stream. It must
+an event-dispatching interface (`rd agent event <NAME> ...`), and adds a
+`rust-fsm` state machine inside `rd` that derives `status` entirely from the
+event stream — including session bootstrap ("idle"), which is modeled as its own
+`SESSION_STARTED` event rather than a separate non-event command, so every
+status transition flows through the same dispatch/FSM/log pipeline. It must
 reproduce today's observable status transitions exactly for both harnesses —
 this is a refactor, not a behavior change — while establishing a vocabulary
-(`RUN_STARTED`/`RUN_FINISHED`/`TOOL_CALL_START`/`TOOL_CALL_RESULT`) that later
-changes can extend (e.g. counting active tool calls).
+(`SESSION_STARTED`/`RUN_STARTED`/`RUN_FINISHED`/`TOOL_CALL_START`/
+`TOOL_CALL_RESULT`) that later changes can extend (e.g. counting active tool
+calls).
 
 ## Goals / Non-Goals
 
 **Goals:**
 
 - Replace `rd agent status` with `rd agent event <EVENT_NAME> ...`, an
-  extensible, per-event-validated dispatch subcommand.
+  extensible, per-event-validated dispatch subcommand, with no non-event escape
+  hatch for status changes other than `rd agent clear` (deletion).
 - Derive `status` (idle/working/done/blocked) from a `rust-fsm`-based state
-  machine driven by the four events, with no observable regression versus
+  machine driven by the five events, with no observable regression versus
   today's status transitions for either the `pi` or `claude` integration.
 - Rename `state.json`'s `state` field to `status`.
-- Persist every dispatched event to an append-only `events-log.jsonl` alongside
-  `state.json`.
+- Persist every dispatched event, including `SESSION_STARTED`, to an append-only
+  `events-log.jsonl` alongside `state.json`.
 - Define concretely how `pi` and `claude` produce the required `id` (and, where
   relevant, `type`) fields for each event, since each harness has very different
   constraints (in-process extension vs. stateless per-hook processes).
@@ -55,41 +59,47 @@ changes can extend (e.g. counting active tool calls).
 
 ### 1. `rd agent event <EVENT_NAME>` as nested clap subcommands
 
-Each event name (`RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
-`TOOL_CALL_RESULT`) is its own clap subcommand nested under `event`, each with
-its own typed args:
+Each event name (`SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
+`TOOL_CALL_START`, `TOOL_CALL_RESULT`) is its own clap subcommand nested under
+`event`, each with its own typed args:
 
 ```
+rd agent event SESSION_STARTED   --id <ID> [--harness <H>] [--pane <ID>]
 rd agent event RUN_STARTED       --id <ID> [--harness <H>] [--pane <ID>]
 rd agent event RUN_FINISHED      --id <ID> [--harness <H>] [--pane <ID>]
 rd agent event TOOL_CALL_START   --id <ID> [--type custom|elicitation] [--harness <H>] [--pane <ID>]
 rd agent event TOOL_CALL_RESULT  --id <ID> [--type custom|elicitation] [--harness <H>] [--pane <ID>]
 ```
 
-`--id` is required on all four (clap `required = true`); `--type` is an optional
+`--id` is required on all five (clap `required = true`); `--type` is an optional
 `ValueEnum` on the two `TOOL_CALL_*` variants only. This gives us free per-event
-validation and `--help` text via clap, and adding a fifth event later is
+validation and `--help` text via clap, and adding a sixth event later is
 additive (new subcommand + new FSM transition), matching the brief's "each event
 name is really just a subcommand of the event dispatching subcommand."
 
 **Alternative considered**: a single `rd agent event <NAME> --id ... --type ...`
 with `NAME` as a free-form `ValueEnum` and one flat arg struct shared by all
 events. Rejected because it can't express "‑‑type is only valid for
-`TOOL_CALL_*`" or "`--id` required for all four but nothing else required for
-`RUN_*`" without runtime checks duplicating what clap already does per
-subcommand.
+`TOOL_CALL_*`" or "`--id` required for all five but nothing else required for
+`RUN_*`/`SESSION_STARTED`" without runtime checks duplicating what clap already
+does per subcommand.
 
-### 2. `rd agent init` stays outside the event/FSM pipeline
+### 2. Session bootstrap is the `SESSION_STARTED` event, not a separate command
 
-`idle` is not one of the four supported events — it's a session bootstrap
-concern, not a fact about a run. `rd agent init [--harness] [--pane]` is added
-as a sibling to the existing `rd agent clear`, both bypassing the FSM/event log
-and writing status directly (`clear` deletes the file; `init` writes
-`status: idle`). This preserves the pi/Claude semantics of "at session start,
-force the pane back to a known idle state" without inventing a fifth
-`SESSION_STARTED`-style event that doesn't fit the run/tool-call vocabulary the
-brief defines. `rd agent init` is not written to `events-log.jsonl`, consistent
-with `rd agent clear` today not being logged either.
+`idle` no longer has a bespoke non-event command. `SESSION_STARTED` is added as
+a fifth event so that "a harness session began" is expressed the same way as
+every other fact radr tracks: dispatched via `rd agent event`, validated by
+clap, run through the FSM, and appended to `events-log.jsonl` like any other
+event. This replaces the `rd agent init` idea from an earlier draft of this
+proposal — everything now goes through one event-dispatching interface, with
+`rd agent clear` (deletion, not a status value) remaining the sole exception,
+since it removes the pane's tracked state entirely rather than reporting a fact
+about it.
+
+`SESSION_STARTED --id <ID>` requires an `id` for consistency with every other
+event and so `events-log.jsonl` entries are uniformly correlatable (e.g. to a
+harness's session id), even though `SESSION_STARTED` has no terminating
+counterpart to reconcile against.
 
 ### 3. FSM shape (`rust-fsm`)
 
@@ -99,11 +109,17 @@ Transitions:
 
 | From      | Event                                    | To        |
 | --------- | ---------------------------------------- | --------- |
+| `*` (any) | `SESSION_STARTED`                        | `Idle`    |
 | `Idle`    | `RUN_STARTED`                            | `Working` |
 | `Done`    | `RUN_STARTED`                            | `Working` |
 | `Working` | `RUN_FINISHED`                           | `Done`    |
 | `Working` | `TOOL_CALL_START { type: elicitation }`  | `Blocked` |
 | `Blocked` | `TOOL_CALL_RESULT { type: elicitation }` | `Working` |
+
+`SESSION_STARTED` is a wildcard reset: it transitions the pane back to `Idle`
+regardless of its current status (including from a stale `Working`/`Blocked`
+left over from a crashed prior session), matching the old `rd agent status idle`
+behavior at `session_start`/`SessionStart`.
 
 `TOOL_CALL_START`/`TOOL_CALL_RESULT` with `type: custom` or no `type` are
 accepted (written to `events-log.jsonl`) but do not drive any status transition
@@ -143,6 +159,7 @@ events/states are added later.
 line, e.g.:
 
 ```json
+{"event":"SESSION_STARTED","id":"...","harness":"claude","pane_id":"%12","timestamp":"..."}
 {"event":"RUN_STARTED","id":"...","harness":"claude","pane_id":"%12","timestamp":"..."}
 {"event":"TOOL_CALL_START","id":"toolu_01...","type":"elicitation","harness":"claude","pane_id":"%12","timestamp":"..."}
 ```
@@ -157,7 +174,9 @@ when a session ends — no new cleanup code needed.
 pi's extension is a single long-lived process per pi session, so it can hold
 in-memory state across hook callbacks:
 
-- `session_start` → `rd agent init --harness pi` (was: `status idle`).
+- `session_start` → generate (or reuse pi's own session id if exposed) an id and
+  call `rd agent event SESSION_STARTED --id <sessionId> --harness pi` (was:
+  `status idle`).
 - `before_agent_start` → generate a run id with `crypto.randomUUID()`, store it
   in a module-scoped variable, call
   `rd agent event RUN_STARTED --id <runId> --harness pi`.
@@ -178,21 +197,24 @@ args). Following Claude's own documented pattern for stdin-parsing hooks (`jq`),
 each hook command becomes a small shell snippet that extracts the field it needs
 from stdin and forwards it as `--id`:
 
-| Event              | Matcher                         | Command                                                                                                             | Async                                                      |
-| ------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | --- |
-| `SessionStart`     | `startup\|resume\|clear`        | `rd agent init --harness claude`                                                                                    | no                                                         |
-| `UserPromptSubmit` | —                               | `id=$(cat \| jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude`                          | yes                                                        |
-| `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `id=$(cat \| jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude`  | yes                                                        |
-| `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | `id=$(cat \| jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude` | yes                                                        |
-| `Notification`     | `permission_prompt`             | `rd agent event TOOL_CALL_START --id "perm-$(cat                                                                    | jq -r '.session_id')" --type elicitation --harness claude` | yes |
-| `PostToolUse`      | — (unmatched, all tools)        | `rd agent event TOOL_CALL_RESULT --id "perm-$(cat                                                                   | jq -r '.session_id')" --type elicitation --harness claude` | yes |
-| `Stop`             | —                               | `id=$(cat \| jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude`                         | yes                                                        |
-| `StopFailure`      | —                               | `id=$(cat \| jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude`                         | yes                                                        |
-| `SessionEnd`       | —                               | `rd agent clear`                                                                                                    | no                                                         |
+| Event              | Matcher                         | Command                                                                                                                 | Async |
+| ------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----- |
+| `SessionStart`     | `startup\|resume\|clear`        | `id=$(cat \| jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude`                          | no    |
+| `UserPromptSubmit` | —                               | `id=$(cat \| jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude`                              | yes   |
+| `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `id=$(cat \| jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude`      | yes   |
+| `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | `id=$(cat \| jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude`     | yes   |
+| `Notification`     | `permission_prompt`             | `id=$(cat \| jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude`  | yes   |
+| `PostToolUse`      | — (unmatched, all tools)        | `id=$(cat \| jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude` | yes   |
+| `Stop`             | —                               | `id=$(cat \| jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude`                             | yes   |
+| `StopFailure`      | —                               | `id=$(cat \| jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude`                             | yes   |
+| `SessionEnd`       | —                               | `rd agent clear`                                                                                                        | no    |
 
 Notes:
 
-- `PostToolUse` is now registered **twice** (once matched to
+- `SessionStart` now reads `session_id` from stdin via `jq`, same as the other
+  hooks, instead of calling a fixed no-payload command — this keeps every hook
+  entry using the same "extract from stdin, dispatch an event" shape.
+- `PostToolUse` is registered **twice** (once matched to
   `AskUserQuestion|ExitPlanMode`, once unmatched for all tools) instead of once
   unconditionally. The unmatched registration's only job is to close out an
   outstanding `permission_prompt`-triggered block using the same synthetic
@@ -238,6 +260,12 @@ to be a real installation obstacle in practice.
 - **[Risk]** `jq` must be installed for the Claude integration to work →
   **Mitigation**: already an implicit requirement of Claude's own hook examples;
   document it in `rd install claude` output.
+- **[Risk]** `SESSION_STARTED`'s wildcard "reset to idle from any state"
+  transition means a stray/duplicate `SESSION_STARTED` could clobber a
+  legitimately `working`/`blocked` pane → **Mitigation**: this exactly mirrors
+  today's behavior (`rd agent status idle` was already unconditional), and
+  `SESSION_STARTED` is only ever dispatched from `session_start`/`SessionStart`,
+  which Claude/pi fire once per session start/resume/clear, not mid-run.
 - **[Risk]** Leniency in the FSM (unknown/mismatched transitions are
   logged-but-ignored no-ops rather than errors) could mask a genuinely broken
   harness integration → **Mitigation**: every event is still written to
@@ -258,7 +286,8 @@ to be a real installation obstacle in practice.
    stale-state validation prunes anything else).
 2. Add `events-log.jsonl` writing, wired through the same write path as
    `state.json` so every event append and status write happen together.
-3. Add `rd agent event <NAME>` and `rd agent init`; remove `rd agent status`.
+3. Add `rd agent event <NAME>` (including `SESSION_STARTED`); remove
+   `rd agent status`.
 4. Update `rd install pi` / `rd install claude` templates and their
    idempotent-upgrade detection to the new command forms; add a migration path
    recognizing the old `rd agent status ...` forms (extending the existing
@@ -281,6 +310,6 @@ rollback is simply reverting the commit(s) and re-running
   `id` doesn't match the currently-open `TOOL_CALL_START`, instead of silently
   no-op'ing, once harness integrations are proven reliable enough that a
   mismatch signals a real bug worth surfacing?
-- Should `rd agent event`/`rd agent init` read the harness's native hook JSON
-  from stdin directly (dropping the `jq` shell-snippet requirement for Claude)
-  in a future change?
+- Should `rd agent event` read the harness's native hook JSON from stdin
+  directly (dropping the `jq` shell-snippet requirement for Claude) in a future
+  change?

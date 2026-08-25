@@ -21,25 +21,27 @@ pipeline exists.
 - Add `rd agent event <EVENT_NAME> ...` as the single event-dispatching
   subcommand. Each event name is its own clap subcommand under `event` with its
   own required/optional payload fields, validated by the CLI.
-- Support four events for now: `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
-  `TOOL_CALL_RESULT`. All four require a unique `id` field (a run ID for
-  `RUN_*`, a tool-call ID for `TOOL_CALL_*`) so terminating events can be
-  reconciled with their starting event. The two `TOOL_CALL_*` events
-  additionally accept an optional `type` field (`custom` | `elicitation`); an
-  `elicitation`-typed tool call is what drives the agent into the `blocked`
-  status.
-- Add `rd agent init [--harness] [--pane]` as a small, non-event bootstrap
-  command that (re)sets a pane's status to `idle`, mirroring the existing
-  `rd agent clear`. This replaces the "idle" case of the old `rd agent status`
-  and is intentionally kept outside the event/FSM pipeline (like `clear`) since
-  it represents session bootstrap, not a fact about a run.
+- Support five events for now: `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
+  `TOOL_CALL_START`, `TOOL_CALL_RESULT`. All five require a unique `id` field (a
+  session ID for `SESSION_STARTED`, a run ID for `RUN_*`, a tool-call ID for
+  `TOOL_CALL_*`) so terminating events can be reconciled with their starting
+  event where applicable. The two `TOOL_CALL_*` events additionally accept an
+  optional `type` field (`custom` | `elicitation`); an `elicitation`-typed tool
+  call is what drives the agent into the `blocked` status.
+- `SESSION_STARTED` replaces the "idle" case of the old `rd agent status`:
+  everything is now handled through the event dispatcher, with no separate
+  non-event bootstrap command. Dispatching `SESSION_STARTED` (re)sets a pane's
+  status to `idle` from any prior status (including a stale `working`/`blocked`
+  left over from a crashed session) and is recorded in `events-log.jsonl` like
+  every other event.
 - Introduce a finite state machine (using the `rust-fsm` crate) that consumes
-  the four events and derives the existing
+  the five events and derives the existing
   `idle → working → blocked ⇄ working → done → working → …` status lifecycle,
   replacing the current "harness passes the status directly" model with "radr
   computes the status from events." `idle` is the FSM's start state, `done` is
   its end state, reached at the end of each run (a subsequent `RUN_STARTED`
-  moves a `done` pane back to `working` for the next run).
+  moves a `done` pane back to `working` for the next run, and `SESSION_STARTED`
+  can reset any state back to `idle`).
 - **BREAKING**: Rename the `state` field in `state.json` to `status` so it reads
   unambiguously now that the file will need to accommodate other,
   independently-tracked state in future changes (starting with active tool call
@@ -56,8 +58,7 @@ pipeline exists.
   (including when `blocked` is entered/exited for Claude's interactive tools and
   permission prompts).
 - Update all existing tests and fixtures that assert on `rd agent status ...`
-  command strings to assert on the new `rd agent event ...` / `rd agent init`
-  invocations.
+  command strings to assert on the new `rd agent event ...` invocations.
 
 ### Explicitly out of scope (future work)
 
@@ -73,27 +74,25 @@ pipeline exists.
 ### New Capabilities
 
 - `agent-events`: Event-dispatching CLI (`rd agent event <EVENT_NAME> ...`), the
-  payload schema for `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
-  `TOOL_CALL_RESULT`, the `rd agent init` bootstrap command, the FSM that
-  derives `status` from the event stream, and the `events-log.jsonl` append-only
-  log.
+  payload schema for `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
+  `TOOL_CALL_START`, `TOOL_CALL_RESULT`, the FSM that derives `status` from the
+  event stream, and the `events-log.jsonl` append-only log.
 
 ### Modified Capabilities
 
 - `agent-state`: `state.json`'s `state` field is renamed to `status`; status is
-  now written as a side-effect of event processing (and of
-  `rd agent init`/`rd agent clear`) rather than directly by a "set status"
-  command.
-- `pi-state-hooks`: The pi extension's lifecycle hooks emit `rd agent init` /
-  `rd agent event ...` instead of `rd agent status ...`.
-- `claude-state-hooks`: The Claude Code hook commands emit `rd agent init` /
-  `rd agent event ...` instead of `rd agent status ...`.
+  now written as a side-effect of event processing (and of `rd agent clear`)
+  rather than directly by a "set status" command.
+- `pi-state-hooks`: The pi extension's lifecycle hooks emit `rd agent event ...`
+  instead of `rd agent status ...`.
+- `claude-state-hooks`: The Claude Code hook commands emit `rd agent event ...`
+  instead of `rd agent status ...`.
 
 ## Impact
 
 - Affected code: `src/state.rs` (schema rename), `src/commands/agent_status.rs`
   (removed), new `src/commands/agent_event.rs` (event dispatcher, one match arm
-  per event) and `src/commands/agent_init.rs`, a new FSM module (e.g.
+  per event, including `SESSION_STARTED`), a new FSM module (e.g.
   `src/status_fsm.rs`) built on `rust-fsm`, a new events-log module (e.g.
   `src/events_log.rs`), `src/commands/hooks.rs` (installer templates +
   matching/upgrade logic for `rd agent status` command strings), `src/main.rs`

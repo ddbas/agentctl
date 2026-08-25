@@ -1,11 +1,13 @@
 ## MODIFIED Requirements
 
-### Requirement: SessionStart hook calls rd agent init
+### Requirement: SessionStart hook calls rd agent event SESSION_STARTED
 
-The Claude `SessionStart` hook SHALL invoke `rd agent init --harness claude`
-when the session starts fresh, resumes from a prior run, or is cleared. The hook
-SHALL be registered with `matcher: "startup|resume|clear"` so it fires for all
-three sources. `rd agent init` exits 0 silently when `$TMUX_PANE` is not set.
+The Claude `SessionStart` hook SHALL invoke a command that reads the hook's JSON
+payload from stdin, extracts `session_id`, and invokes
+`rd agent event SESSION_STARTED --id <session_id> --harness claude` when the
+session starts fresh, resumes from a prior run, or is cleared. The hook SHALL be
+registered with `matcher: "startup|resume|clear"` so it fires for all three
+sources. `rd agent event` exits 0 silently when `$TMUX_PANE` is not set.
 
 #### Scenario: SessionStart fires on new session inside tmux
 
@@ -187,38 +189,38 @@ file exists.
   `$TMUX_PANE`
 - **THEN** `rd agent clear` exits 0 without error
 
-### Requirement: rd agent init, rd agent event, and rd agent clear are no-ops outside tmux
+### Requirement: rd agent event and rd agent clear are no-ops outside tmux
 
-`rd agent init`, every `rd agent event <NAME>` subcommand, and `rd agent clear`
-SHALL exit with code 0 and write nothing when `$TMUX_PANE` is not set in the
-environment and `--pane` is not supplied.
+Every `rd agent event <NAME>` subcommand and `rd agent clear` SHALL exit with
+code 0 and write nothing when `$TMUX_PANE` is not set in the environment and
+`--pane` is not supplied.
 
 #### Scenario: Hook fires outside tmux
 
-- **WHEN** `rd agent init`, `rd agent event <NAME>`, or `rd agent clear` is
-  invoked with `$TMUX_PANE` unset and no `--pane` flag
+- **WHEN** `rd agent event <NAME>` or `rd agent clear` is invoked with
+  `$TMUX_PANE` unset and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
 ### Requirement: rd install claude registers handlers in user Claude settings
 
 The `rd install claude` subcommand SHALL patch `~/.claude/settings.json` to
-register nine Claude hook entries using `rd agent init`, `rd agent event`, and
-`rd agent clear`. `SessionStart` and `SessionEnd` are registered without `async`
-so they complete before Claude proceeds; all other hooks use `async: true`. The
-command SHALL be idempotent and SHALL merge into any existing hook configuration
-without overwriting it. If `~/.claude/settings.json` already contains hook
-entries registered by an older `rd` binary using the pre-rename
+register nine Claude hook entries using `rd agent event` and `rd agent clear`.
+`SessionStart` and `SessionEnd` are registered without `async` so they complete
+before Claude proceeds; all other hooks use `async: true`. The command SHALL be
+idempotent and SHALL merge into any existing hook configuration without
+overwriting it. If `~/.claude/settings.json` already contains hook entries
+registered by an older `rd` binary using the pre-rename
 `rd set-state`/`rd clear-state` commands, the subsequently renamed
 `rd state set`/`rd state clear` commands, or the subsequently renamed
 `rd agent status`/`rd agent clear` commands, those entries SHALL be recognized
 as radr-managed, removed as superseded, and replaced with the equivalent
-`rd agent init`/`rd agent event`/`rd agent clear` entries.
+`rd agent event`/`rd agent clear` entries.
 
 The nine entries are:
 
 | Event              | Matcher                         | Command                                                                                                                           | Async |
 | ------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `SessionStart`     | `startup\|resume\|clear`        | `rd agent init --harness claude`                                                                                                  | no    |
+| `SessionStart`     | `startup\|resume\|clear`        | reads stdin for `session_id`, then `rd agent event SESSION_STARTED --id <session_id> --harness claude`                            | no    |
 | `UserPromptSubmit` | —                               | reads stdin for `session_id`, then `rd agent event RUN_STARTED --id <session_id> --harness claude`                                | yes   |
 | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_START --id <tool_use_id> --type elicitation --harness claude`       | yes   |
 | `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_RESULT --id <tool_use_id> --type elicitation --harness claude`      | yes   |
@@ -267,19 +269,19 @@ The nine entries are:
 
 - **WHEN** `~/.claude/settings.json` contains radr hook entries using the
   `rd agent status ...` / `rd agent clear` commands (from a `rd` binary
-  installed after the `state`→`agent` rename but before this
-  `status`→`event`/`init` rename)
+  installed after the `state`→`agent` rename but before this `status`→`event`
+  rename)
 - **THEN** running `rd install claude` removes the old entries and adds the
-  equivalent `rd agent init` / `rd agent event ...` / `rd agent clear` entries,
-  with no duplicate or leftover old-style entries remaining
+  equivalent `rd agent event ...` / `rd agent clear` entries, with no duplicate
+  or leftover old-style entries remaining
 
 ### Requirement: rd uninstall claude removes only radr-managed hook entries
 
 The `rd uninstall claude` subcommand SHALL remove radr-managed hook entries from
 `~/.claude/settings.json`, recognizing the current-form commands
-(`rd agent init ...` / `rd agent event ...` / `rd agent clear`) as well as all
-prior legacy forms (`rd agent status ...` / `rd agent clear`, `rd state set ...`
-/ `rd state clear`, and the earlier `rd set-state ...` / `rd clear-state`) using
+(`rd agent event ...` / `rd agent clear`) as well as all prior legacy forms
+(`rd agent status ...` / `rd agent clear`, `rd state set ...` /
+`rd state clear`, and the earlier `rd set-state ...` / `rd clear-state`) using
 the same recognition logic as `rd install claude`'s migration path. All non-radr
 content in the file, including non-radr hook entries under the same event and
 any other top-level settings keys, SHALL be preserved unchanged. The command
