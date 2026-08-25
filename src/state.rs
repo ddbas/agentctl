@@ -72,8 +72,8 @@ pub struct AgentInfo {
     pub pane_id: String,
     /// Agent harness name (e.g. `claude`, `pi`), or `"unknown"` when not set.
     pub harness: String,
-    /// Current state of the agent.
-    pub state: AgentState,
+    /// Current status of the agent.
+    pub status: AgentState,
     /// RFC 3339 timestamp of the last state change.
     pub updated_at: DateTime<Utc>,
 }
@@ -123,7 +123,7 @@ pub fn state_file_path(pane_id: &str) -> PathBuf {
 ///
 /// Writes to a `.tmp` sibling then renames so concurrent readers never see a
 /// partial file.
-pub fn write_state_to(base: &Path, pane_id: &str, harness: &str, state: AgentState) -> Result<()> {
+pub fn write_state_to(base: &Path, pane_id: &str, harness: &str, status: AgentState) -> Result<()> {
     let dir = agent_dir_in(base, pane_id);
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("create state dir: {}", dir.display()))?;
@@ -131,7 +131,7 @@ pub fn write_state_to(base: &Path, pane_id: &str, harness: &str, state: AgentSta
     let info = AgentInfo {
         pane_id: pane_id.to_owned(),
         harness: harness.to_owned(),
-        state,
+        status,
         updated_at: Utc::now(),
     };
 
@@ -158,7 +158,7 @@ pub fn read_state_from(base: &Path, pane_id: &str) -> AgentState {
         Err(_) => return AgentState::Unknown,
     };
     match serde_json::from_slice::<AgentInfo>(&bytes) {
-        Ok(info) => info.state,
+        Ok(info) => info.status,
         Err(_) => AgentState::Unknown,
     }
 }
@@ -208,8 +208,8 @@ pub fn list_agent_infos_in(base: &Path) -> Vec<AgentInfo> {
 
 /// Atomically write (or overwrite) the state file for `pane_id` using the XDG
 /// base directory.
-pub fn write_state(pane_id: &str, harness: &str, state: AgentState) -> Result<()> {
-    write_state_to(&xdg_data_home(), pane_id, harness, state)
+pub fn write_state(pane_id: &str, harness: &str, status: AgentState) -> Result<()> {
+    write_state_to(&xdg_data_home(), pane_id, harness, status)
 }
 
 /// Read and return the current `AgentState` for `pane_id` using the XDG base.

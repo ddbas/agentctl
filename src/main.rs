@@ -1,6 +1,9 @@
 mod commands;
 #[allow(dead_code)]
+mod events_log;
+#[allow(dead_code)]
 mod state;
+mod status_fsm;
 
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -96,24 +99,28 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AgentSubcommand {
-    /// Write the current agent state to the state file.
+    /// Dispatch a typed event; the pane's status is derived from the event
+    /// stream via a finite state machine.
     ///
     /// Reads `$TMUX_PANE` from the environment to identify the current pane.
     /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
     /// supplied — suitable for calling from hooks that may run outside tmux.
-    Status {
-        /// New state. Accepted values: idle, working, done, blocked.
-        #[arg(value_name = "STATE")]
-        state: String,
-
+    ///
+    /// `--harness` and `--pane` are declared once here and inherited by every
+    /// event subcommand below (they may appear before or after the event
+    /// name on the command line).
+    Event {
         /// Harness name to write to the state file (e.g. `claude`).
         /// Defaults to `"unknown"` when omitted.
-        #[arg(long, value_name = "HARNESS")]
+        #[arg(long, value_name = "HARNESS", global = true)]
         harness: Option<String>,
 
         /// Override the pane ID instead of reading `$TMUX_PANE`.
-        #[arg(long, value_name = "PANE_ID")]
+        #[arg(long, value_name = "PANE_ID", global = true)]
         pane: Option<String>,
+
+        #[command(subcommand)]
+        event: AgentEventSubcommand,
     },
 
     /// Whole-session cleanup for the current agent pane.
@@ -127,6 +134,81 @@ enum AgentSubcommand {
         #[arg(long, value_name = "PANE_ID")]
         pane: Option<String>,
     },
+}
+
+/// The five events accepted by `rd agent event <NAME>`.
+///
+/// `--id` is required on all five; `--type` is only accepted on the two
+/// `TOOL_CALL_*` variants.
+#[derive(Subcommand)]
+enum AgentEventSubcommand {
+    /// A harness session began (or resumed / was cleared). Resets the pane's
+    /// status to `idle` from any prior status.
+    #[command(name = "SESSION_STARTED")]
+    SessionStarted {
+        /// Unique id for this session (used to correlate events.jsonl entries).
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+
+    /// A run (agent turn) started.
+    #[command(name = "RUN_STARTED")]
+    RunStarted {
+        /// Unique id for this run.
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+
+    /// A run (agent turn) finished.
+    #[command(name = "RUN_FINISHED")]
+    RunFinished {
+        /// Unique id for this run (matching the corresponding RUN_STARTED).
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+
+    /// A tool call started.
+    #[command(name = "TOOL_CALL_START")]
+    ToolCallStart {
+        /// Unique id for this tool call.
+        #[arg(long, value_name = "ID")]
+        id: String,
+
+        /// Payload type. `elicitation` drives the agent into `blocked`.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<ToolCallTypeArg>,
+    },
+
+    /// A tool call finished.
+    #[command(name = "TOOL_CALL_RESULT")]
+    ToolCallResult {
+        /// Unique id for this tool call (matching the corresponding
+        /// TOOL_CALL_START).
+        #[arg(long, value_name = "ID")]
+        id: String,
+
+        /// Payload type. `elicitation` clears a `blocked` status back to
+        /// `working`.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<ToolCallTypeArg>,
+    },
+}
+
+/// Accepted `--type` values for `TOOL_CALL_START` / `TOOL_CALL_RESULT`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[value(rename_all = "snake_case")]
+enum ToolCallTypeArg {
+    Custom,
+    Elicitation,
+}
+
+impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
+    fn from(value: ToolCallTypeArg) -> Self {
+        match value {
+            ToolCallTypeArg::Custom => status_fsm::ToolCallType::Custom,
+            ToolCallTypeArg::Elicitation => status_fsm::ToolCallType::Elicitation,
+        }
+    }
 }
 
 /// Harnesses supported by `rd install` and `rd uninstall`.
@@ -172,13 +254,34 @@ fn run() -> anyhow::Result<()> {
         }
         Some(Commands::Agent {
             subcommand:
-                AgentSubcommand::Status {
-                    state,
+                AgentSubcommand::Event {
                     harness,
                     pane,
+                    event,
                 },
         }) => {
-            commands::agent_status::run(state, harness, pane)?;
+            let (kind, id, tool_call_type) = match event {
+                AgentEventSubcommand::SessionStarted { id } => {
+                    (commands::agent_event::EventKind::SessionStarted, id, None)
+                }
+                AgentEventSubcommand::RunStarted { id } => {
+                    (commands::agent_event::EventKind::RunStarted, id, None)
+                }
+                AgentEventSubcommand::RunFinished { id } => {
+                    (commands::agent_event::EventKind::RunFinished, id, None)
+                }
+                AgentEventSubcommand::ToolCallStart { id, r#type } => (
+                    commands::agent_event::EventKind::ToolCallStart,
+                    id,
+                    r#type.map(Into::into),
+                ),
+                AgentEventSubcommand::ToolCallResult { id, r#type } => (
+                    commands::agent_event::EventKind::ToolCallResult,
+                    id,
+                    r#type.map(Into::into),
+                ),
+            };
+            commands::agent_event::run(kind, id, tool_call_type, harness, pane)?;
         }
         Some(Commands::Agent {
             subcommand: AgentSubcommand::Clear { pane },

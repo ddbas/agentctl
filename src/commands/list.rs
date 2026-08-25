@@ -292,7 +292,7 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
         .map(|p| {
             state_map
                 .get(&p.pane_id)
-                .map(|info| info.state.to_string())
+                .map(|info| info.status.to_string())
                 .unwrap_or_else(|| AgentState::Unknown.to_string())
         })
         .collect();
@@ -347,11 +347,11 @@ pub fn sort_panes(
         SortKey::State => {
             let sa = state_map
                 .get(&a.pane_id)
-                .map(|i| i.state)
+                .map(|i| i.status)
                 .unwrap_or(AgentState::Unknown);
             let sb = state_map
                 .get(&b.pane_id)
-                .map(|i| i.state)
+                .map(|i| i.status)
                 .unwrap_or(AgentState::Unknown);
             sa.cmp(&sb)
         }
@@ -684,7 +684,7 @@ mod tests {
                 let info = AgentInfo {
                     pane_id: id.to_string(),
                     harness: "claude".to_string(),
-                    state: *state,
+                    status: *state,
                     updated_at: *ts,
                 };
                 (id.to_string(), info)
@@ -820,7 +820,7 @@ mod tests {
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4, &p5];
         sort_panes(&mut refs, SortKey::State, false, &map);
 
-        let states: Vec<AgentState> = refs.iter().map(|p| map[&p.pane_id].state).collect();
+        let states: Vec<AgentState> = refs.iter().map(|p| map[&p.pane_id].status).collect();
         assert_eq!(
             states,
             vec![
@@ -847,8 +847,8 @@ mod tests {
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
         sort_panes(&mut refs, SortKey::State, true, &map);
 
-        assert_eq!(map[refs[0].pane_id.as_str()].state, AgentState::Unknown);
-        assert_eq!(map[refs[2].pane_id.as_str()].state, AgentState::Blocked);
+        assert_eq!(map[refs[0].pane_id.as_str()].status, AgentState::Unknown);
+        assert_eq!(map[refs[2].pane_id.as_str()].status, AgentState::Blocked);
     }
 
     // ── Stability ───────────────────────────────────────────────────────────────────

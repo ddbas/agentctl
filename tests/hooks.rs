@@ -189,7 +189,7 @@ async fn hooks_install_pi_idempotent() {
 // ── Claude integration tests (task 2.6 and 2.7) ───────────────────────────────
 
 /// `rd install claude` on a container with no `~/.claude/settings.json`:
-/// the file is created and contains all six radr hook entries.
+/// the file is created and contains all nine radr hook entries.
 #[tokio::test]
 async fn hooks_install_claude_creates_settings_file() {
     let env = common::TmuxEnv::new().await;
@@ -224,7 +224,8 @@ async fn hooks_install_claude_creates_settings_file() {
     // File must exist.
     assert!(settings_path.exists(), "settings.json should be created");
 
-    // Parse and verify all six hook events are registered.
+    // Parse and verify all seven distinct hook events are registered (nine
+    // entries total — PostToolUse is registered twice).
     let content = fs::read_to_string(&settings_path).expect("read settings.json");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
     let hooks = &parsed["hooks"];
@@ -234,6 +235,7 @@ async fn hooks_install_claude_creates_settings_file() {
         "UserPromptSubmit",
         "PreToolUse",
         "Stop",
+        "StopFailure",
         "Notification",
         "SessionEnd",
     ] {
@@ -242,6 +244,15 @@ async fn hooks_install_claude_creates_settings_file() {
             .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
         assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
     }
+
+    let post_tool_use = hooks["PostToolUse"]
+        .as_array()
+        .expect("hooks.PostToolUse should be an array");
+    assert_eq!(
+        post_tool_use.len(),
+        2,
+        "hooks.PostToolUse should have exactly two entries"
+    );
 
     // stdout should contain '+' for new entries.
     let stdout = String::from_utf8_lossy(&output.stdout);
