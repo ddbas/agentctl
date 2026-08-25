@@ -19,6 +19,9 @@
       used when `--columns` is omitted
 - [ ] 2.3 Add doc comments describing `--columns` behavior, default, and
       duplicate/order-preserving semantics
+- [ ] 2.4 Ensure `--columns`/`-c` help text displays the default value as the
+      literal string `agent,session,pane,status` (derived from `DEFAULT_COLUMNS`
+      so it cannot drift from the actual default)
 
 ## 3. Generalized row rendering
 
@@ -29,7 +32,10 @@
       resolved `AgentState` string (`unknown` fallback), `UpdatedAt` → formatted
       timestamp or empty string
 - [ ] 3.3 Preserve existing Unicode-display-width column padding logic, computed
-      per column position over the generalized cell values
+      per column position over the generalized cell values, guaranteeing: (a)
+      exactly two spaces of separation between columns, (b) each column's width
+      equals the display width of its widest cell, and (c) every row's cell for
+      a given column starts at the same terminal column offset
 - [ ] 3.4 Support duplicate field entries rendering repeated columns with no
       deduplication
 
@@ -61,9 +67,15 @@
       order, duplicates, invalid column name rejection
 - [ ] 6.4 Add unit tests for `updatedAt` rendering: RFC 3339 output when a state
       file exists, empty string when absent
-- [ ] 6.5 Update `tests/list_sessions.rs` integration tests for the renamed
+- [ ] 6.5 Add regression tests asserting, for both the default column set and
+      arbitrary `--columns` selections: (a) columns are separated by exactly two
+      spaces, (b) each column's width equals its widest cell's display width
+      (e.g. `agent` column with `pi`/`claude` values is exactly as wide as
+      `claude`), and (c) every row's cell for a given column starts at the same
+      terminal column offset as every other row
+- [ ] 6.6 Update `tests/list_sessions.rs` integration tests for the renamed
       `status` column and default column output
-- [ ] 6.6 Add an integration test exercising `rd list --columns ...` end to end
+- [ ] 6.7 Add an integration test exercising `rd list --columns ...` end to end
       (custom subset/order) and `rd list --sort-by status`/`updatedAt`
 
 ## 7. Documentation

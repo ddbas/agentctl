@@ -43,7 +43,11 @@ Column widths SHALL be computed using **Unicode terminal display width** (the
 number of terminal columns a string occupies), not byte length or Unicode scalar
 count. Each column SHALL be padded to the maximum display width in that column
 plus two spaces, so that all rows are visually aligned in a fixed-width
-terminal.
+terminal. This behaviour is unchanged by the introduction of `--columns` and
+MUST NOT regress; the precise, testable alignment rules (two-space separation,
+per-column width equal to its widest cell, identical start position across rows)
+are defined by the `list-columns` capability and apply regardless of which
+columns are selected.
 
 #### Scenario: Agent panes exist across multiple sessions
 

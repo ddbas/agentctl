@@ -51,6 +51,12 @@ column's name (previously called `state`).
 - **THEN** each output row contains four columns, in order: agent name, session
   name, `window.pane`, and status
 
+#### Scenario: Help text shows the default column list
+
+- **WHEN** the user runs `rd list --help`
+- **THEN** the `--columns` flag's help text displays its default value as the
+  literal, comma-delimited string a user would type: `agent,session,pane,status`
+
 ### Requirement: updatedAt column renders a timestamp
 
 The `updatedAt` column SHALL render the agent's `updated_at` timestamp (from its
@@ -74,9 +80,22 @@ render as an empty string for that row.
 ### Requirement: Column alignment applies uniformly regardless of selected columns
 
 Column widths SHALL continue to be computed using Unicode terminal display width
-(not byte length or scalar count), padded per-column to the maximum display
-width in that column plus two spaces, regardless of which columns or how many
-are selected via `--columns`.
+(not byte length or scalar count), regardless of which columns or how many are
+selected via `--columns`. This is a strict, no-regression carryover of
+pre-existing alignment behaviour; it applies identically whether the default
+columns or a custom `--columns` selection is used:
+
+1. **Two-space column separation**: adjacent columns SHALL always be separated
+   by at least two spaces of padding, for every row.
+2. **Column width equals its widest cell**: each column's rendered width SHALL
+   equal the maximum Unicode display width of that column's values across all
+   rendered rows (plus the two-space separator) — e.g. an `agent` column
+   containing only `pi` and `claude` SHALL be exactly as wide as `claude` (plus
+   the separator), not wider or narrower.
+3. **Fixed start position per column**: every row's cell for a given column
+   position SHALL start at the same terminal column offset as every other row's
+   cell for that same column position — i.e. columns are vertically aligned down
+   the output, not just individually padded.
 
 #### Scenario: Alignment holds for a custom column subset
 
@@ -84,3 +103,27 @@ are selected via `--columns`.
   vary in display width (including wide Unicode characters)
 - **THEN** the `updatedAt` column starts at the same terminal column position on
   every row
+
+#### Scenario: Columns are always separated by two spaces
+
+- **WHEN** the user runs `rd list` (default columns) or with any `--columns`
+  selection, and two or more rows are printed
+- **THEN** every column boundary within a row is separated from the next
+  column's first character by exactly two spaces of padding, after accounting
+  for the padding needed to reach the column's fixed width
+
+#### Scenario: Column width matches its widest cell exactly
+
+- **WHEN** the user runs `rd list` and the `agent` column's values across all
+  rows are `pi` and `claude`
+- **THEN** the `agent` column's rendered width (excluding the two-space
+  separator) equals the display width of `claude`, and the `pi` row is padded
+  with trailing spaces to that same width
+
+#### Scenario: Every row's column starts at the same position
+
+- **WHEN** the user runs `rd list` (or with any `--columns` selection) and
+  multiple rows are printed, some with shorter and some with longer values in
+  earlier columns
+- **THEN** for every column position, the first character of that column's value
+  starts at the identical terminal column offset on every row

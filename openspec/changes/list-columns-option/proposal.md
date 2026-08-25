@@ -16,6 +16,8 @@ agents.
 - Default columns (when `--columns` is omitted) remain
   `agent,session,pane,status` to preserve current visual behaviour, aside from
   the renamed `state` → `status` header/key.
+- The `--columns` help text SHALL display the default value as the literal,
+  comma-delimited string a user would type: `agent,session,pane,status`.
 - Add a new selectable column, `updatedAt`, which renders the agent's last
   state-file update timestamp in RFC 3339 UTC form (e.g.
   `2024-06-01T14:32:05Z`); panes with no state file render an empty value for
@@ -30,6 +32,13 @@ agents.
 - Duplicate column names in `--columns` are permitted and rendered as repeated
   columns (no deduplication), matching the flag's literal, order-preserving
   contract.
+- **No regression** to existing column alignment behaviour, now made an
+  explicit, strict requirement regardless of which columns are selected: (1)
+  columns are always separated by at least two spaces, (2) each column's width
+  always equals the display width of its widest cell (e.g. an `agent` column
+  with only `pi`/`claude` is exactly as wide as `claude`), and (3) every row's
+  cell for a given column always starts at the same terminal column position as
+  every other row's cell for that column.
 
 ## Capabilities
 

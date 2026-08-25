@@ -75,6 +75,17 @@ Unicode-width alignment logic. Duplicate fields in the list simply produce
 duplicate cell computations at their respective positions — no special-casing
 needed.
 
+This preserves, unchanged, three pre-existing alignment guarantees that MUST NOT
+regress regardless of which/how many columns are selected: (a) exactly two
+spaces of separation between columns, (b) each column's width equal to the
+Unicode display width of its widest cell in that column (no more, no less), and
+(c) every row's cell for a given column position starting at the same terminal
+column offset as every other row. These three properties are already covered by
+the existing `format_panes_left_aligned_correct_widths` and
+`format_panes_aligns_columns_with_wide_unicode` tests for the fixed four-column
+case; equivalent tests MUST be added for arbitrary `--columns` selections (see
+Tasks) to guard against regression during the generalization.
+
 ### 4. `updatedAt` renders as RFC 3339 in UTC, empty when absent
 
 `AgentInfo.updated_at: DateTime<Utc>` is formatted with `to_rfc3339()` (e.g.
@@ -92,7 +103,11 @@ v1 — RFC 3339 is unambiguous, trivially testable, and avoids introducing a
 
 Matches today's fixed four-column output exactly (module-level constant, e.g.
 `const DEFAULT_COLUMNS: &[Field] = &[Field::Agent, Field::Session, Field::Pane, Field::Status];`),
-used when `--columns` is omitted.
+used when `--columns` is omitted. The clap `--columns` argument's help text
+SHALL render this default using `default_value_t`/an explicit string built from
+the same constant (e.g. via a helper that joins the `Field` `Display` impl with
+commas), so the help text and the constant can never drift apart:
+`[default: agent,session,pane,status]`.
 
 ### 6. Breaking rename handled as a hard cutover, no deprecation shim
 
@@ -118,6 +133,13 @@ spellings.
   **Mitigation**: existing per-column max-width padding handles arbitrary-width
   cells already (validated by the emoji-alignment test); no new alignment logic
   required.
+- **[Risk]** Generalizing `format_panes` from four hardcoded fields to a generic
+  per-`Field` loop could silently regress the two-space separation, widest-cell
+  column sizing, or fixed start-position guarantees. → **Mitigation**: treat
+  these three properties as explicit, strict spec requirements (see
+  `list-columns` capability) with dedicated regression tests covering both the
+  default column set and arbitrary `--columns` selections, run before/after the
+  refactor.
 - **[Trade-off]** Reworking `format_panes` from fixed four-field logic to a
   generic field-mapping loop touches all existing rendering tests; they must be
   updated to reflect `status` naming and, where relevant, exercise custom
