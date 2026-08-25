@@ -58,6 +58,14 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  pi.on("tool_call", async (event) => {
+    rd("agent", "event", "TOOL_CALL_START", "--id", event.toolCallId, "--harness", "pi");
+  });
+
+  pi.on("tool_result", async (event) => {
+    rd("agent", "event", "TOOL_CALL_RESULT", "--id", event.toolCallId, "--harness", "pi");
+  });
+
   pi.on("session_shutdown", async () => {
     rd("agent", "clear");
   });
@@ -194,6 +202,8 @@ fn print_pi_summary(dest: &Path, status: FileStatus) {
             println!("    session_start        → rd agent event SESSION_STARTED --harness pi");
             println!("    before_agent_start   → rd agent event RUN_STARTED --harness pi");
             println!("    agent_settled        → rd agent event RUN_FINISHED --harness pi");
+            println!("    tool_call            → rd agent event TOOL_CALL_START --harness pi");
+            println!("    tool_result          → rd agent event TOOL_CALL_RESULT --harness pi");
             println!("    session_shutdown     → rd agent clear");
         }
         FileStatus::Unchanged => {
@@ -929,6 +939,69 @@ mod tests {
             PI_EXTENSION_CONTENT.contains(r#"rd("agent", "clear")"#),
             "session_shutdown should call rd agent clear"
         );
+    }
+
+    // ── task 3.1/3.2: tool_call / tool_result handlers ────────────────────────
+
+    #[test]
+    fn extension_content_has_tool_call_and_tool_result_handlers() {
+        assert!(
+            PI_EXTENSION_CONTENT.contains(r#"pi.on("tool_call""#),
+            "should handle tool_call"
+        );
+        assert!(
+            PI_EXTENSION_CONTENT.contains(
+                r#"rd("agent", "event", "TOOL_CALL_START", "--id", event.toolCallId, "--harness", "pi")"#
+            ),
+            "tool_call should call rd agent event TOOL_CALL_START with event.toolCallId"
+        );
+
+        assert!(
+            PI_EXTENSION_CONTENT.contains(r#"pi.on("tool_result""#),
+            "should handle tool_result"
+        );
+        assert!(
+            PI_EXTENSION_CONTENT.contains(
+                r#"rd("agent", "event", "TOOL_CALL_RESULT", "--id", event.toolCallId, "--harness", "pi")"#
+            ),
+            "tool_result should call rd agent event TOOL_CALL_RESULT with event.toolCallId"
+        );
+    }
+
+    #[test]
+    fn install_pi_overwrites_stale_pre_tool_call_handler_file() {
+        let tmp = TempDir::new().unwrap();
+        let dest = ext_path(&tmp);
+
+        // Stale content mirroring the previous template that predates the
+        // tool_call/tool_result handlers.
+        let stale = r#"export default function (pi) {
+  pi.on("session_start", async () => {
+    rd("agent", "event", "SESSION_STARTED", "--harness", "pi");
+  });
+  pi.on("before_agent_start", async () => {
+    rd("agent", "event", "RUN_STARTED", "--harness", "pi");
+  });
+  pi.on("agent_settled", async () => {
+    rd("agent", "event", "RUN_FINISHED", "--harness", "pi");
+  });
+  pi.on("session_shutdown", async () => {
+    rd("agent", "clear");
+  });
+}
+"#;
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, stale).unwrap();
+
+        install_pi_to(&dest).expect("install over stale pre-tool-call-handler file");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        assert_eq!(
+            content, PI_EXTENSION_CONTENT,
+            "stale pre-tool-call-handler file should be overwritten with the new content"
+        );
+        assert!(content.contains(r#"pi.on("tool_call""#));
+        assert!(content.contains(r#"pi.on("tool_result""#));
     }
 
     // ── run_install dispatches to pi ──────────────────────────────────────────
