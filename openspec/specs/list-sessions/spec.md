@@ -22,50 +22,38 @@ the following steps in order:
    state file (the session is gone).
 4. **Reconcile contradictory state** — for each live pane, if a state file
    exists for that pane's `pane_id` but its `harness` field does not match the
-   pane's `pane_current_command`, treat the pane's state as `unknown` (the state
-   file belongs to a different harness that previously ran in that pane; do
-   **not** delete it).
+   pane's `pane_current_command`, treat the pane's status as `unknown` (the
+   state file belongs to a different harness that previously ran in that pane;
+   do **not** delete it).
 5. **Sort output** — apply the sort key and order specified by `--sort-by` and
-   `--reverse` (defaulting to `updated-at` descending) to the filtered pane list
+   `--reverse` (defaulting to `updatedAt` descending) to the filtered pane list
    before rendering.
-6. **Render output** — print one line per live agent pane. A pane with no
-   matching state file, or whose state file is contradictory (step 4), displays
-   `unknown` in the state column.
+6. **Select and render columns** — render the columns specified by `--columns`,
+   or the default column set (`agent`, `session`, `pane`, `status`,
+   `activeTools`) when `--columns` is omitted, one line per live agent pane. A
+   pane with no matching state file, or whose state file is contradictory (step
+   4), displays `unknown` in the `status` column.
 
 If tmux is unreachable the reconciliation steps above are skipped entirely (no
 state files are deleted) and the command exits 0 with no output.
 
-Each output line SHALL contain five left-aligned columns:
-`<agent-name>  <session-name>  <window-index>.<pane-index>  <state>  <active-tools>`.
-The state column SHALL display the current `AgentState` for the agent (as
+By default (no `--columns` given), each output line SHALL contain five
+left-aligned columns:
+`<agent-name>  <session-name>  <window-index>.<pane-index>  <status>  <active-tools>`.
+The `status` column SHALL display the current `AgentState` for the agent (as
 lowercase string), or `unknown` if the pane has no state file or a contradictory
-one. The fifth column, `<active-tools>`, SHALL show the pane's `active_tools`
-count from its state file as `N tool` (singular, when `active_tools == 1`) or
-`N tools` (plural, when `active_tools > 1`) — e.g. `1 tool` or `3 tools`. When
-`active_tools` is `0`, absent, or the pane's state is `unknown`, the fifth
-column SHALL be empty and no trailing delimiter SHALL be printed after the
-`state` column for that row (i.e. the line ends at `state` with no dangling
-whitespace).
+one. The full set of selectable columns, their names, per-column rendering rules
+(including `activeTools`'s `N tool`/`N tools`/empty format and `updatedAt`'s RFC
+3339 format), status-column coloring, the trailing-whitespace trimming rule, and
+`--columns`-driven customization are defined by the `list-columns` capability.
 
-count, and SHALL be computed from each cell's plain (uncolored) text so that any
-ANSI color codes applied to the state column never affect column alignment. Each
-column, including the boundary between `state` and the fifth column, SHALL be
-padded to the maximum display width in that column plus two spaces — the same
-delimiter convention used between every other column pair — so that all rows are
-visually aligned in a fixed-width terminal.
-
-When standard output is a terminal, the state column's text SHALL be rendered
-with an ANSI foreground color keyed to the agent's state:
-
-- `idle` → grey (bright black)
-- `working` → yellow
-- `blocked` → red
-- `done` → green
-- `unknown` → no color (default terminal foreground)
-
-When standard output is **not** a terminal (e.g. piped to a file or another
-process), the state column SHALL be rendered as plain, uncolored text, identical
-to the current behavior.
+Column widths SHALL be computed using **Unicode terminal display width** (the
+number of terminal columns a string occupies), not byte length or Unicode scalar
+count. This behaviour is unchanged by the introduction of `--columns` and MUST
+NOT regress; the precise, testable alignment rules (two-space separation,
+per-column width equal to its widest cell, identical start position across rows)
+are defined by the `list-columns` capability and apply regardless of which
+columns are selected.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -75,21 +63,21 @@ to the current behavior.
 - **THEN** the output contains exactly two lines — one for `claude` and one for
   `pi` — and panes running unrelated processes are omitted
 
-#### Scenario: Output is columnar and left-aligned
+#### Scenario: Default output is columnar and left-aligned
 
-- **WHEN** two or more matching panes are printed
-- **THEN** all five columns (agent, session, window.pane, state, active-tools)
-  are left-aligned, each padded to the display width of the longest value in
-  that column plus two spaces, where display width is measured in terminal
-  columns
+- **WHEN** two or more matching panes are printed with no `--columns` flag
+- **THEN** all five default columns (agent, session, window.pane, status,
+  activeTools) are left-aligned, each padded to the display width of the longest
+  value in that column plus two spaces, where display width is measured in
+  terminal columns
 
-#### Scenario: Agent name appears in the first column
+#### Scenario: Agent name appears in the first column by default
 
-- **WHEN** matching panes are displayed
+- **WHEN** matching panes are displayed with no `--columns` flag
 - **THEN** the first column contains the agent process name (`claude` or `pi`),
   the second column contains the tmux session name, the third column contains
   the `window_index.pane_index` in the form `N.M`, the fourth column contains
-  the agent state in lowercase, and the fifth column contains the active tool
+  the agent status in lowercase, and the fifth column contains the active tool
   count (or is empty)
 
 #### Scenario: No matching panes
@@ -108,13 +96,13 @@ to the current behavior.
 
 - **WHEN** the user runs `rd list` and a matching pane has no corresponding
   state file
-- **THEN** the state column for that pane shows `unknown`
+- **THEN** the `status` column for that pane shows `unknown`
 
-#### Scenario: Agent state is reflected in list output
+#### Scenario: Agent status is reflected in list output
 
 - **WHEN** the user runs `rd list` and a matching pane has a valid state file
-  with `"state": "working"`
-- **THEN** the state column for that pane shows `working`
+  with `"status": "working"`
+- **THEN** the `status` column for that pane shows `working`
 
 #### Scenario: Stale state file deleted when pane no longer exists
 
@@ -122,13 +110,13 @@ to the current behavior.
   not correspond to any live tmux pane
 - **THEN** that state file is deleted before the output is printed
 
-#### Scenario: Contradictory state file results in unknown state (not deleted)
+#### Scenario: Contradictory state file results in unknown status (not deleted)
 
 - **WHEN** the user runs `rd list` and a state file exists whose `pane_id`
   corresponds to a live pane but the pane's current command does not match the
   `harness` field in the state file
-- **THEN** the state column for that pane shows `unknown` and the state file is
-  **not** deleted
+- **THEN** the `status` column for that pane shows `unknown` and the state file
+  is **not** deleted
 
 #### Scenario: Stale validation skipped when tmux is unreachable
 
@@ -140,7 +128,7 @@ to the current behavior.
 
 - **WHEN** the user runs `rd list` and one session name contains an emoji (e.g.
   `🌳 radr (claude-hooks)`) while another contains only ASCII (e.g. `dotfiles`)
-- **THEN** the state column for every row starts at the same terminal column
+- **THEN** the `status` column for every row starts at the same terminal column
   position, despite the emoji occupying two terminal columns
 
 #### Scenario: Default sort puts most recently active agents first
@@ -157,63 +145,5 @@ to the current behavior.
 
 #### Scenario: Descending sort reverses order
 
-- **WHEN** the user runs `rd list --sort-by state --reverse`
+- **WHEN** the user runs `rd list --sort-by status --reverse`
 - **THEN** output rows are ordered with `unknown` first and `blocked` last
-
-#### Scenario: Fifth column shows the singular form for exactly one active tool
-
-- **WHEN** a pane's state is `working` and its state file has `active_tools: 1`
-- **THEN** that pane's state column reads `working` and the fifth column reads
-  `1 tool`, separated by the same two-space delimiter used between the other
-  columns
-
-#### Scenario: Fifth column shows the plural form for more than one active tool
-
-- **WHEN** a pane's state is `working` and its state file has `active_tools: 3`
-- **THEN** that pane's state column reads `working` and the fifth column reads
-  `3 tools`
-
-#### Scenario: Fifth column is empty when no tools are active
-
-- **WHEN** a pane's state is `working` and its state file has `active_tools: 0`
-  (or the field is absent)
-- **THEN** the fifth column is empty and the line ends at `working` with no
-  trailing delimiter or whitespace
-
-#### Scenario: Unknown state never shows an active tool count
-
-- **WHEN** a pane has no matching state file (state is `unknown`)
-- **THEN** the fifth column is empty and the line ends at `unknown`, regardless
-  of any stale `active_tools` value
-
-#### Scenario: Fifth column uses the same two-space delimiter as other columns
-
-- **WHEN** two panes are printed, one with `active_tools: 1` and one with
-  `active_tools: 0`
-- **THEN** the non-empty fifth column is separated from the `state` column by
-  the maximum `state` column width plus two spaces, identically to how the
-  `state` column is separated from the `window.pane` column
-
-#### Scenario: State column is colored when attached to a terminal
-
-- **WHEN** the user runs `rd list` with stdout attached to a terminal and
-  matching panes have states `idle`, `working`, `blocked`, and `done`
-- **THEN** each state token is wrapped in ANSI foreground color escape
-  sequences: grey for `idle`, yellow for `working`, red for `blocked`, and green
-  for `done`, while the `unknown` state (if present) is printed with no color
-  escape sequences
-
-#### Scenario: State column is plain text when stdout is not a terminal
-
-- **WHEN** the user runs `rd list` with stdout redirected to a file or piped to
-  another process
-- **THEN** the state column contains only the plain lowercase state string with
-  no ANSI escape sequences, identical to output produced before this change
-
-#### Scenario: Colored state does not break column alignment
-
-- **WHEN** the user runs `rd list` with stdout attached to a terminal and
-  multiple panes have different-length state values (e.g. `idle` and `blocked`)
-- **THEN** the state column's ANSI color codes do not introduce extra visible
-  padding or misalignment, since alignment is computed from the state text's
-  visible display width, not the byte length of the color-wrapped string
