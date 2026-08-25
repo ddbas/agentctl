@@ -1,6 +1,7 @@
 mod commands;
 #[allow(dead_code)]
 mod events_log;
+mod logging;
 #[allow(dead_code)]
 mod state;
 mod status_fsm;
@@ -18,6 +19,11 @@ use clap::{CommandFactory, Parser, Subcommand};
     disable_help_subcommand = true,
 )]
 struct Cli {
+    /// Log level for the log file: trace, debug, info, warn, or error
+    /// (default: info). Does not affect stdout/stderr output.
+    #[arg(long, global = true, default_value = "info", value_name = "LEVEL")]
+    log_level: logging::LogLevel,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -95,6 +101,13 @@ enum Commands {
         #[command(subcommand)]
         subcommand: AgentSubcommand,
     },
+
+    /// Print radr's runtime paths and metadata.
+    ///
+    /// Prints resolved paths (log directory, current log file) and metadata
+    /// (version, effective log level) as `key: value` lines. Performs no
+    /// filesystem writes.
+    Info,
 }
 
 #[derive(Subcommand)]
@@ -235,6 +248,15 @@ fn main() {
 fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    // Initialize logging (best-effort; failures are non-fatal)
+    let _guard = logging::init(cli.log_level);
+
+    // Log the parsed CLI invocation
+    tracing::debug!(
+        "CLI invocation: rd {:?}",
+        std::env::args().collect::<Vec<_>>()
+    );
+
     match cli.command {
         None | Some(Commands::Help) => {
             Cli::command().print_long_help()?;
@@ -287,6 +309,9 @@ fn run() -> anyhow::Result<()> {
             subcommand: AgentSubcommand::Clear { pane },
         }) => {
             commands::agent_clear::run(pane)?;
+        }
+        Some(Commands::Info) => {
+            commands::info::run(cli.log_level)?;
         }
     }
 

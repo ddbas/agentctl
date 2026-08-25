@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::Utc;
 
 use crate::events_log::{EventRecord, append_event};
-use crate::state::{read_agent_info, write_state};
+use crate::state::{read_agent_info, write_state_with_tools};
 use crate::status_fsm::{self, Event, ToolCallType};
 
 /// One of the five events accepted by `rd agent event <NAME>`.
@@ -70,14 +70,27 @@ pub fn run(
 
     let harness_str = harness.unwrap_or_else(|| "unknown".to_owned());
 
-    let current_status = read_agent_info(&pane_id)
+    let current_info = read_agent_info(&pane_id);
+    let current_status = current_info
+        .as_ref()
         .map(|info| info.status)
         .unwrap_or_default();
+    let current_active_tools = current_info
+        .as_ref()
+        .map(|info| info.active_tools)
+        .unwrap_or(0);
 
     let event = kind.to_fsm_event(tool_call_type);
     let new_status = status_fsm::apply_event(current_status, &event);
 
-    write_state(&pane_id, &harness_str, new_status)?;
+    let new_active_tools = match kind {
+        EventKind::SessionStarted => 0,
+        EventKind::ToolCallStart => current_active_tools + 1,
+        EventKind::ToolCallResult => current_active_tools.saturating_sub(1),
+        EventKind::RunStarted | EventKind::RunFinished => current_active_tools,
+    };
+
+    write_state_with_tools(&pane_id, &harness_str, new_status, new_active_tools)?;
 
     let record = EventRecord {
         event: kind.name().to_owned(),
@@ -185,6 +198,223 @@ mod tests {
         assert!(events_path.exists());
         let content = std::fs::read_to_string(&events_path).unwrap();
         assert!(content.contains("SESSION_STARTED"));
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    // ── active_tools ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tool_call_start_increments_active_tools() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("run");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 1);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn tool_call_result_decrements_active_tools() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("start");
+        run(
+            EventKind::ToolCallStart,
+            "t2".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("start 2");
+        run(
+            EventKind::ToolCallResult,
+            "t1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("result");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 1);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn tool_call_result_on_zero_count_stays_zero() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::ToolCallResult,
+            "t1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("result");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 0);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn multiple_concurrent_tool_call_starts_accumulate() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        for id in ["t1", "t2", "t3"] {
+            run(
+                EventKind::ToolCallStart,
+                id.to_owned(),
+                None,
+                Some("pi".to_owned()),
+                Some("%1".to_owned()),
+            )
+            .expect("start");
+        }
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 3);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn custom_type_tool_call_still_increments_and_decrements() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            Some(ToolCallType::Custom),
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("start");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 1);
+        run(
+            EventKind::ToolCallResult,
+            "t1".to_owned(),
+            Some(ToolCallType::Custom),
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("result");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 0);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn session_started_resets_nonzero_active_tools_to_zero() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("start");
+        run(
+            EventKind::ToolCallStart,
+            "t2".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("start 2");
+        run(
+            EventKind::SessionStarted,
+            "s1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("session started");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 0);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn elicitation_tool_call_start_blocks_status_and_increments_active_tools() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::SessionStarted,
+            "s1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("session started");
+        run(
+            EventKind::RunStarted,
+            "r1".to_owned(),
+            None,
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("run started");
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            Some(ToolCallType::Elicitation),
+            Some("pi".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("tool call start");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.status, AgentState::Blocked);
+        assert_eq!(info.active_tools, 1);
         unsafe {
             std::env::remove_var("XDG_DATA_HOME");
         }
