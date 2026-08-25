@@ -5,12 +5,11 @@
 The `list` subcommand SHALL accept a `--columns` flag (short: `-c`) whose value
 is a comma-delimited, ordered list of column names. Accepted column names SHALL
 be: `agent`, `session`, `pane`, `status`, `updatedAt`, `activeTools`. This
-vocabulary is a **strict superset** of the `--sort-by` flag's accepted values
-(`agent`, `session`, `pane`, `status`, `updatedAt`) — `activeTools` is a valid
-`--columns` value but is deliberately **not** a valid `--sort-by` value (see the
-`list-sorting` capability). The output SHALL render exactly the columns listed,
-in the exact order given, including repeated column names if the user repeats a
-name.
+vocabulary is identical to the `--sort-by` flag's accepted values (see the
+`list-sorting` capability) — every value accepted by one flag is accepted by the
+other, using the same spelling and casing. The output SHALL render exactly the
+columns listed, in the exact order given, including repeated column names if the
+user repeats a name.
 
 #### Scenario: Custom column subset and order
 
@@ -35,20 +34,19 @@ name.
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing the valid column names
 
-#### Scenario: --columns accepts every --sort-by value
+#### Scenario: --columns and --sort-by share one identical vocabulary
 
 - **WHEN** a name is a valid value for `--sort-by`
 - **THEN** the same name (identical spelling and casing) is also a valid value
-  for `--columns`
+  for `--columns`, and vice versa
 
-#### Scenario: activeTools is valid for --columns but not for --sort-by
+#### Scenario: activeTools is valid for both --columns and --sort-by
 
 - **WHEN** the user runs `rd list --columns activeTools`
 - **THEN** the command succeeds and each row's `activeTools` column is rendered
 - **WHEN** the user instead runs `rd list --sort-by activeTools`
-- **THEN** the command exits with a non-zero exit code and prints an error
-  message listing only the valid `--sort-by` values (`agent`, `session`, `pane`,
-  `status`, `updatedAt`), not `activeTools`
+- **THEN** the command succeeds and output rows are ordered by `active_tools`
+  count (see the `list-sorting` capability)
 
 ### Requirement: Default column set when --columns is omitted
 

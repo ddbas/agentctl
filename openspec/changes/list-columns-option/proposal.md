@@ -39,18 +39,18 @@ though it's useful for spotting stale or recently-active agents.
   column with no name of its own). Rendering is unchanged from today: `N tool`
   (singular), `N tools` (plural), or empty when `active_tools` is `0`, absent,
   or the pane's status is `unknown`.
-- **`activeTools` is a `--columns`-only value; it is intentionally NOT added to
-  `--sort-by`'s vocabulary.** `--columns` and `--sort-by` therefore no longer
-  share one identical vocabulary; `--columns` accepts a strict superset
-  (`agent`, `session`, `pane`, `status`, `updatedAt`, `activeTools`) of what
-  `--sort-by` accepts (`agent`, `session`, `pane`, `status`, `updatedAt`). No
-  existing requirement or shipped behavior calls for sorting by concurrent tool
-  count, so adding it is out of scope for this change; `--sort-by activeTools`
-  is rejected the same way any other unrecognized value is.
+- **`activeTools` is also a valid `--sort-by` value**, sorting numerically by
+  each pane's `active_tools` count (panes with no state file, or whose state is
+  `unknown`, are treated as `0`). Its natural direction is descending (busiest
+  agents first), matching the same "most-interesting-first" default direction
+  convention already used for `updatedAt`. `--columns` and `--sort-by` therefore
+  share one fully identical, six-value vocabulary: `agent`, `session`, `pane`,
+  `status`, `updatedAt`, `activeTools`.
 - **BREAKING**: Rename the `state` column/sort-key to `status` and the
   `updated-at` sort-key to `updatedAt` so that `--sort-by` and `--columns` use
-  one consistent, camelCase spelling for every key they do share. Existing
-  scripts passing `--sort-by state` or `--sort-by updated-at` must be updated.
+  one consistent, camelCase spelling across their fully shared vocabulary.
+  Existing scripts passing `--sort-by state` or `--sort-by updated-at` must be
+  updated.
 - Invalid column names passed to `--columns` are rejected the same way invalid
   `--sort-by` values are: non-zero exit, error message listing valid values.
 - Duplicate column names in `--columns` are permitted and rendered as repeated
@@ -81,9 +81,9 @@ though it's useful for spotting stale or recently-active agents.
 ### New Capabilities
 
 - `list-columns`: Defines the `--columns`/`-c` flag, the full column vocabulary
-  (`agent`, `session`, `pane`, `status`, `updatedAt`, `activeTools` — a strict
-  superset of the `--sort-by` vocabulary), per-column rendering rules (including
-  the `updatedAt` RFC 3339 format and the existing `activeTools` N/tool(s)/empty
+  (`agent`, `session`, `pane`, `status`, `updatedAt`, `activeTools` — identical
+  to the `--sort-by` vocabulary), per-column rendering rules (including the
+  `updatedAt` RFC 3339 format and the existing `activeTools` N/tool(s)/empty
   format), the generalized status-column coloring rule, the generalized per-row
   trailing-whitespace trim, default column set/order, and validation/error
   behaviour for unknown column names.
@@ -91,9 +91,10 @@ though it's useful for spotting stale or recently-active agents.
 ### Modified Capabilities
 
 - `list-sorting`: Rename the `state` sort-key to `status` and the `updated-at`
-  sort-key to `updatedAt`; all `--sort-by` accepted values become camelCase.
-  Document explicitly that `activeTools` is a valid `--columns` value but not a
-  valid `--sort-by` value.
+  sort-key to `updatedAt`; add `activeTools` as a new sortable key (numeric,
+  descending/busiest-first by default, `0` when absent/unknown); all `--sort-by`
+  accepted values become camelCase and remain identical to the `--columns`
+  vocabulary.
 - `list-sessions`: Replace the fixed five-column output description with a
   reference to the configurable column set defined by `list-columns`; rename the
   `state` column to `status` and the unnamed fifth column to `activeTools` in
@@ -102,20 +103,24 @@ though it's useful for spotting stale or recently-active agents.
 
 ## Impact
 
-- `src/commands/list.rs`: new `Column` enum (superset of `SortKey`, adding
-  `ActiveTools`) and column-list parsing; a generalized row-rendering function
-  that takes an ordered `&[Column]` list instead of hardcoded fields, threading
-  through the existing `colorize_state` call (applied only to `Column::Status`
-  cells, wherever they occur) and the existing `active_tools` N/tool(s)/empty
-  formatting (now driven by `Column::ActiveTools` instead of being
+- `src/commands/list.rs`: one shared `Field` enum (six variants: `Agent`,
+  `Session`, `Pane`, `Status`, `UpdatedAt`, `ActiveTools`) used by both
+  `--sort-by` and `--columns`; a generalized row-rendering function that takes
+  an ordered `&[Field]` list instead of hardcoded fields, threading through the
+  existing `colorize_state` call (applied only to `Field::Status` cells,
+  wherever they occur) and the existing `active_tools` N/tool(s)/empty
+  formatting (now driven by `Field::ActiveTools` instead of being
   unconditional); `AgentInfo.updated_at` formatting for the new `updatedAt`
-  column; a generalized per-row trailing-whitespace trim replacing the current
-  hardcoded "only trim after the fixed fifth column" logic.
+  column; new numeric comparison logic in `sort_panes` for `Field::ActiveTools`
+  (descending natural direction, `0` when absent/unknown, mirroring
+  `UpdatedAt`'s newest-first convention); a generalized per-row
+  trailing-whitespace trim replacing the current hardcoded "only trim after the
+  fixed fifth column" logic.
 - `src/main.rs`: new `--columns`/`-c` CLI argument on the `List` subcommand;
   rename of `--sort-by` accepted value strings (`state` → `status`, `updated-at`
-  → `updatedAt`) and the `SortKey` `Display`/`ValueEnum` mappings; updated
-  `List` subcommand doc comment (no longer claims a fixed "four left-aligned
-  columns").
+  → `updatedAt`) and addition of `activeTools`, plus the `Field`
+  `Display`/`ValueEnum` mappings; updated `List` subcommand doc comment (no
+  longer claims a fixed "four left-aligned columns").
 - `openspec/specs/list-sorting/spec.md`, `openspec/specs/list-sessions/spec.md`:
   updated requirements.
 - Tests in `src/commands/list.rs` and `tests/list_sessions.rs` referencing the
