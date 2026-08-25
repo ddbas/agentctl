@@ -2,8 +2,8 @@
 //!
 //! Shells out to `tmux list-panes -a` and prints one line per pane whose
 //! `pane_current_command` exactly matches a known agent name (`claude` or
-//! `pi`).  Output is columnar plain text with four left-aligned columns:
-//! `<agent-name>  <session-name>  <window-index>.<pane-index>  <state>`.
+//! `pi`).  Output is columnar plain text with five left-aligned columns:
+//! `<agent-name>  <session-name>  <window-index>.<pane-index>  <state>  <active-tools>`.
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -271,10 +271,13 @@ pub fn validate_state_files(state_map: &mut HashMap<String, AgentInfo>, live_pan
 
 /// Format a slice of agent pane references as columnar plain text.
 ///
-/// Produces one line per pane with four left-aligned columns:
-/// `agent`, `session`, `window_index.pane_index`, `state`.  Each column is
-/// padded to the maximum value width in that column plus two spaces.  Returns
-/// an empty string when `panes` is empty.
+/// Produces one line per pane with five left-aligned columns:
+/// `agent`, `session`, `window_index.pane_index`, `state`, and the active
+/// tool count (`N tool` / `N tools`, empty when zero, absent, or the pane's
+/// state is `unknown`).  Each column is padded to the maximum value width in
+/// that column plus two spaces, and rows with an empty fifth column have no
+/// trailing delimiter/whitespace after `state`.  Returns an empty string when
+/// `panes` is empty.
 pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>) -> String {
     if panes.is_empty() {
         return String::new();
@@ -297,29 +300,64 @@ pub fn format_panes(panes: &[&PaneEntry], state_map: &HashMap<String, AgentInfo>
         })
         .collect();
 
+    // Resolve each pane's active-tools column value: empty when the state is
+    // `unknown` or `active_tools == 0`/absent.
+    let tool_counts: Vec<String> = panes
+        .iter()
+        .zip(states.iter())
+        .map(|(p, state)| {
+            if state == "unknown" {
+                return String::new();
+            }
+            let active_tools = state_map
+                .get(&p.pane_id)
+                .map(|info| info.active_tools)
+                .unwrap_or(0);
+            match active_tools {
+                0 => String::new(),
+                1 => "1 tool".to_owned(),
+                n => format!("{n} tools"),
+            }
+        })
+        .collect();
+
     let max_agent = panes.iter().map(|p| p.agent.width()).max().unwrap_or(0);
     let max_session = panes.iter().map(|p| p.session.width()).max().unwrap_or(0);
     let max_wp = window_pane.iter().map(|s| s.width()).max().unwrap_or(0);
+    let max_state = states.iter().map(|s| s.width()).max().unwrap_or(0);
 
     let col1 = max_agent + 2;
     let col2 = max_session + 2;
     let col3 = max_wp + 2;
+    let col4 = max_state + 2;
 
     let mut output = String::new();
-    for ((pane, wp), state) in panes.iter().zip(window_pane.iter()).zip(states.iter()) {
+    for (((pane, wp), state), tool_count) in panes
+        .iter()
+        .zip(window_pane.iter())
+        .zip(states.iter())
+        .zip(tool_counts.iter())
+    {
         let pad1 = col1 - pane.agent.width();
         let pad2 = col2 - pane.session.width();
         let pad3 = col3 - wp.width();
-        output.push_str(&format!(
-            "{}{}{}{}{}{}{}\n",
+        let pad4 = col4 - state.width();
+        let mut line = format!(
+            "{}{}{}{}{}{}{}",
             pane.agent,
             " ".repeat(pad1),
             pane.session,
             " ".repeat(pad2),
             wp,
             " ".repeat(pad3),
-            state
-        ));
+            state,
+        );
+        if !tool_count.is_empty() {
+            line.push_str(&" ".repeat(pad4));
+            line.push_str(tool_count);
+        }
+        output.push_str(&line);
+        output.push('\n');
     }
     output
 }
@@ -569,6 +607,76 @@ mod tests {
         );
     }
 
+    // ── active-tools fifth column ──────────────────────────────────────────
+
+    #[test]
+    fn format_panes_singular_tool_column() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::write_state_with_tools_to(tmp.path(), "%5", "claude", AgentState::Working, 1)
+            .unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map);
+        assert_eq!(output, "claude  dev  0.0  working  1 tool\n");
+    }
+
+    #[test]
+    fn format_panes_plural_tool_column() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::write_state_with_tools_to(tmp.path(), "%5", "claude", AgentState::Working, 3)
+            .unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map);
+        assert_eq!(output, "claude  dev  0.0  working  3 tools\n");
+    }
+
+    #[test]
+    fn format_panes_empty_tool_column_when_zero() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%5", "claude", AgentState::Working).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map);
+        assert_eq!(output, "claude  dev  0.0  working\n");
+    }
+
+    #[test]
+    fn format_panes_unknown_state_never_shows_tool_count() {
+        // No state file for this pane at all → unknown state, no tool count.
+        let state_map = empty_state_map();
+        let data = vec![pane_with_id("claude", "dev", 0, 0, "%missing")];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map);
+        assert_eq!(output, "claude  dev  0.0  unknown\n");
+    }
+
+    #[test]
+    fn format_panes_column_alignment_mixed_tool_counts() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::write_state_with_tools_to(tmp.path(), "%1", "claude", AgentState::Working, 1)
+            .unwrap();
+        write_state_to(tmp.path(), "%2", "pi", AgentState::Idle).unwrap();
+        let state_map = load_state_map_from(tmp.path());
+
+        let data = vec![
+            pane_with_id("claude", "dev", 0, 0, "%1"),
+            pane_with_id("pi", "dev", 0, 1, "%2"),
+        ];
+        let refs: Vec<&PaneEntry> = data.iter().collect();
+        let output = format_panes(&refs, &state_map);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "claude  dev  0.0  working  1 tool");
+        assert_eq!(lines[1], "pi      dev  0.1  idle");
+    }
+
     // ── validate_state_files ───────────────────────────────────────────────────────────
 
     #[test]
@@ -686,6 +794,7 @@ mod tests {
                     harness: "claude".to_string(),
                     status: *state,
                     updated_at: *ts,
+                    active_tools: 0,
                 };
                 (id.to_string(), info)
             })

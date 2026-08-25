@@ -76,6 +76,9 @@ pub struct AgentInfo {
     pub status: AgentState,
     /// RFC 3339 timestamp of the last state change.
     pub updated_at: DateTime<Utc>,
+    /// Count of tool calls currently in flight for this pane.
+    #[serde(default)]
+    pub active_tools: u32,
 }
 
 // ── XDG helpers ───────────────────────────────────────────────────────────────
@@ -124,6 +127,21 @@ pub fn state_file_path(pane_id: &str) -> PathBuf {
 /// Writes to a `.tmp` sibling then renames so concurrent readers never see a
 /// partial file.
 pub fn write_state_to(base: &Path, pane_id: &str, harness: &str, status: AgentState) -> Result<()> {
+    write_state_with_tools_to(base, pane_id, harness, status, 0)
+}
+
+/// Atomically write (or overwrite) the state file for `pane_id` under `base`,
+/// including an explicit `active_tools` value.
+///
+/// Writes to a `.tmp` sibling then renames so concurrent readers never see a
+/// partial file.
+pub fn write_state_with_tools_to(
+    base: &Path,
+    pane_id: &str,
+    harness: &str,
+    status: AgentState,
+    active_tools: u32,
+) -> Result<()> {
     let dir = agent_dir_in(base, pane_id);
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("create state dir: {}", dir.display()))?;
@@ -133,6 +151,7 @@ pub fn write_state_to(base: &Path, pane_id: &str, harness: &str, status: AgentSt
         harness: harness.to_owned(),
         status,
         updated_at: Utc::now(),
+        active_tools,
     };
 
     let json = serde_json::to_string_pretty(&info).context("serialise AgentInfo")?;
@@ -210,6 +229,17 @@ pub fn list_agent_infos_in(base: &Path) -> Vec<AgentInfo> {
 /// base directory.
 pub fn write_state(pane_id: &str, harness: &str, status: AgentState) -> Result<()> {
     write_state_to(&xdg_data_home(), pane_id, harness, status)
+}
+
+/// Atomically write (or overwrite) the state file for `pane_id` using the XDG
+/// base directory, including an explicit `active_tools` value.
+pub fn write_state_with_tools(
+    pane_id: &str,
+    harness: &str,
+    status: AgentState,
+    active_tools: u32,
+) -> Result<()> {
+    write_state_with_tools_to(&xdg_data_home(), pane_id, harness, status, active_tools)
 }
 
 /// Read and return the current `AgentState` for `pane_id` using the XDG base.
@@ -381,5 +411,40 @@ mod tests {
         write_state_to(tmp.path(), "%2", "pi", AgentState::Working).unwrap();
         let infos = list_agent_infos_in(tmp.path());
         assert_eq!(infos.len(), 2);
+    }
+
+    // ── active_tools ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn write_and_read_active_tools_round_trip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_with_tools_to(tmp.path(), "%12", "claude", AgentState::Working, 3)
+            .expect("write_state_with_tools");
+        let info = read_agent_info_from(tmp.path(), "%12").expect("read info");
+        assert_eq!(info.active_tools, 3);
+    }
+
+    #[test]
+    fn write_state_defaults_active_tools_to_zero() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_state_to(tmp.path(), "%13", "claude", AgentState::Idle).expect("write_state");
+        let info = read_agent_info_from(tmp.path(), "%13").expect("read info");
+        assert_eq!(info.active_tools, 0);
+    }
+
+    #[test]
+    fn legacy_state_file_without_active_tools_deserializes_as_zero() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("radr").join("agents").join("%legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        let legacy_json = r#"{
+            "pane_id": "%legacy",
+            "harness": "claude",
+            "status": "idle",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }"#;
+        std::fs::write(dir.join("state.json"), legacy_json).unwrap();
+        let info = read_agent_info_from(tmp.path(), "%legacy").expect("read legacy info");
+        assert_eq!(info.active_tools, 0);
     }
 }
