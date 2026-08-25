@@ -42,9 +42,23 @@ string), or `unknown` if the pane has no state file or a contradictory one.
 
 Column widths SHALL be computed using **Unicode terminal display width** (the
 number of terminal columns a string occupies), not byte length or Unicode scalar
-count. Each column SHALL be padded to the maximum display width in that column
-plus two spaces, so that all rows are visually aligned in a fixed-width
-terminal.
+count, and SHALL be computed from each cell's plain (uncolored) text so that any
+ANSI color codes applied to the state column never affect column alignment. Each
+column SHALL be padded to the maximum display width in that column plus two
+spaces, so that all rows are visually aligned in a fixed-width terminal.
+
+When standard output is a terminal, the state column's text SHALL be rendered
+with an ANSI foreground color keyed to the agent's state:
+
+- `idle` → grey (bright black)
+- `working` → yellow
+- `blocked` → red
+- `done` → green
+- `unknown` → no color (default terminal foreground)
+
+When standard output is **not** a terminal (e.g. piped to a file or another
+process), the state column SHALL be rendered as plain, uncolored text, identical
+to the current behavior.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -136,3 +150,27 @@ terminal.
 
 - **WHEN** the user runs `rd list --sort-by state --reverse`
 - **THEN** output rows are ordered with `unknown` first and `blocked` last
+
+#### Scenario: State column is colored when attached to a terminal
+
+- **WHEN** the user runs `rd list` with stdout attached to a terminal and
+  matching panes have states `idle`, `working`, `blocked`, and `done`
+- **THEN** each state token is wrapped in ANSI foreground color escape
+  sequences: grey for `idle`, yellow for `working`, red for `blocked`, and green
+  for `done`, while the `unknown` state (if present) is printed with no color
+  escape sequences
+
+#### Scenario: State column is plain text when stdout is not a terminal
+
+- **WHEN** the user runs `rd list` with stdout redirected to a file or piped to
+  another process
+- **THEN** the state column contains only the plain lowercase state string with
+  no ANSI escape sequences, identical to output produced before this change
+
+#### Scenario: Colored state does not break column alignment
+
+- **WHEN** the user runs `rd list` with stdout attached to a terminal and
+  multiple panes have different-length state values (e.g. `idle` and `blocked`)
+- **THEN** the state column's ANSI color codes do not introduce extra visible
+  padding or misalignment, since alignment is computed from the state text's
+  visible display width, not the byte length of the color-wrapped string
