@@ -20,7 +20,10 @@ pipeline exists.
 - **BREAKING**: Remove `rd agent status <state> [--harness] [--pane]`.
 - Add `rd agent event <EVENT_NAME> ...` as the single event-dispatching
   subcommand. Each event name is its own clap subcommand under `event` with its
-  own required/optional payload fields, validated by the CLI.
+  own required/optional payload fields, validated by the CLI. `--harness` and
+  `--pane` are declared once as global args on `rd agent event` (not repeated
+  per event name), so they are guaranteed to be available, with identical
+  behavior, on every current and future event subcommand.
 - Support five events for now: `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
   `TOOL_CALL_START`, `TOOL_CALL_RESULT`. All five require a unique `id` field (a
   session ID for `SESSION_STARTED`, a run ID for `RUN_*`, a tool-call ID for

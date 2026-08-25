@@ -57,32 +57,47 @@ calls).
 
 ## Decisions
 
-### 1. `rd agent event <EVENT_NAME>` as nested clap subcommands
+### 1. `rd agent event <EVENT_NAME>` as nested clap subcommands, with `--harness`/`--pane` as shared global args
 
 Each event name (`SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
 `TOOL_CALL_START`, `TOOL_CALL_RESULT`) is its own clap subcommand nested under
-`event`, each with its own typed args:
+`event`, each with its own typed args for `--id` (and `--type` where
+applicable). `--harness` and `--pane` are **not** redefined per event
+subcommand: they are declared once on the `event` parent command (and,
+transitively, on `rd agent` itself, alongside `rd agent clear`) using clap's
+`#[arg(global = true)]`, so every current and future event subcommand inherits
+them automatically without repeating the flag definitions:
 
 ```
-rd agent event SESSION_STARTED   --id <ID> [--harness <H>] [--pane <ID>]
-rd agent event RUN_STARTED       --id <ID> [--harness <H>] [--pane <ID>]
-rd agent event RUN_FINISHED      --id <ID> [--harness <H>] [--pane <ID>]
-rd agent event TOOL_CALL_START   --id <ID> [--type custom|elicitation] [--harness <H>] [--pane <ID>]
-rd agent event TOOL_CALL_RESULT  --id <ID> [--type custom|elicitation] [--harness <H>] [--pane <ID>]
+rd agent event SESSION_STARTED   [--harness <H>] [--pane <ID>] --id <ID>
+rd agent event RUN_STARTED       [--harness <H>] [--pane <ID>] --id <ID>
+rd agent event RUN_FINISHED      [--harness <H>] [--pane <ID>] --id <ID>
+rd agent event TOOL_CALL_START   [--harness <H>] [--pane <ID>] --id <ID> [--type custom|elicitation]
+rd agent event TOOL_CALL_RESULT  [--harness <H>] [--pane <ID>] --id <ID> [--type custom|elicitation]
 ```
 
-`--id` is required on all five (clap `required = true`); `--type` is an optional
-`ValueEnum` on the two `TOOL_CALL_*` variants only. This gives us free per-event
-validation and `--help` text via clap, and adding a sixth event later is
-additive (new subcommand + new FSM transition), matching the brief's "each event
-name is really just a subcommand of the event dispatching subcommand."
+Global args in clap can be placed before or after the subcommand name on the
+command line (e.g. both `rd agent event --pane %12 RUN_STARTED --id r1` and
+`rd agent event RUN_STARTED --id r1 --pane %12` parse identically), which
+matches how `--pane`/`--harness` are already used with `rd agent clear` today.
+
+`--id` is required on all five (clap `required = true`, declared per event
+subcommand since only `TOOL_CALL_*` also accept `--type`); `--type` is an
+optional `ValueEnum` on the two `TOOL_CALL_*` variants only. This gives us free
+per-event validation and `--help` text via clap, and adding a sixth event later
+only requires adding its own `--id`/`--type`-equivalent args —
+`--harness`/`--pane` are already available for free by virtue of being global,
+matching the brief's "each event name is really just a subcommand of the event
+dispatching subcommand."
 
 **Alternative considered**: a single `rd agent event <NAME> --id ... --type ...`
 with `NAME` as a free-form `ValueEnum` and one flat arg struct shared by all
 events. Rejected because it can't express "‑‑type is only valid for
 `TOOL_CALL_*`" or "`--id` required for all five but nothing else required for
 `RUN_*`/`SESSION_STARTED`" without runtime checks duplicating what clap already
-does per subcommand.
+does per subcommand. `--harness`/`--pane` as global args on the `event` parent
+command gets us the best of both: shared flags without duplication, plus
+per-event-typed required/optional payload fields.
 
 ### 2. Session bootstrap is the `SESSION_STARTED` event, not a separate command
 

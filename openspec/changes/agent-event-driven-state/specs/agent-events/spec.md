@@ -16,6 +16,34 @@ are `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and
 - **THEN** the command exits non-zero with an error identifying the accepted
   event names
 
+### Requirement: --harness and --pane are global args shared by every event subcommand
+
+`--harness` and `--pane` SHALL be declared once, as global arguments on the
+`rd agent event` subcommand, rather than being redefined separately on each of
+the five event subcommands. Every current and future event subcommand SHALL
+accept `--harness` and `--pane` with identical behavior as a result, without
+needing to redeclare them.
+
+#### Scenario: --harness is accepted by every event subcommand
+
+- **WHEN** `--harness <H>` is passed to any of `rd agent event SESSION_STARTED`,
+  `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, or `TOOL_CALL_RESULT`
+- **THEN** the command accepts the flag and records `<H>` as the event's
+  `harness`
+
+#### Scenario: --pane is accepted by every event subcommand
+
+- **WHEN** `--pane <ID>` is passed to any of `rd agent event SESSION_STARTED`,
+  `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, or `TOOL_CALL_RESULT`
+- **THEN** the command resolves the pane using `<ID>` instead of `$TMUX_PANE`,
+  exactly as `--pane` already behaves for `rd agent clear`
+
+#### Scenario: --harness and --pane may be placed before or after the event name
+
+- **WHEN** `rd agent event --harness claude --pane %12 RUN_STARTED --id r1` or
+  `rd agent event RUN_STARTED --id r1 --harness claude --pane %12` is invoked
+- **THEN** both invocations are accepted and behave identically
+
 ### Requirement: id is required on all five events
 
 Every event dispatched via `rd agent event` SHALL require a non-empty `--id`

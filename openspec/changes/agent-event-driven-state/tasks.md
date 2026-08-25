@@ -36,11 +36,13 @@
 
 ## 4. rd agent event command
 
-- [ ] 4.1 Add `AgentSubcommand::Event { name, id, type, harness, pane }` (or one
-      nested subcommand per event name, covering `SESSION_STARTED`,
-      `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, `TOOL_CALL_RESULT`) to
-      `src/main.rs`'s clap definitions, matching the CLI shape in design.md
-      decision 1
+- [ ] 4.1 Add an `AgentEventSubcommand` enum (one variant per event name:
+      `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
+      `TOOL_CALL_RESULT`, each with its own `--id`/`--type` args) nested under a
+      new `Event { harness, pane, subcommand }` variant of `AgentSubcommand` in
+      `src/main.rs`'s clap definitions, declaring `--harness`/`--pane` once with
+      `#[arg(global = true)]` so every event subcommand inherits them, matching
+      the CLI shape in design.md decision 1
 - [ ] 4.2 Add `src/commands/agent_event.rs`: resolves pane ID (flag → env →
       silent exit), reads current status via existing `read_state`/
       `read_agent_info`, computes new status via `status_fsm::apply_event`,
@@ -57,8 +59,9 @@
       required `--id` on all five events, rejected `--type` on `RUN_*`/
       `SESSION_STARTED`, accepted/invalid `--type` values on `TOOL_CALL_*`,
       unknown event name rejected, outside-tmux no-op, pane resolution order
-      (`--pane` overrides `$TMUX_PANE`), and that `rd agent init` no longer
-      exists as a subcommand
+      (`--pane` overrides `$TMUX_PANE`), `rd agent init` no longer exists as a
+      subcommand, and that `--harness`/`--pane` are accepted by every event
+      subcommand both before and after the event name on the command line
 
 ## 5. pi integration
 
