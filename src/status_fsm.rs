@@ -19,6 +19,7 @@ use crate::state::AgentState;
 pub enum ToolCallType {
     Custom,
     Elicitation,
+    PermissionPrompt,
 }
 
 /// The five events accepted by `rd agent event`, as FSM inputs.
@@ -26,9 +27,23 @@ pub enum ToolCallType {
 pub enum Event {
     SessionStarted,
     RunStarted,
-    RunFinished,
-    ToolCallStart { r#type: Option<ToolCallType> },
-    ToolCallResult { r#type: Option<ToolCallType> },
+    /// A run finished. Carries the reconciled `active_tools` count (computed
+    /// by `agent_event.rs` before calling the FSM); the transition to `Done`
+    /// is gated on this being `0`.
+    RunFinished {
+        active_tools: u32,
+    },
+    ToolCallStart {
+        r#type: Option<ToolCallType>,
+    },
+    /// A tool call finished. `blocked_prompts` carries the reconciled
+    /// `blocked_prompts` count, populated only for `PermissionPrompt`-typed
+    /// events (`None` for every other type); the `Blocked` → `Working`
+    /// transition for `PermissionPrompt` is gated on this being `0`.
+    ToolCallResult {
+        r#type: Option<ToolCallType>,
+        blocked_prompts: Option<u32>,
+    },
 }
 
 /// Marker type implementing [`StateMachineImpl`] for the agent status FSM.
@@ -43,7 +58,7 @@ impl StateMachineImpl for StatusFsm {
 
     fn transition(state: &Self::State, input: &Self::Input) -> Option<Self::State> {
         use AgentState::*;
-        use ToolCallType::Elicitation;
+        use ToolCallType::{Elicitation, PermissionPrompt};
 
         // Wildcard reset: SESSION_STARTED always moves to Idle, regardless of
         // the current status (including a stale Working/Blocked left over
@@ -53,10 +68,17 @@ impl StateMachineImpl for StatusFsm {
             return Some(Idle);
         }
 
+        // Wildcard: RUN_FINISHED is authoritative from any current status
+        // (Stop/StopFailure fired, the harness says the turn is over),
+        // provided there's no reconciled in-flight work left. When
+        // active_tools is still nonzero, RUN_FINISHED is a no-op for status.
+        if let Event::RunFinished { active_tools } = input {
+            return if *active_tools == 0 { Some(Done) } else { None };
+        }
+
         match (state, input) {
             (Idle, Event::RunStarted) => Some(Working),
             (Done, Event::RunStarted) => Some(Working),
-            (Working, Event::RunFinished) => Some(Done),
             (
                 Working,
                 Event::ToolCallStart {
@@ -67,8 +89,29 @@ impl StateMachineImpl for StatusFsm {
                 Blocked,
                 Event::ToolCallResult {
                     r#type: Some(Elicitation),
+                    ..
                 },
             ) => Some(Working),
+            (
+                Working,
+                Event::ToolCallStart {
+                    r#type: Some(PermissionPrompt),
+                },
+            ) => Some(Blocked),
+            (
+                Blocked,
+                Event::ToolCallResult {
+                    r#type: Some(PermissionPrompt),
+                    blocked_prompts: Some(0),
+                },
+            ) => Some(Working),
+            (
+                Blocked,
+                Event::ToolCallResult {
+                    r#type: Some(PermissionPrompt),
+                    ..
+                },
+            ) => None,
             // Every other combination (custom/no-type tool call events, or an
             // event that doesn't match the current status, e.g. a stray
             // TOOL_CALL_RESULT when not Blocked) is a no-op for status.
@@ -135,7 +178,45 @@ mod tests {
 
     #[test]
     fn run_finished_moves_working_to_done() {
-        assert_eq!(apply_event(Working, &Event::RunFinished), Done);
+        assert_eq!(
+            apply_event(Working, &Event::RunFinished { active_tools: 0 }),
+            Done
+        );
+    }
+
+    #[test]
+    fn run_finished_moves_idle_to_done() {
+        assert_eq!(
+            apply_event(Idle, &Event::RunFinished { active_tools: 0 }),
+            Done
+        );
+    }
+
+    #[test]
+    fn run_finished_moves_blocked_to_done() {
+        assert_eq!(
+            apply_event(Blocked, &Event::RunFinished { active_tools: 0 }),
+            Done
+        );
+    }
+
+    #[test]
+    fn run_finished_moves_done_to_done() {
+        assert_eq!(
+            apply_event(Done, &Event::RunFinished { active_tools: 0 }),
+            Done
+        );
+    }
+
+    #[test]
+    fn run_finished_with_nonzero_active_tools_is_noop_from_every_state() {
+        for state in [Idle, Working, Blocked, Done] {
+            assert_eq!(
+                apply_event(state, &Event::RunFinished { active_tools: 1 }),
+                state,
+                "RunFinished with active_tools > 0 should be a no-op from {state:?}"
+            );
+        }
     }
 
     #[test]
@@ -150,6 +231,7 @@ mod tests {
     fn elicitation_tool_call_result_moves_blocked_to_working() {
         let event = Event::ToolCallResult {
             r#type: Some(ToolCallType::Elicitation),
+            blocked_prompts: None,
         };
         assert_eq!(apply_event(Blocked, &event), Working);
     }
@@ -166,6 +248,7 @@ mod tests {
     fn custom_type_tool_call_result_is_noop() {
         let event = Event::ToolCallResult {
             r#type: Some(ToolCallType::Custom),
+            blocked_prompts: None,
         };
         assert_eq!(apply_event(Working, &event), Working);
     }
@@ -178,17 +261,19 @@ mod tests {
 
     #[test]
     fn no_type_tool_call_result_is_noop() {
-        let event = Event::ToolCallResult { r#type: None };
+        let event = Event::ToolCallResult {
+            r#type: None,
+            blocked_prompts: None,
+        };
         assert_eq!(apply_event(Working, &event), Working);
     }
 
     #[test]
     fn unmatched_event_for_current_state_is_noop() {
-        // Idle has no defined RUN_FINISHED transition.
-        assert_eq!(apply_event(Idle, &Event::RunFinished), Idle);
         // Idle has no defined transition for an elicitation tool call result.
         let event = Event::ToolCallResult {
             r#type: Some(ToolCallType::Elicitation),
+            blocked_prompts: None,
         };
         assert_eq!(apply_event(Idle, &event), Idle);
     }
@@ -200,7 +285,47 @@ mod tests {
     }
 
     #[test]
-    fn done_run_finished_is_noop() {
-        assert_eq!(apply_event(Done, &Event::RunFinished), Done);
+    fn done_run_finished_is_noop_when_already_done() {
+        assert_eq!(
+            apply_event(Done, &Event::RunFinished { active_tools: 0 }),
+            Done
+        );
+    }
+
+    // ── permission-prompt ─────────────────────────────────────────────────
+
+    #[test]
+    fn permission_prompt_tool_call_start_moves_working_to_blocked() {
+        let event = Event::ToolCallStart {
+            r#type: Some(ToolCallType::PermissionPrompt),
+        };
+        assert_eq!(apply_event(Working, &event), Blocked);
+    }
+
+    #[test]
+    fn permission_prompt_tool_call_result_moves_blocked_to_working_when_zero() {
+        let event = Event::ToolCallResult {
+            r#type: Some(ToolCallType::PermissionPrompt),
+            blocked_prompts: Some(0),
+        };
+        assert_eq!(apply_event(Blocked, &event), Working);
+    }
+
+    #[test]
+    fn permission_prompt_tool_call_result_stays_blocked_when_nonzero() {
+        let event = Event::ToolCallResult {
+            r#type: Some(ToolCallType::PermissionPrompt),
+            blocked_prompts: Some(1),
+        };
+        assert_eq!(apply_event(Blocked, &event), Blocked);
+    }
+
+    #[test]
+    fn permission_prompt_tool_call_result_with_no_count_is_noop() {
+        let event = Event::ToolCallResult {
+            r#type: Some(ToolCallType::PermissionPrompt),
+            blocked_prompts: None,
+        };
+        assert_eq!(apply_event(Blocked, &event), Blocked);
     }
 }

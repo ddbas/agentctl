@@ -1213,6 +1213,7 @@ mod tests {
                     status: *state,
                     updated_at: *ts,
                     active_tools: 0,
+                    blocked_prompts: 0,
                 };
                 (id.to_string(), info)
             })
@@ -1391,6 +1392,7 @@ mod tests {
                     status: *state,
                     updated_at: chrono::Utc::now(),
                     active_tools: *active_tools,
+                    blocked_prompts: 0,
                 };
                 (id.to_string(), info)
             })

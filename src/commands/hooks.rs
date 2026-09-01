@@ -240,8 +240,9 @@ struct ClaudeHookDef {
 /// `PostToolUse` each appear twice: once unmatched (every tool, untyped,
 /// drives `active_tools` via plain `TOOL_CALL_START`/`TOOL_CALL_RESULT`) and
 /// once matched (interactive tools only, `--type elicitation`, drives
-/// `blocked` status), plus `PostToolUse` appears a third time unmatched with
-/// the `"perm-<session_id>"` id to close out permission-prompt blocks.
+/// plus `PostToolUse` appears a third time unmatched with the
+/// `"perm-<session_id>-<nonce>"` id (`--type permission-prompt`) to close out
+/// permission-prompt blocks.
 const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "SessionStart",
@@ -282,13 +283,13 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "PostToolUse",
         matcher: None,
-        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude"#,
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
         event: "Notification",
         matcher: Some("permission_prompt"),
-        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude"#,
+        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
@@ -1520,13 +1521,13 @@ mod tests {
                         "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude"# }]
                     },
                     {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude"# }]
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"# }]
                     }
                 ],
                 "Notification": [
                     {
                         "matcher": "permission_prompt",
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude"# }]
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"# }]
                     }
                 ],
                 "Stop": [
@@ -2176,7 +2177,7 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap();
         assert!(perm_cmd.contains("rd agent event TOOL_CALL_RESULT"));
-        assert!(perm_cmd.contains("--type elicitation"));
+        assert!(perm_cmd.contains("--type permission-prompt"));
     }
 
     // ── task 3.8: StopFailure entry ───────────────────────────────────────────
