@@ -2,8 +2,8 @@
 
 Define the `--columns` flag for `rd list`: the vocabulary of selectable columns,
 their per-column rendering rules, the default column set, status-column
-coloring, trailing-whitespace trimming, and column alignment — independent of
-which columns are selected.
+coloring, and tab-delimited output with a fixed field count per row —
+independent of which columns are selected.
 
 ## Requirements
 
@@ -133,8 +133,9 @@ for `blocked`, green for `done`, no color for `unknown`), identically regardless
 of that column's position or whether `status` is repeated. Only `status` cells
 are ever colorized; all other columns are always rendered as plain text. When
 standard output is **not** a terminal, every column — including `status` — SHALL
-be rendered as plain, uncolored text. Column widths SHALL always be computed
-from each cell's plain (uncolored) text, so coloring never affects alignment.
+be rendered as plain, uncolored text. The ANSI escape sequence wraps only the
+cell's rendered text and never introduces or alters tab delimiters, so coloring
+never affects the tab-separated field count of a row.
 
 #### Scenario: Status colorized regardless of column position
 
@@ -156,78 +157,55 @@ from each cell's plain (uncolored) text, so coloring never affects alignment.
   another process, regardless of `--columns`
 - **THEN** no column, including `status`, contains ANSI escape sequences
 
-### Requirement: Trailing whitespace is trimmed from each rendered row
+### Requirement: Rows are tab-delimited with a fixed field count
 
-The `list` subcommand SHALL trim any trailing whitespace from each rendered row
-after all selected columns for that row are padded to their column widths and
-joined with the two-space delimiter. This generalizes the pre-existing behavior
-where a row whose last column is empty (e.g. `activeTools` when
-zero/absent/unknown) produces no dangling delimiter or whitespace at the end of
-the line, to apply regardless of which column ends up last in a `--columns`
-selection.
+The `list` subcommand SHALL separate adjacent rendered columns within a row with
+a single tab character (`\t`) and SHALL NOT pad any column's value. Every
+rendered row SHALL contain exactly as many tab-separated fields as the number of
+columns selected (the default five, or the count given via `--columns`),
+regardless of whether any column's rendered value — including a trailing
+column's — is an empty string. A row whose last column is empty (e.g.
+`activeTools` when zero/absent/unknown, or `updatedAt` with no state file) SHALL
+still emit that column's delimiting tab, so the field count for that row matches
+every other row's.
 
-#### Scenario: Trailing whitespace trimmed for the default column set
+#### Scenario: Columns separated by tabs for the default column set
 
 - **WHEN** the user runs `rd list` without `--columns` and a pane's status is
-  `working` with `active_tools: 0` (so the last column, `activeTools`, is empty
-  for that row)
-- **THEN** that row's line ends immediately after `working` with no trailing
-  delimiter or whitespace
+  `working` with `active_tools: 1`
+- **THEN** that row reads `<agent>\t<session>\t<pane>\t<status>\t<activeTools>`
+  with exactly four tab characters and no padding
 
-#### Scenario: Trailing whitespace trimmed for a custom last column
+#### Scenario: Trailing empty column still emits its delimiting tab
 
 - **WHEN** the user runs `rd list --columns agent,updatedAt` and a pane has no
   state file (so `updatedAt`, the last selected column, is empty for that row)
-- **THEN** that row's line ends immediately after the agent name with no
-  trailing delimiter or whitespace
+- **THEN** that row's line is `<agent>\t` — the agent name, a tab, and an empty
+  final field — not `<agent>` alone
 
-### Requirement: Column alignment applies uniformly regardless of selected columns
+#### Scenario: Field count is consistent across rows regardless of content
 
-Column widths SHALL continue to be computed using Unicode terminal display width
-(not byte length or scalar count), regardless of which columns or how many are
-selected via `--columns`. This is a strict, no-regression carryover of
-pre-existing alignment behaviour; it applies identically whether the default
-columns or a custom `--columns` selection is used:
+- **WHEN** the user runs `rd list` (default columns) and one row's pane is
+  `working` with one active tool while another row's pane is `idle` with zero
+  active tools
+- **THEN** splitting each row on `\t` yields exactly five fields for both rows,
+  even though the second row's `activeTools` field is an empty string
 
-1. **Two-space column separation**: adjacent columns SHALL always be separated
-   by at least two spaces of padding, for every row.
-2. **Column width equals its widest cell**: each column's rendered width SHALL
-   equal the maximum Unicode display width of that column's values across all
-   rendered rows (plus the two-space separator) — e.g. an `agent` column
-   containing only `pi` and `claude` SHALL be exactly as wide as `claude` (plus
-   the separator), not wider or narrower.
-3. **Fixed start position per column**: every row's cell for a given column
-   position SHALL start at the same terminal column offset as every other row's
-   cell for that same column position — i.e. columns are vertically aligned down
-   the output, not just individually padded.
+### Requirement: Tab-delimited rendering is uniform regardless of selected columns
 
-#### Scenario: Alignment holds for a custom column subset
+Tab-delimited, unpadded rendering and the fixed-field-count rule SHALL apply
+identically whether the default columns or a custom `--columns` selection is
+used, and regardless of column order or repeated column names.
+
+#### Scenario: Tab-delimiting holds for a custom column subset
 
 - **WHEN** the user runs `rd list --columns session,updatedAt` and session names
   vary in display width (including wide Unicode characters)
-- **THEN** the `updatedAt` column starts at the same terminal column position on
-  every row
+- **THEN** each row is exactly `<session>\t<updatedAt-or-empty>` with a single
+  tab separator and no padding, regardless of the session name's display width
 
-#### Scenario: Columns are always separated by two spaces
+#### Scenario: Repeated columns each get their own delimiting tab
 
-- **WHEN** the user runs `rd list` (default columns) or with any `--columns`
-  selection, and two or more rows are printed
-- **THEN** every column boundary within a row is separated from the next
-  column's first character by exactly two spaces of padding, after accounting
-  for the padding needed to reach the column's fixed width
-
-#### Scenario: Column width matches its widest cell exactly
-
-- **WHEN** the user runs `rd list` and the `agent` column's values across all
-  rows are `pi` and `claude`
-- **THEN** the `agent` column's rendered width (excluding the two-space
-  separator) equals the display width of `claude`, and the `pi` row is padded
-  with trailing spaces to that same width
-
-#### Scenario: Every row's column starts at the same position
-
-- **WHEN** the user runs `rd list` (or with any `--columns` selection) and
-  multiple rows are printed, some with shorter and some with longer values in
-  earlier columns
-- **THEN** for every column position, the first character of that column's value
-  starts at the identical terminal column offset on every row
+- **WHEN** the user runs `rd list --columns agent,agent`
+- **THEN** each row reads `<agent>\t<agent>` with exactly one tab between the
+  two identical fields
