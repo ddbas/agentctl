@@ -302,7 +302,13 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
 /// set ` prefix or `rd state clear`), or the earliest pre-rename forms (`rd
 /// set-state ` prefix or `rd clear-state`), so installs from an older `rd`
 /// binary — of any vintage — are still recognized and cleaned up during
-/// migration.
+/// migration. Also matches `rd agent watch ` (prefix) and `rd agent stop`
+/// (prefix), which leaked into some `~/.claude/settings.json` files from a
+/// build of `rd` implementing the never-merged `add-snoozed-agent-state`
+/// change (`new-agent-status-snoozed` branch); these have no corresponding
+/// entry in `RADR_CLAUDE_HOOKS`, so recognizing them here only feeds the
+/// existing superseded-entry-removal pass, which deletes them with no
+/// replacement.
 fn is_radr_command(cmd: &str) -> bool {
     cmd.contains("rd agent event ")
         || cmd == "rd agent clear"
@@ -311,6 +317,8 @@ fn is_radr_command(cmd: &str) -> bool {
         || cmd == "rd state clear"
         || cmd.starts_with("rd set-state ")
         || cmd == "rd clear-state"
+        || cmd.starts_with("rd agent watch ")
+        || cmd.starts_with("rd agent stop")
 }
 
 /// Returns the single radr command string from `entry`'s inner hooks array,
@@ -1408,6 +1416,194 @@ mod tests {
             has_blocked,
             "new AskUserQuestion|ExitPlanMode → TOOL_CALL_START entry should be present"
         );
+    }
+
+    // ── orphaned Monitor-watch/stop entries: removed with no replacement ────
+
+    #[test]
+    fn install_claude_removes_orphaned_monitor_watch_and_stop_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with the four orphaned entries that leaked from a build
+        // of `rd` implementing the never-merged `add-snoozed-agent-state`
+        // change, alongside a non-radr hook entry that must be left untouched.
+        let existing = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Monitor",
+                        "hooks": [{ "type": "command", "command": "rd agent watch arm --harness claude" }]
+                    },
+                    {
+                        "hooks": [{ "type": "command", "command": "~/.claude/hooks/notify.sh" }]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "Monitor",
+                        "hooks": [{ "type": "command", "command": "rd agent watch resolve --harness claude" }]
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
+                    }
+                ],
+                "StopFailure": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // All four orphaned commands must be gone from every event.
+        let orphaned_commands = [
+            "rd agent watch arm --harness claude",
+            "rd agent watch resolve --harness claude",
+            "rd agent stop --harness claude",
+        ];
+        for event in &["PreToolUse", "PostToolUse", "Stop", "StopFailure"] {
+            let arr = parsed["hooks"][event]
+                .as_array()
+                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+
+            let has_orphaned = arr.iter().any(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|hs| {
+                        hs.iter().any(|h| {
+                            h.get("command")
+                                .and_then(|c| c.as_str())
+                                .map(|c| orphaned_commands.contains(&c))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            });
+            assert!(
+                !has_orphaned,
+                "hooks.{event} should have no orphaned Monitor-watch/stop command strings remaining"
+            );
+        }
+
+        // The pre-existing non-radr entry under PreToolUse must be untouched.
+        let pretooluse = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+        let has_notify = pretooluse.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str())
+                            == Some("~/.claude/hooks/notify.sh")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        assert!(
+            has_notify,
+            "non-radr PreToolUse entry should be preserved untouched"
+        );
+
+        // All nine current entries should still be present/added as usual.
+        assert_eq!(
+            parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
+            "rd agent clear"
+        );
+    }
+
+    #[test]
+    fn format_claude_summary_shows_all_four_orphaned_entries_removed() {
+        let statuses = vec![HookStatus::Unchanged; RADR_CLAUDE_HOOKS.len()];
+        let removed = vec![
+            (
+                "PreToolUse".to_string(),
+                "rd agent watch arm --harness claude".to_string(),
+            ),
+            (
+                "PostToolUse".to_string(),
+                "rd agent watch resolve --harness claude".to_string(),
+            ),
+            (
+                "Stop".to_string(),
+                "rd agent stop --harness claude".to_string(),
+            ),
+            (
+                "StopFailure".to_string(),
+                "rd agent stop --harness claude".to_string(),
+            ),
+        ];
+        let summary = format_claude_summary(&statuses, &removed);
+
+        for (event, cmd) in &removed {
+            let expected = format!("{event:<35} → {cmd} [removed]");
+            assert!(
+                summary.contains(&expected),
+                "summary should contain removed line for {event}/{cmd}: {summary}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_claude_removes_orphaned_monitor_watch_and_stop_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        let existing = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Monitor",
+                        "hooks": [{ "type": "command", "command": "rd agent watch arm --harness claude" }]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "Monitor",
+                        "hooks": [{ "type": "command", "command": "rd agent watch resolve --harness claude" }]
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
+                    }
+                ],
+                "StopFailure": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
+                    }
+                ]
+            }
+        });
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        uninstall_claude_to(&dest).expect("uninstall should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert!(
+            parsed.get("hooks").is_none(),
+            "hooks key should be pruned once all orphaned Monitor-watch/stop entries are removed"
+        );
+    }
+
+    #[test]
+    fn is_radr_command_recognizes_orphaned_watch_and_stop_forms() {
+        assert!(is_radr_command("rd agent watch arm --harness claude"));
+        assert!(is_radr_command("rd agent watch resolve --harness claude"));
+        assert!(is_radr_command("rd agent stop --harness claude"));
     }
 
     // ── task 3.2: migration — pre-rename command strings are upgraded ────────

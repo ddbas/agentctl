@@ -224,7 +224,12 @@ registered by an older `rd` binary using the pre-rename
 `rd state set`/`rd state clear` commands, or the subsequently renamed
 `rd agent status`/`rd agent clear` commands, those entries SHALL be recognized
 as radr-managed, removed as superseded, and replaced with the equivalent
-`rd agent event`/`rd agent clear` entries.
+`rd agent event`/`rd agent clear` entries. If `~/.claude/settings.json` contains
+hook entries using `rd agent watch arm`, `rd agent watch resolve`, or
+`rd agent stop` command strings (from a build of `rd` implementing a feature
+never shipped on the mainline), those entries SHALL be recognized as
+radr-managed and removed as superseded, with no replacement entries added since
+no current hook set corresponds to them.
 
 The nine entries are:
 
@@ -285,18 +290,31 @@ The nine entries are:
   equivalent `rd agent event ...` / `rd agent clear` entries, with no duplicate
   or leftover old-style entries remaining
 
+#### Scenario: Install removes orphaned Monitor-watch and stop entries with no replacement
+
+- **WHEN** `~/.claude/settings.json` contains a `PreToolUse` entry (matcher
+  `Monitor`) invoking `rd agent watch arm --harness claude`, a `PostToolUse`
+  entry (matcher `Monitor`) invoking `rd agent watch resolve --harness claude`,
+  and `Stop`/`StopFailure` entries invoking `rd agent stop --harness claude`
+  (left over from a build of `rd` implementing a feature never shipped on the
+  mainline)
+- **THEN** running `rd install claude` removes all four entries, reports each in
+  the summary's `[removed]` list, adds no replacement entries for them, and
+  still adds/leaves-unchanged the nine current entries listed above
+
 ### Requirement: rd uninstall claude removes only radr-managed hook entries
 
 The `rd uninstall claude` subcommand SHALL remove radr-managed hook entries from
 `~/.claude/settings.json`, recognizing the current-form commands
 (`rd agent event ...` / `rd agent clear`) as well as all prior legacy forms
 (`rd agent status ...` / `rd agent clear`, `rd state set ...` /
-`rd state clear`, and the earlier `rd set-state ...` / `rd clear-state`) using
-the same recognition logic as `rd install claude`'s migration path. All non-radr
-content in the file, including non-radr hook entries under the same event and
-any other top-level settings keys, SHALL be preserved unchanged. The command
-SHALL be idempotent: running it again after all radr entries are removed SHALL
-make no further changes.
+`rd state clear`, the earlier `rd set-state ...` / `rd clear-state`, and the
+never-shipped `rd agent watch arm`/`rd agent watch resolve`/`rd agent stop`
+forms) using the same recognition logic as `rd install claude`'s migration path.
+All non-radr content in the file, including non-radr hook entries under the same
+event and any other top-level settings keys, SHALL be preserved unchanged. The
+command SHALL be idempotent: running it again after all radr entries are removed
+SHALL make no further changes.
 
 #### Scenario: Uninstall removes all nine radr hook entries
 
@@ -320,6 +338,14 @@ make no further changes.
   (from an older `rd` binary, not yet migrated by `rd install claude`)
 - **THEN** `rd uninstall claude` recognizes and removes those entries as
   radr-managed
+
+#### Scenario: Uninstall removes orphaned Monitor-watch and stop entries
+
+- **WHEN** `~/.claude/settings.json` contains hook entries invoking
+  `rd agent watch arm --harness claude`,
+  `rd agent watch resolve --harness claude`, or `rd agent stop --harness claude`
+- **THEN** `rd uninstall claude` recognizes and removes those entries as
+  radr-managed, alongside any other radr entries present
 
 #### Scenario: Uninstall prunes empty event arrays and the hooks key
 
