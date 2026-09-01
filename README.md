@@ -124,7 +124,7 @@ Supported harnesses: `claude`, `pi`.
 
 #### `claude`
 
-Patches `~/.claude/settings.json` to register nine hook entries that call
+Patches `~/.claude/settings.json` to register eleven hook entries that call
 `rd agent event` and `rd agent clear` at key Claude Code lifecycle events. Each
 hook command reads the hook's JSON payload from stdin via `jq` and forwards the
 extracted field (`session_id` or `tool_use_id`) as `--id` — **`jq` must be on
@@ -139,10 +139,12 @@ rd install claude
 Example output (first install):
 
 ```
-Installed radr hooks for claude (9 entries):
+Installed radr hooks for claude (11 entries):
   + SessionStart (startup|resume|clear) → id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude
   + UserPromptSubmit                    → id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude [async]
+  + PreToolUse                          → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --harness claude [async]
   + PreToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude [async]
+  + PostToolUse                         → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --harness claude [async]
   + PostToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude [async]
   + PostToolUse                         → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude [async]
   + Notification (permission_prompt)    → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude [async]
@@ -155,7 +157,7 @@ Installed radr hooks for claude (9 entries):
 On a subsequent run (all entries already present):
 
 ```
-Installed radr hooks for claude (9 entries):
+Installed radr hooks for claude (11 entries):
   = SessionStart (startup|resume|clear) → id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude
   ...
 ```
@@ -166,7 +168,9 @@ Installed radr hooks for claude (9 entries):
 | ------------------ | ------------------------------- | -------------------------------------------------------------- | ----- |
 | `SessionStart`     | `startup\|resume\|clear`        | `SESSION_STARTED --id <session_id>`                            | no    |
 | `UserPromptSubmit` | _(none)_                        | `RUN_STARTED --id <session_id>`                                | yes   |
+| `PreToolUse`       | _(none — all tools)_            | `TOOL_CALL_START --id <tool_use_id>`                           | yes   |
 | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `TOOL_CALL_START --id <tool_use_id> --type elicitation`        | yes   |
+| `PostToolUse`      | _(none — all tools)_            | `TOOL_CALL_RESULT --id <tool_use_id>`                          | yes   |
 | `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | `TOOL_CALL_RESULT --id <tool_use_id> --type elicitation`       | yes   |
 | `PostToolUse`      | _(none — all tools)_            | `TOOL_CALL_RESULT --id "perm-<session_id>" --type elicitation` | yes   |
 | `Notification`     | `permission_prompt`             | `TOOL_CALL_START --id "perm-<session_id>" --type elicitation`  | yes   |
@@ -178,10 +182,14 @@ Installed radr hooks for claude (9 entries):
 established before any async hook fires and is cleaned up before the session
 exits. All other hooks use `async: true` to avoid blocking Claude's operation.
 
-The unmatched `PostToolUse` registration exists solely to close out a
-`permission_prompt`-triggered block using the same synthetic `perm-<session_id>`
-id used to open it; it is a no-op for `status` when nothing is currently
-`blocked`.
+The unmatched, untyped `PreToolUse`/`PostToolUse` entries fire for every tool
+call (mirroring the pi extension's `tool_call`/`tool_result` handlers) and drive
+the pane's `active_tools` count, independent of the `blocked`-status machinery.
+
+The unmatched `PostToolUse` registration with the `perm-<session_id>` id exists
+solely to close out a `permission_prompt`-triggered block using the same
+synthetic `perm-<session_id>` id used to open it; it is a no-op for `status`
+when nothing is currently `blocked`.
 
 #### `pi`
 
