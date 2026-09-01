@@ -189,7 +189,7 @@ async fn hooks_install_pi_idempotent() {
 // ── Claude integration tests (task 2.6 and 2.7) ───────────────────────────────
 
 /// `rd install claude` on a container with no `~/.claude/settings.json`:
-/// the file is created and contains all nine radr hook entries.
+/// the file is created and contains all eleven radr hook entries.
 #[tokio::test]
 async fn hooks_install_claude_creates_settings_file() {
     let env = common::TmuxEnv::new().await;
@@ -224,8 +224,9 @@ async fn hooks_install_claude_creates_settings_file() {
     // File must exist.
     assert!(settings_path.exists(), "settings.json should be created");
 
-    // Parse and verify all seven distinct hook events are registered (nine
-    // entries total — PostToolUse is registered twice).
+    // Parse and verify all seven distinct hook events are registered (eleven
+    // entries total — PreToolUse and PostToolUse are each registered more
+    // than once).
     let content = fs::read_to_string(&settings_path).expect("read settings.json");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
     let hooks = &parsed["hooks"];
@@ -233,7 +234,6 @@ async fn hooks_install_claude_creates_settings_file() {
     for event in &[
         "SessionStart",
         "UserPromptSubmit",
-        "PreToolUse",
         "Stop",
         "StopFailure",
         "Notification",
@@ -245,13 +245,22 @@ async fn hooks_install_claude_creates_settings_file() {
         assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
     }
 
+    let pre_tool_use = hooks["PreToolUse"]
+        .as_array()
+        .expect("hooks.PreToolUse should be an array");
+    assert_eq!(
+        pre_tool_use.len(),
+        2,
+        "hooks.PreToolUse should have exactly two entries"
+    );
+
     let post_tool_use = hooks["PostToolUse"]
         .as_array()
         .expect("hooks.PostToolUse should be an array");
     assert_eq!(
         post_tool_use.len(),
-        2,
-        "hooks.PostToolUse should have exactly two entries"
+        3,
+        "hooks.PostToolUse should have exactly three entries"
     );
 
     // stdout should contain '+' for new entries.
@@ -314,5 +323,139 @@ async fn hooks_install_claude_idempotent() {
     assert!(
         stdout2.contains('='),
         "stdout should contain '=' for idempotent re-run; got:\n{stdout2}"
+    );
+}
+
+/// Simulating the generated `PreToolUse`/`PostToolUse` (unmatched, untyped)
+/// hook commands for a non-interactive tool increments then decrements
+/// `active_tools` in the pane's state file.
+#[tokio::test]
+async fn hooks_install_claude_tool_call_tracking_updates_active_tools() {
+    let env = common::TmuxEnv::new().await;
+
+    let fake_home = env.workspace_path.join("home_claude3");
+    fs::create_dir_all(&fake_home).expect("create fake home");
+
+    let settings_path = fake_home.join(".claude").join("settings.json");
+
+    let install_out = env
+        .rd()
+        .args(["install", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("spawn rd install claude");
+    assert!(
+        install_out.status.success(),
+        "install claude should succeed"
+    );
+
+    let content = fs::read_to_string(&settings_path).expect("read settings.json");
+    let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+
+    // Locate the unmatched, untyped PreToolUse entry (no matcher, no --type).
+    let pre_cmd = parsed["hooks"]["PreToolUse"]
+        .as_array()
+        .expect("PreToolUse should be an array")
+        .iter()
+        .find_map(|entry| {
+            if entry.get("matcher").is_some() {
+                return None;
+            }
+            let cmd = entry["hooks"][0].get("command")?.as_str()?;
+            if cmd.contains("TOOL_CALL_START") && !cmd.contains("--type") {
+                Some(cmd.to_owned())
+            } else {
+                None
+            }
+        })
+        .expect("unmatched untyped PreToolUse command should be present");
+
+    // Locate the unmatched, untyped PostToolUse entry (no matcher, no --type,
+    // no "perm-" id).
+    let post_cmd = parsed["hooks"]["PostToolUse"]
+        .as_array()
+        .expect("PostToolUse should be an array")
+        .iter()
+        .find_map(|entry| {
+            if entry.get("matcher").is_some() {
+                return None;
+            }
+            let cmd = entry["hooks"][0].get("command")?.as_str()?;
+            if cmd.contains("TOOL_CALL_RESULT") && !cmd.contains("--type") && !cmd.contains("perm-")
+            {
+                Some(cmd.to_owned())
+            } else {
+                None
+            }
+        })
+        .expect("unmatched untyped PostToolUse command should be present");
+
+    let pane = "%88";
+    let rd_bin_dir = std::path::Path::new(env!("CARGO_BIN_EXE_rd"))
+        .parent()
+        .expect("rd binary has a parent dir")
+        .to_path_buf();
+    let path_with_rd = format!(
+        "{}:{}",
+        rd_bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    // Simulate the PreToolUse hook firing for a non-interactive tool call.
+    let run_hook = |cmd: &str| {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .env("TMUX_PANE", pane)
+            .env("XDG_DATA_HOME", &env.xdg_path)
+            .env("PATH", &path_with_rd)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write as _;
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(br#"{"tool_use_id":"tu1","session_id":"s1"}"#)?;
+                child.wait_with_output()
+            })
+            .expect("failed to run simulated hook command")
+    };
+
+    let pre_out = run_hook(&pre_cmd);
+    assert!(
+        pre_out.status.success(),
+        "simulated PreToolUse hook should exit 0; stderr: {}",
+        String::from_utf8_lossy(&pre_out.stderr)
+    );
+
+    let state_after_pre = fs::read_to_string(env.state_file_path(pane))
+        .expect("state file should exist after PreToolUse hook");
+    let state_after_pre: serde_json::Value =
+        serde_json::from_str(&state_after_pre).expect("valid state JSON");
+    assert_eq!(
+        state_after_pre["active_tools"].as_u64(),
+        Some(1),
+        "active_tools should be incremented to 1 after PreToolUse"
+    );
+
+    let post_out = run_hook(&post_cmd);
+    assert!(
+        post_out.status.success(),
+        "simulated PostToolUse hook should exit 0; stderr: {}",
+        String::from_utf8_lossy(&post_out.stderr)
+    );
+
+    let state_after_post = fs::read_to_string(env.state_file_path(pane))
+        .expect("state file should exist after PostToolUse hook");
+    let state_after_post: serde_json::Value =
+        serde_json::from_str(&state_after_post).expect("valid state JSON");
+    assert_eq!(
+        state_after_post["active_tools"].as_u64(),
+        Some(0),
+        "active_tools should be decremented back to 0 after PostToolUse"
     );
 }

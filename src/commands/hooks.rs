@@ -232,11 +232,16 @@ struct ClaudeHookDef {
     async_: bool,
 }
 
-/// The nine radr hook entries to register in `~/.claude/settings.json`.
+/// The eleven radr hook entries to register in `~/.claude/settings.json`.
 ///
 /// Every command reads the hook's JSON payload from stdin via `jq` and
 /// forwards the extracted field as `--id` to `rd agent event`/`rd agent
-/// clear`, per `specs/claude-state-hooks/spec.md`.
+/// clear`, per `specs/claude-state-hooks/spec.md`. `PreToolUse` and
+/// `PostToolUse` each appear twice: once unmatched (every tool, untyped,
+/// drives `active_tools` via plain `TOOL_CALL_START`/`TOOL_CALL_RESULT`) and
+/// once matched (interactive tools only, `--type elicitation`, drives
+/// `blocked` status), plus `PostToolUse` appears a third time unmatched with
+/// the `"perm-<session_id>"` id to close out permission-prompt blocks.
 const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "SessionStart",
@@ -252,8 +257,20 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     },
     ClaudeHookDef {
         event: "PreToolUse",
+        matcher: None,
+        command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --harness claude"#,
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "PreToolUse",
         matcher: Some("AskUserQuestion|ExitPlanMode"),
         command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude"#,
+        async_: true,
+    },
+    ClaudeHookDef {
+        event: "PostToolUse",
+        matcher: None,
+        command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
@@ -569,7 +586,7 @@ fn build_claude_hook_entry(hook: &ClaudeHookDef) -> serde_json::Value {
 /// - `=` entry was already correct — no change
 /// - `-` entry was superseded and removed
 pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String)]) -> String {
-    let mut lines = vec!["Installed radr hooks for claude (9 entries):".to_string()];
+    let mut lines = vec!["Installed radr hooks for claude (11 entries):".to_string()];
 
     // Show removed (superseded) entries first so they're visible.
     for (event, cmd) in removed {
@@ -1034,7 +1051,7 @@ mod tests {
     // ── task 3.1: install on a clean (empty) settings file ──────────────────
 
     #[test]
-    fn install_claude_clean_file_writes_all_eight_entries() {
+    fn install_claude_clean_file_writes_all_eleven_entries() {
         let tmp = TempDir::new().unwrap();
         let dest = claude_settings_path(&tmp);
 
@@ -1052,7 +1069,6 @@ mod tests {
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
-            "PreToolUse",
             "Stop",
             "StopFailure",
             "Notification",
@@ -1064,15 +1080,27 @@ mod tests {
             assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
         }
 
-        // PostToolUse is registered twice: matched (interactive tools) and
-        // unmatched (closes out permission-prompt blocks).
+        // PreToolUse is registered twice: unmatched (every tool, untyped,
+        // drives active_tools) and matched (interactive tools, elicitation).
+        let pre_tool_use = hooks["PreToolUse"]
+            .as_array()
+            .expect("hooks.PreToolUse should be an array");
+        assert_eq!(
+            pre_tool_use.len(),
+            2,
+            "hooks.PreToolUse should have exactly two entries (unmatched + matched)"
+        );
+
+        // PostToolUse is registered three times: unmatched untyped (drives
+        // active_tools), matched (interactive tools), and unmatched "perm-$id"
+        // (closes out permission-prompt blocks).
         let post_tool_use = hooks["PostToolUse"]
             .as_array()
             .expect("hooks.PostToolUse should be an array");
         assert_eq!(
             post_tool_use.len(),
-            2,
-            "hooks.PostToolUse should have exactly two entries (matched + unmatched)"
+            3,
+            "hooks.PostToolUse should have exactly three entries"
         );
     }
 
@@ -1104,13 +1132,13 @@ mod tests {
         );
 
         // No duplicate entries — every event, each exactly once, except
-        // PostToolUse which is registered twice by design (matched +
-        // unmatched).
+        // PreToolUse (unmatched + matched) and PostToolUse (unmatched
+        // untyped + matched + unmatched "perm-$id"), which are registered
+        // multiple times by design.
         let parsed: serde_json::Value = serde_json::from_str(&content_after_second).unwrap();
         for event in &[
             "SessionStart",
             "UserPromptSubmit",
-            "PreToolUse",
             "Stop",
             "StopFailure",
             "Notification",
@@ -1123,11 +1151,17 @@ mod tests {
                 "hooks.{event} should have no duplicates after second install"
             );
         }
+        let pre_tool_use = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(
+            pre_tool_use.len(),
+            2,
+            "hooks.PreToolUse should have exactly two entries (unmatched + matched) after second install"
+        );
         let post_tool_use = parsed["hooks"]["PostToolUse"].as_array().unwrap();
         assert_eq!(
             post_tool_use.len(),
-            2,
-            "hooks.PostToolUse should have exactly two entries (matched + unmatched) after second install"
+            3,
+            "hooks.PostToolUse should have exactly three entries after second install"
         );
     }
 
@@ -1236,6 +1270,40 @@ mod tests {
                 "{event} should not have async field"
             );
         }
+    }
+
+    // ── task 2.2: the two new general tool-call-tracking entries ─────────────
+
+    #[test]
+    fn general_tool_call_tracking_entries_have_no_type_flag_and_are_async() {
+        let pre = RADR_CLAUDE_HOOKS
+            .iter()
+            .find(|h| h.event == "PreToolUse" && h.matcher.is_none())
+            .expect("should have an unmatched PreToolUse entry");
+        assert!(pre.command.contains("tool_use_id"));
+        assert!(pre.command.contains("rd agent event TOOL_CALL_START"));
+        assert!(
+            !pre.command.contains("--type"),
+            "unmatched PreToolUse entry should not have a --type flag"
+        );
+        assert!(pre.async_, "unmatched PreToolUse entry should be async");
+
+        let post = RADR_CLAUDE_HOOKS
+            .iter()
+            .find(|h| {
+                h.event == "PostToolUse" && h.matcher.is_none() && !h.command.contains("perm-")
+            })
+            .expect("should have an untyped unmatched PostToolUse entry");
+        assert!(post.command.contains("tool_use_id"));
+        assert!(post.command.contains("rd agent event TOOL_CALL_RESULT"));
+        assert!(
+            !post.command.contains("--type"),
+            "untyped unmatched PostToolUse entry should not have a --type flag"
+        );
+        assert!(
+            post.async_,
+            "untyped unmatched PostToolUse entry should be async"
+        );
     }
 
     // ── task 3.4 / 5.5: summary output uses +, ~, = ────────────────────────────
@@ -1416,6 +1484,117 @@ mod tests {
             has_blocked,
             "new AskUserQuestion|ExitPlanMode → TOOL_CALL_START entry should be present"
         );
+    }
+
+    // ── task 2.3: install adds the two new general entries to a nine-entry file ──
+
+    #[test]
+    fn install_claude_adds_two_new_entries_to_pre_change_nine_entry_file() {
+        let tmp = TempDir::new().unwrap();
+        let dest = claude_settings_path(&tmp);
+
+        // Pre-populate with exactly the nine pre-change entries (the current
+        // table minus the two new unmatched PreToolUse/PostToolUse entries).
+        let existing = serde_json::json!({
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume|clear",
+                        "hooks": [{ "type": "command", "command": r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"# }]
+                    }
+                ],
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"# }]
+                    }
+                ],
+                "PreToolUse": [
+                    {
+                        "matcher": "AskUserQuestion|ExitPlanMode",
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude"# }]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "AskUserQuestion|ExitPlanMode",
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude"# }]
+                    },
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude"# }]
+                    }
+                ],
+                "Notification": [
+                    {
+                        "matcher": "permission_prompt",
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude"# }]
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"# }]
+                    }
+                ],
+                "StopFailure": [
+                    {
+                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"# }]
+                    }
+                ],
+                "SessionEnd": [
+                    {
+                        "hooks": [{ "type": "command", "command": "rd agent clear" }]
+                    }
+                ]
+            }
+        });
+        let existing_str = serde_json::to_string_pretty(&existing).unwrap();
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, &existing_str).unwrap();
+
+        install_claude_to(&dest).expect("install should succeed");
+
+        let content = fs::read_to_string(&dest).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // The nine existing entries should be byte-for-byte unchanged: re-parse
+        // the original and compare each entry's JSON value.
+        let original: serde_json::Value = serde_json::from_str(&existing_str).unwrap();
+        for (event, orig_arr) in original["hooks"].as_object().unwrap() {
+            let orig_entries = orig_arr.as_array().unwrap();
+            let new_entries = parsed["hooks"][event].as_array().unwrap();
+            for orig_entry in orig_entries {
+                assert!(
+                    new_entries.contains(orig_entry),
+                    "existing entry under {event} should remain unchanged: {orig_entry}"
+                );
+            }
+        }
+
+        // Exactly the two new unmatched, untyped entries should be added.
+        let pre = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 2, "PreToolUse should now have two entries");
+        let new_pre = pre
+            .iter()
+            .find(|e| e.get("matcher").is_none())
+            .expect("new unmatched PreToolUse entry should be added");
+        let new_pre_cmd = new_pre["hooks"][0]["command"].as_str().unwrap();
+        assert!(new_pre_cmd.contains("rd agent event TOOL_CALL_START"));
+        assert!(!new_pre_cmd.contains("--type"));
+
+        let post = parsed["hooks"]["PostToolUse"].as_array().unwrap();
+        assert_eq!(post.len(), 3, "PostToolUse should now have three entries");
+        let new_post = post
+            .iter()
+            .find(|e| {
+                e.get("matcher").is_none()
+                    && !e["hooks"][0]["command"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("perm-")
+            })
+            .expect("new unmatched, untyped PostToolUse entry should be added");
+        let new_post_cmd = new_post["hooks"][0]["command"].as_str().unwrap();
+        assert!(new_post_cmd.contains("rd agent event TOOL_CALL_RESULT"));
+        assert!(!new_post_cmd.contains("--type"));
     }
 
     // ── orphaned Monitor-watch/stop entries: removed with no replacement ────
@@ -1911,7 +2090,10 @@ mod tests {
                     hs.iter().any(|h| {
                         h.get("command")
                             .and_then(|c| c.as_str())
-                            .map(|c| c.contains("rd agent event TOOL_CALL_START"))
+                            .map(|c| {
+                                c.contains("rd agent event TOOL_CALL_START")
+                                    && c.contains("--type elicitation")
+                            })
                             .unwrap_or(false)
                     })
                 })
@@ -1928,7 +2110,7 @@ mod tests {
     // ── task 3.7: PostToolUse entry ───────────────────────────────────────────
 
     #[test]
-    fn install_claude_posttooluse_has_two_entries_matched_and_unmatched() {
+    fn install_claude_posttooluse_has_three_entries() {
         let tmp = TempDir::new().unwrap();
         let dest = claude_settings_path(&tmp);
         install_claude_to(&dest).expect("install");
@@ -1938,7 +2120,7 @@ mod tests {
         let entries = parsed["hooks"]["PostToolUse"]
             .as_array()
             .expect("PostToolUse should be an array");
-        assert_eq!(entries.len(), 2, "PostToolUse should have two entries");
+        assert_eq!(entries.len(), 3, "PostToolUse should have three entries");
 
         let matched = entries
             .iter()
@@ -1953,16 +2135,48 @@ mod tests {
         assert!(matched_cmd.contains("rd agent event TOOL_CALL_RESULT"));
         assert!(matched_cmd.contains("--type elicitation"));
 
-        let unmatched = entries
+        // Two unmatched entries: one untyped, id=tool_use_id (drives
+        // active_tools), one typed, id="perm-<session_id>" (closes out
+        // permission-prompt blocks).
+        let unmatched: Vec<&serde_json::Value> = entries
             .iter()
-            .find(|e| e.get("matcher").is_none())
-            .expect("should have an unmatched PostToolUse entry");
-        let unmatched_cmd = unmatched["hooks"][0]
+            .filter(|e| e.get("matcher").is_none())
+            .collect();
+        assert_eq!(unmatched.len(), 2, "should have two unmatched entries");
+
+        let untyped = unmatched
+            .iter()
+            .find(|e| {
+                let cmd = e["hooks"][0]
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                cmd.contains("rd agent event TOOL_CALL_RESULT") && !cmd.contains("--type")
+            })
+            .expect("should have an untyped unmatched PostToolUse entry");
+        let untyped_cmd = untyped["hooks"][0]
             .get("command")
             .and_then(|v| v.as_str())
-            .expect("unmatched PostToolUse hook should have a command");
-        assert!(unmatched_cmd.contains("rd agent event TOOL_CALL_RESULT"));
-        assert!(unmatched_cmd.contains("perm-"));
+            .unwrap();
+        assert!(untyped_cmd.contains("tool_use_id"));
+        assert!(!untyped_cmd.contains("perm-"));
+
+        let perm = unmatched
+            .iter()
+            .find(|e| {
+                let cmd = e["hooks"][0]
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                cmd.contains("perm-")
+            })
+            .expect("should have the perm-$id unmatched PostToolUse entry");
+        let perm_cmd = perm["hooks"][0]
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert!(perm_cmd.contains("rd agent event TOOL_CALL_RESULT"));
+        assert!(perm_cmd.contains("--type elicitation"));
     }
 
     // ── task 3.8: StopFailure entry ───────────────────────────────────────────
@@ -2071,10 +2285,10 @@ mod tests {
     // Claude uninstall unit tests
     // ─────────────────────────────────────────────────────────────────────────
 
-    // ── task 3.7: uninstall removes all eight radr-managed entries ──────────
+    // ── task 3.7: uninstall removes all eleven radr-managed entries ──────────
 
     #[test]
-    fn uninstall_claude_removes_all_eight_entries() {
+    fn uninstall_claude_removes_all_eleven_entries() {
         let tmp = TempDir::new().unwrap();
         let dest = claude_settings_path(&tmp);
 

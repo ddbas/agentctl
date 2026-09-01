@@ -2,11 +2,12 @@
 
 ## Purpose
 
-Specification for radr's Claude harness integration: the nine Claude lifecycle
-hook entries (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`
-(matched and unmatched), `Stop`, `StopFailure`, `Notification`, `SessionEnd`)
-that keep the agent state file in sync with Claude's current activity, and the
-`rd install claude` command that registers them.
+Specification for radr's Claude harness integration: the eleven Claude lifecycle
+hook entries (`SessionStart`, `UserPromptSubmit`, `PreToolUse` (unmatched and
+matched), `PostToolUse` (unmatched untyped, matched, and unmatched "perm-" id),
+`Stop`, `StopFailure`, `Notification`, `SessionEnd`) that keep the agent state
+file in sync with Claude's current activity, and the `rd install claude` command
+that registers them.
 
 ## Requirements
 
@@ -58,6 +59,28 @@ JSON payload from stdin, extracts `session_id`, and invokes
 - **WHEN** Claude fires the `UserPromptSubmit` hook and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"status": "working"`
 
+### Requirement: PreToolUse hook calls rd agent event TOOL_CALL_START for every tool call
+
+The Claude `PreToolUse` hook SHALL additionally be registered without a tool
+matcher (firing for every tool) to invoke a command that reads the hook's JSON
+payload from stdin, extracts `tool_use_id`, and invokes
+`rd agent event TOOL_CALL_START --id <tool_use_id> --harness claude` (async, no
+`--type`), incrementing the pane's `active_tools` count for every tool call,
+mirroring the pi extension's `tool_call` handler.
+
+#### Scenario: Any tool call increments active_tools
+
+- **WHEN** Claude fires the unmatched `PreToolUse` hook for any tool call and
+  `$TMUX_PANE` is set
+- **THEN** the state file's `active_tools` count is incremented by one
+
+#### Scenario: Concurrent tool calls each get a distinct id
+
+- **WHEN** Claude fires the unmatched `PreToolUse` hook for two tool calls
+  running concurrently
+- **THEN** each invocation uses its own `tool_use_id`, so both increments are
+  recorded independently
+
 ### Requirement: PreToolUse hook calls rd agent event TOOL_CALL_START for interactive tools
 
 The Claude `PreToolUse` hook SHALL invoke a command that reads the hook's JSON
@@ -86,6 +109,34 @@ before continuing.
 - **THEN** this hook does NOT fire (filtered by Claude's `matcher`) and no
   `TOOL_CALL_START --type elicitation` event is dispatched from this
   registration
+
+### Requirement: PostToolUse hook calls rd agent event TOOL_CALL_RESULT for every tool call
+
+The Claude `PostToolUse` hook SHALL additionally be registered without a tool
+matcher (firing for every tool) to invoke a command that reads the hook's JSON
+payload from stdin, extracts `tool_use_id`, and invokes
+`rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude` (async, no
+`--type`), decrementing the pane's `active_tools` count for every completed tool
+call, mirroring the pi extension's `tool_result` handler. This entry is
+independent of the unmatched `PostToolUse` →
+`TOOL_CALL_RESULT --id "perm-<session_id>" --type elicitation` entry, which
+continues to serve only permission-prompt block closure and is unaffected by
+this requirement.
+
+#### Scenario: Any tool call completion decrements active_tools
+
+- **WHEN** Claude fires the unmatched `PostToolUse` hook for any tool call and
+  `$TMUX_PANE` is set
+- **THEN** the state file's `active_tools` count is decremented by one (never
+  below zero)
+
+#### Scenario: Interactive tool calls still track active_tools alongside blocked status
+
+- **WHEN** Claude fires `PreToolUse`/`PostToolUse` for `AskUserQuestion` or
+  `ExitPlanMode`
+- **THEN** both the elicitation-typed entries (driving `blocked` status) and the
+  general untyped entries (driving `active_tools`) fire for that same tool call,
+  each independently
 
 ### Requirement: PostToolUse hook calls rd agent event TOOL_CALL_RESULT for interactive tools
 
@@ -214,7 +265,7 @@ code 0 and write nothing when `$TMUX_PANE` is not set in the environment and
 ### Requirement: rd install claude registers handlers in user Claude settings
 
 The `rd install claude` subcommand SHALL patch `~/.claude/settings.json` to
-register nine Claude hook entries using `rd agent event` and `rd agent clear`.
+register eleven Claude hook entries using `rd agent event` and `rd agent clear`.
 `SessionStart` and `SessionEnd` are registered without `async` so they complete
 before Claude proceeds; all other hooks use `async: true`. The command SHALL be
 idempotent and SHALL merge into any existing hook configuration without
@@ -229,15 +280,20 @@ hook entries using `rd agent watch arm`, `rd agent watch resolve`, or
 `rd agent stop` command strings (from a build of `rd` implementing a feature
 never shipped on the mainline), those entries SHALL be recognized as
 radr-managed and removed as superseded, with no replacement entries added since
-no current hook set corresponds to them.
+no current hook set corresponds to them. If `~/.claude/settings.json` was
+written by an `rd` binary that predates the two general tool-call-tracking
+entries below, those two entries SHALL be added without disturbing any of the
+nine entries already present.
 
-The nine entries are:
+The eleven entries are:
 
 | Event              | Matcher                         | Command                                                                                                                           | Async |
 | ------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | `SessionStart`     | `startup\|resume\|clear`        | reads stdin for `session_id`, then `rd agent event SESSION_STARTED --id <session_id> --harness claude`                            | no    |
 | `UserPromptSubmit` | —                               | reads stdin for `session_id`, then `rd agent event RUN_STARTED --id <session_id> --harness claude`                                | yes   |
+| `PreToolUse`       | — (unmatched)                   | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_START --id <tool_use_id> --harness claude`                          | yes   |
 | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_START --id <tool_use_id> --type elicitation --harness claude`       | yes   |
+| `PostToolUse`      | — (unmatched)                   | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude`                         | yes   |
 | `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_RESULT --id <tool_use_id> --type elicitation --harness claude`      | yes   |
 | `PostToolUse`      | — (unmatched)                   | reads stdin for `session_id`, then `rd agent event TOOL_CALL_RESULT --id "perm-<session_id>" --type elicitation --harness claude` | yes   |
 | `Notification`     | `permission_prompt`             | reads stdin for `session_id`, then `rd agent event TOOL_CALL_START --id "perm-<session_id>" --type elicitation --harness claude`  | yes   |
@@ -245,11 +301,17 @@ The nine entries are:
 | `StopFailure`      | —                               | reads stdin for `session_id`, then `rd agent event RUN_FINISHED --id <session_id> --harness claude`                               | yes   |
 | `SessionEnd`       | —                               | `rd agent clear`                                                                                                                  | no    |
 
+Note: `PreToolUse` and `PostToolUse` each appear twice — once unmatched (every
+tool, untyped, drives `active_tools`) and once matched (interactive tools only,
+`--type elicitation`, drives `blocked` status) — plus `PostToolUse` appears a
+third time unmatched with the `"perm-<session_id>"` id to close out
+permission-prompt blocks, for three `PostToolUse` entries total.
+
 #### Scenario: First-time install on a clean settings file
 
 - **WHEN** the user runs `rd install claude` and `~/.claude/settings.json`
   contains no radr hook entries
-- **THEN** the file is updated with all nine entries listed above
+- **THEN** the file is updated with all eleven entries listed above
 
 #### Scenario: Idempotent re-install
 
@@ -300,7 +362,17 @@ The nine entries are:
   mainline)
 - **THEN** running `rd install claude` removes all four entries, reports each in
   the summary's `[removed]` list, adds no replacement entries for them, and
-  still adds/leaves-unchanged the nine current entries listed above
+  still adds/leaves-unchanged the eleven current entries listed above
+
+#### Scenario: Install adds the two tool-call-tracking entries to a nine-entry file
+
+- **WHEN** `~/.claude/settings.json` contains the nine radr hook entries
+  installed by an `rd` binary that predates the general tool-call-tracking
+  entries, and none of the nine entries' commands, matchers, or async flags
+  differ from the current table
+- **THEN** running `rd install claude` adds the two new unmatched
+  `PreToolUse`/`PostToolUse` entries, leaves the nine existing entries
+  unchanged, and the file ends up with eleven radr entries total
 
 ### Requirement: rd uninstall claude removes only radr-managed hook entries
 
@@ -316,12 +388,12 @@ event and any other top-level settings keys, SHALL be preserved unchanged. The
 command SHALL be idempotent: running it again after all radr entries are removed
 SHALL make no further changes.
 
-#### Scenario: Uninstall removes all nine radr hook entries
+#### Scenario: Uninstall removes all eleven radr hook entries
 
 - **WHEN** the user runs `rd uninstall claude` and `~/.claude/settings.json`
-  contains the nine radr-managed hook entries installed by `rd install claude`
-- **THEN** all nine entries are removed and the command prints a summary listing
-  each removed entry (prefixed with `-`)
+  contains the eleven radr-managed hook entries installed by `rd install claude`
+- **THEN** all eleven entries are removed and the command prints a summary
+  listing each removed entry (prefixed with `-`)
 
 #### Scenario: Uninstall preserves non-radr hooks under the same event
 
