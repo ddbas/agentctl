@@ -24,11 +24,16 @@ rd install <harness>          # install harness hooks (pi, claude)
 
 Queries every pane across all tmux sessions via `tmux list-panes -a` and prints
 one line per pane whose foreground process is a known agent harness (`claude` or
-`pi`). By default, output has five left-aligned columns:
+`pi`). By default, output is tab-delimited plain text with five columns:
 
 ```
-<agent-name>  <session-name>  <window>.<pane>  <status>  <activeTools>
+<agent-name>\t<session-name>\t<window>.<pane>\t<status>\t<activeTools>
 ```
+
+Every row always has the same number of tab-separated fields as the number of
+rendered columns, even when a trailing column's value is empty (e.g. an empty
+`activeTools` or `updatedAt` cell) — this keeps the output reliably parseable by
+tools like `cut -f` or `awk -F'\t'`.
 
 The `status` column shows the agent's last derived status, or `unknown` if no
 state file exists for that pane. The `activeTools` column shows the number of
