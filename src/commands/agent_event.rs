@@ -15,7 +15,13 @@ use crate::status_fsm::{self, Event, ToolCallType};
 pub enum EventKind {
     SessionStarted,
     RunStarted,
-    RunFinished,
+    /// A run (agent turn) finished. `active_tools`, when set, overrides the
+    /// pane's `activeTools` counter instead of leaving it untouched — used
+    /// to reconcile against a harness's authoritative in-flight
+    /// background-task count (see `RunFinished` in `main.rs`).
+    RunFinished {
+        active_tools: Option<u32>,
+    },
     ToolCallStart,
     ToolCallResult,
 }
@@ -26,7 +32,7 @@ impl EventKind {
         match self {
             EventKind::SessionStarted => "SESSION_STARTED",
             EventKind::RunStarted => "RUN_STARTED",
-            EventKind::RunFinished => "RUN_FINISHED",
+            EventKind::RunFinished { .. } => "RUN_FINISHED",
             EventKind::ToolCallStart => "TOOL_CALL_START",
             EventKind::ToolCallResult => "TOOL_CALL_RESULT",
         }
@@ -37,7 +43,7 @@ impl EventKind {
         match self {
             EventKind::SessionStarted => Event::SessionStarted,
             EventKind::RunStarted => Event::RunStarted,
-            EventKind::RunFinished => Event::RunFinished,
+            EventKind::RunFinished { .. } => Event::RunFinished,
             EventKind::ToolCallStart => Event::ToolCallStart {
                 r#type: tool_call_type,
             },
@@ -87,7 +93,12 @@ pub fn run(
         EventKind::SessionStarted => 0,
         EventKind::ToolCallStart => current_active_tools + 1,
         EventKind::ToolCallResult => current_active_tools.saturating_sub(1),
-        EventKind::RunStarted | EventKind::RunFinished => current_active_tools,
+        EventKind::RunFinished {
+            active_tools: Some(n),
+        } => n,
+        EventKind::RunFinished { active_tools: None } | EventKind::RunStarted => {
+            current_active_tools
+        }
     };
 
     write_state_with_tools(&pane_id, &harness_str, new_status, new_active_tools)?;
@@ -414,6 +425,97 @@ mod tests {
         .expect("tool call start");
         let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
         assert_eq!(info.status, AgentState::Blocked);
+        assert_eq!(info.active_tools, 1);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn run_finished_active_tools_override_reconciles_counter() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::SessionStarted,
+            "s1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("session started");
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("tool call start");
+        run(
+            EventKind::ToolCallResult,
+            "t1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("tool call result");
+        // A background task (e.g. Monitor) is still in flight per Claude's
+        // `background_tasks` array, even though the counter above already
+        // dropped back to 0 once the launching tool call's PostToolUse hook
+        // fired. `RunFinished { active_tools: Some(1) }` reconciles the
+        // counter to that authoritative value.
+        run(
+            EventKind::RunFinished {
+                active_tools: Some(1),
+            },
+            "r1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("run finished");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
+        assert_eq!(info.active_tools, 1);
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
+    #[test]
+    fn run_finished_without_active_tools_leaves_counter_untouched() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", tmp.path());
+        }
+        run(
+            EventKind::SessionStarted,
+            "s1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("session started");
+        run(
+            EventKind::ToolCallStart,
+            "t1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("tool call start");
+        run(
+            EventKind::RunFinished { active_tools: None },
+            "r1".to_owned(),
+            None,
+            Some("claude".to_owned()),
+            Some("%1".to_owned()),
+        )
+        .expect("run finished");
+        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
         assert_eq!(info.active_tools, 1);
         unsafe {
             std::env::remove_var("XDG_DATA_HOME");

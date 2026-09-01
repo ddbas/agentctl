@@ -191,6 +191,19 @@ enum AgentEventSubcommand {
         /// Unique id for this run (matching the corresponding RUN_STARTED).
         #[arg(long, value_name = "ID")]
         id: String,
+
+        /// Override the pane's `activeTools` count instead of leaving it
+        /// untouched. Intended for reconciling against a harness's
+        /// authoritative in-flight background-task count (e.g. Claude
+        /// Code's `background_tasks` array delivered to `Stop`/
+        /// `StopFailure` hooks), which can diverge from radr's own
+        /// increment/decrement counter for tools that launch async
+        /// background work (the `Monitor` tool, backgrounded shells,
+        /// async subagents) — such tools fire `PostToolUse` as soon as the
+        /// launch itself returns, well before the background work
+        /// actually finishes.
+        #[arg(long, value_name = "N")]
+        active_tools: Option<u32>,
     },
 
     /// A tool call started.
@@ -303,9 +316,11 @@ fn run() -> anyhow::Result<()> {
                 AgentEventSubcommand::RunStarted { id } => {
                     (commands::agent_event::EventKind::RunStarted, id, None)
                 }
-                AgentEventSubcommand::RunFinished { id } => {
-                    (commands::agent_event::EventKind::RunFinished, id, None)
-                }
+                AgentEventSubcommand::RunFinished { id, active_tools } => (
+                    commands::agent_event::EventKind::RunFinished { active_tools },
+                    id,
+                    None,
+                ),
                 AgentEventSubcommand::ToolCallStart { id, r#type } => (
                     commands::agent_event::EventKind::ToolCallStart,
                     id,

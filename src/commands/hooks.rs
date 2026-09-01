@@ -294,13 +294,13 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "Stop",
         matcher: None,
-        command: r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"#,
+        command: r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
         event: "StopFailure",
         matcher: None,
-        command: r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"#,
+        command: r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
@@ -1531,12 +1531,12 @@ mod tests {
                 ],
                 "Stop": [
                     {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"# }]
+                        "hooks": [{ "type": "command", "async": true, "command": r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"# }]
                     }
                 ],
                 "StopFailure": [
                     {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"# }]
+                        "hooks": [{ "type": "command", "async": true, "command": r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"# }]
                     }
                 ],
                 "SessionEnd": [
@@ -2042,7 +2042,7 @@ mod tests {
         );
         assert_eq!(
             parsed["hooks"]["Stop"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude"#
+            r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"#
         );
         // SessionEnd's `rd agent clear` is already the current form, so it
         // should remain unchanged (Unchanged status, not re-added).
