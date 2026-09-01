@@ -72,7 +72,7 @@ payload fields:
 ```bash
 rd agent event SESSION_STARTED  --id <ID>                          [--harness <H>] [--pane <ID>]
 rd agent event RUN_STARTED      --id <ID>                          [--harness <H>] [--pane <ID>]
-rd agent event RUN_FINISHED     --id <ID>                          [--harness <H>] [--pane <ID>]
+rd agent event RUN_FINISHED     --id <ID> [--active-tools <N>]     [--harness <H>] [--pane <ID>]
 rd agent event TOOL_CALL_START  --id <ID> [--type custom|elicitation] [--harness <H>] [--pane <ID>]
 rd agent event TOOL_CALL_RESULT --id <ID> [--type custom|elicitation] [--harness <H>] [--pane <ID>]
 ```
@@ -90,6 +90,16 @@ Flags:
 - `--type <custom|elicitation>` — optional, and only accepted on
   `TOOL_CALL_START` / `TOOL_CALL_RESULT`; an `elicitation`-typed tool call
   drives the agent into (or out of) the `blocked` status
+- `--active-tools <n>` — optional, and only accepted on `RUN_FINISHED`;
+  overrides the pane's `activeTools` counter to `n` instead of leaving it
+  untouched. Reconciles radr's own increment/decrement counter against a
+  harness's authoritative in-flight background-task count. This matters because
+  some tools launch async background work and return (firing `PostToolUse`,
+  which decrements the counter) well before that background work actually
+  finishes — Claude Code's `Monitor` tool (event streaming from a background
+  process) and backgrounded shells are the main examples. See "Claude lifecycle
+  event → event mapping" below for how the `claude` harness populates this from
+  the `background_tasks` array delivered to `Stop`/`StopFailure` hook payloads
 - `--harness <name>` — harness identifier written to the state file and event
   log (default: `"unknown"`); declared once as a global arg shared by every
   event subcommand
@@ -148,8 +158,8 @@ Installed radr hooks for claude (11 entries):
   + PostToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude [async]
   + PostToolUse                         → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id" --type elicitation --harness claude [async]
   + Notification (permission_prompt)    → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id" --type elicitation --harness claude [async]
-  + Stop                                → id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude [async]
-  + StopFailure                         → id=$(cat | jq -r '.session_id'); rd agent event RUN_FINISHED --id "$id" --harness claude [async]
+  + Stop                                → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
+  + StopFailure                         → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
   + SessionEnd                          → rd agent clear
 (requires `jq` on PATH to parse hook payloads)
 ```
@@ -174,9 +184,20 @@ Installed radr hooks for claude (11 entries):
 | `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | `TOOL_CALL_RESULT --id <tool_use_id> --type elicitation`       | yes   |
 | `PostToolUse`      | _(none — all tools)_            | `TOOL_CALL_RESULT --id "perm-<session_id>" --type elicitation` | yes   |
 | `Notification`     | `permission_prompt`             | `TOOL_CALL_START --id "perm-<session_id>" --type elicitation`  | yes   |
-| `Stop`             | _(none)_                        | `RUN_FINISHED --id <session_id>`                               | yes   |
-| `StopFailure`      | _(none)_                        | `RUN_FINISHED --id <session_id>`                               | yes   |
+| `Stop`             | _(none)_                        | `RUN_FINISHED --id <session_id> --active-tools <n>`            | yes   |
+| `StopFailure`      | _(none)_                        | `RUN_FINISHED --id <session_id> --active-tools <n>`            | yes   |
 | `SessionEnd`       | _(none)_                        | `rd agent clear`                                               | no    |
+
+`<n>` above is `(.background_tasks // []) | length` from the hook payload — the
+number of tasks (of type `shell`, `subagent`, `monitor`, `workflow`, `teammate`,
+`cloud session`, or `MCP task`) still in flight when the turn ends. This
+reconciles `activeTools` against Claude's own authoritative accounting: the
+unmatched `PreToolUse`/`PostToolUse` pair above only tracks the launching tool
+call itself, which returns (firing `PostToolUse`, and decrementing the counter)
+as soon as async background work is kicked off — not when that work actually
+finishes. Without this reconciliation, a `Monitor` tool streaming a background
+process's output, or a backgrounded shell command, would show `activeTools: 0`
+in `rd list` well before the underlying work is done.
 
 `SessionStart` and `SessionEnd` run synchronously so the state file is
 established before any async hook fires and is cleaned up before the session
