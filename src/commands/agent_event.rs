@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::Utc;
 
 use crate::events_log::{EventRecord, append_event};
-use crate::state::{read_agent_info, write_state_with_counters};
+use crate::state::{read_agent_info, write_state_with_tools};
 use crate::status_fsm::{self, Event, ToolCallType};
 
 /// One of the five events accepted by `rd agent event <NAME>`.
@@ -71,23 +71,10 @@ pub fn run(
         .as_ref()
         .map(|info| info.active_tools)
         .unwrap_or(0);
-    let current_blocked_prompts = current_info
-        .as_ref()
-        .map(|info| info.blocked_prompts)
-        .unwrap_or(0);
-
-    // `permission-prompt`-typed TOOL_CALL_START/TOOL_CALL_RESULT events
-    // mutate `blocked_prompts` instead of `active_tools` (see design.md
-    // decision 2) — this closes the double-decrement hole that previously
-    // let the synthetic `perm-` close events corrupt the shared tool-call
-    // counter.
-    let is_permission_prompt = matches!(tool_call_type, Some(ToolCallType::PermissionPrompt));
 
     let new_active_tools = match kind {
         EventKind::SessionStarted => 0,
-        EventKind::ToolCallStart if is_permission_prompt => current_active_tools,
         EventKind::ToolCallStart => current_active_tools + 1,
-        EventKind::ToolCallResult if is_permission_prompt => current_active_tools,
         EventKind::ToolCallResult => current_active_tools.saturating_sub(1),
         EventKind::RunFinished {
             active_tools: Some(n),
@@ -95,15 +82,6 @@ pub fn run(
         EventKind::RunFinished { active_tools: None } | EventKind::RunStarted => {
             current_active_tools
         }
-    };
-
-    let new_blocked_prompts = match kind {
-        EventKind::SessionStarted => 0,
-        EventKind::ToolCallStart if is_permission_prompt => current_blocked_prompts + 1,
-        EventKind::ToolCallResult if is_permission_prompt => {
-            current_blocked_prompts.saturating_sub(1)
-        }
-        _ => current_blocked_prompts,
     };
 
     let event = match kind {
@@ -117,18 +95,11 @@ pub fn run(
         },
         EventKind::ToolCallResult => Event::ToolCallResult {
             r#type: tool_call_type,
-            blocked_prompts: is_permission_prompt.then_some(new_blocked_prompts),
         },
     };
     let new_status = status_fsm::apply_event(current_status, &event);
 
-    write_state_with_counters(
-        &pane_id,
-        &harness_str,
-        new_status,
-        new_active_tools,
-        new_blocked_prompts,
-    )?;
+    write_state_with_tools(&pane_id, &harness_str, new_status, new_active_tools)?;
 
     let record = EventRecord {
         event: kind.name().to_owned(),
@@ -136,7 +107,6 @@ pub fn run(
         r#type: tool_call_type.map(|t| match t {
             ToolCallType::Custom => "custom".to_owned(),
             ToolCallType::Elicitation => "elicitation".to_owned(),
-            ToolCallType::PermissionPrompt => "permission-prompt".to_owned(),
         }),
         harness: harness_str,
         pane_id: pane_id.clone(),
@@ -572,16 +542,18 @@ mod tests {
         }
     }
 
-    // ── permission-prompt / blocked_prompts ─────────────────────────────────────────
+    // ── failed tool calls (PostToolUseFailure) still close TOOL_CALL_START ──
 
     #[test]
-    fn permission_prompt_tool_call_start_increments_blocked_prompts_not_active_tools() {
+    fn tool_call_result_without_type_decrements_after_a_failed_call() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("XDG_DATA_HOME", tmp.path());
         }
-        // A real tool call genuinely in flight.
+        // Simulates PreToolUse (start) followed by PostToolUseFailure
+        // (result), which dispatches the exact same TOOL_CALL_RESULT command
+        // as a successful PostToolUse would.
         run(
             EventKind::ToolCallStart,
             "t1".to_owned(),
@@ -591,128 +563,15 @@ mod tests {
         )
         .expect("tool call start");
         run(
-            EventKind::ToolCallStart,
-            "perm-s1".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("permission prompt start");
-        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
-        assert_eq!(info.active_tools, 1, "active_tools should be untouched");
-        assert_eq!(info.blocked_prompts, 1);
-        unsafe {
-            std::env::remove_var("XDG_DATA_HOME");
-        }
-    }
-
-    #[test]
-    fn permission_prompt_tool_call_result_decrements_blocked_prompts_not_active_tools() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        unsafe {
-            std::env::set_var("XDG_DATA_HOME", tmp.path());
-        }
-        run(
-            EventKind::ToolCallStart,
+            EventKind::ToolCallResult,
             "t1".to_owned(),
             None,
             Some("claude".to_owned()),
             Some("%1".to_owned()),
         )
-        .expect("tool call start");
-        run(
-            EventKind::ToolCallStart,
-            "perm-s1".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("permission prompt start");
-        run(
-            EventKind::ToolCallResult,
-            "perm-s1".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("permission prompt result");
+        .expect("tool call result (failure path)");
         let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
-        assert_eq!(info.active_tools, 1, "active_tools should be untouched");
-        assert_eq!(info.blocked_prompts, 0);
-        unsafe {
-            std::env::remove_var("XDG_DATA_HOME");
-        }
-    }
-
-    #[test]
-    fn two_concurrent_permission_prompts_first_close_does_not_clear_blocked() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        unsafe {
-            std::env::set_var("XDG_DATA_HOME", tmp.path());
-        }
-        run(
-            EventKind::SessionStarted,
-            "s1".to_owned(),
-            None,
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("session started");
-        run(
-            EventKind::RunStarted,
-            "r1".to_owned(),
-            None,
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("run started");
-        run(
-            EventKind::ToolCallStart,
-            "perm-1".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("first permission prompt open");
-        run(
-            EventKind::ToolCallStart,
-            "perm-2".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("second permission prompt open");
-        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
-        assert_eq!(info.status, AgentState::Blocked);
-        assert_eq!(info.blocked_prompts, 2);
-
-        // Closing one of the two must not clear blocked.
-        run(
-            EventKind::ToolCallResult,
-            "perm-1".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("first permission prompt close");
-        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
-        assert_eq!(info.status, AgentState::Blocked);
-        assert_eq!(info.blocked_prompts, 1);
-
-        // Closing the last one clears blocked.
-        run(
-            EventKind::ToolCallResult,
-            "perm-2".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("second permission prompt close");
-        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
-        assert_eq!(info.status, AgentState::Working);
-        assert_eq!(info.blocked_prompts, 0);
+        assert_eq!(info.active_tools, 0);
         unsafe {
             std::env::remove_var("XDG_DATA_HOME");
         }
@@ -806,36 +665,6 @@ mod tests {
         .expect("run finished");
         let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
         assert_eq!(info.status, AgentState::Done);
-        unsafe {
-            std::env::remove_var("XDG_DATA_HOME");
-        }
-    }
-
-    #[test]
-    fn session_started_resets_blocked_prompts_to_zero() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        unsafe {
-            std::env::set_var("XDG_DATA_HOME", tmp.path());
-        }
-        run(
-            EventKind::ToolCallStart,
-            "perm-1".to_owned(),
-            Some(ToolCallType::PermissionPrompt),
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("permission prompt open");
-        run(
-            EventKind::SessionStarted,
-            "s1".to_owned(),
-            None,
-            Some("claude".to_owned()),
-            Some("%1".to_owned()),
-        )
-        .expect("session started");
-        let info = crate::state::read_agent_info_from(tmp.path(), "%1").expect("info");
-        assert_eq!(info.blocked_prompts, 0);
         unsafe {
             std::env::remove_var("XDG_DATA_HOME");
         }

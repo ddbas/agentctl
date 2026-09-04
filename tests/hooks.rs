@@ -236,8 +236,8 @@ async fn hooks_install_claude_creates_plugin_directory() {
     assert_eq!(manifest["name"], "radr");
 
     // Parse and verify all seven distinct hook events are registered (eleven
-    // entries total — PreToolUse and PostToolUse are each registered more
-    // than once).
+    // entries total — PreToolUse, PostToolUse, and PostToolUseFailure are each
+    // registered twice).
     let content = fs::read_to_string(&hooks_json_path).expect("read hooks.json");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
     let hooks = &parsed["hooks"];
@@ -247,7 +247,6 @@ async fn hooks_install_claude_creates_plugin_directory() {
         "UserPromptSubmit",
         "Stop",
         "StopFailure",
-        "Notification",
         "SessionEnd",
     ] {
         let arr = hooks[event]
@@ -256,23 +255,21 @@ async fn hooks_install_claude_creates_plugin_directory() {
         assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
     }
 
-    let pre_tool_use = hooks["PreToolUse"]
-        .as_array()
-        .expect("hooks.PreToolUse should be an array");
-    assert_eq!(
-        pre_tool_use.len(),
-        2,
-        "hooks.PreToolUse should have exactly two entries"
+    assert!(
+        hooks.get("Notification").is_none(),
+        "hooks.json should not register a Notification handler"
     );
 
-    let post_tool_use = hooks["PostToolUse"]
-        .as_array()
-        .expect("hooks.PostToolUse should be an array");
-    assert_eq!(
-        post_tool_use.len(),
-        3,
-        "hooks.PostToolUse should have exactly three entries"
-    );
+    for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure"] {
+        let arr = hooks[event]
+            .as_array()
+            .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+        assert_eq!(
+            arr.len(),
+            2,
+            "hooks.{event} should have exactly two entries"
+        );
+    }
 
     // stdout should mention the two written files.
     let stdout = String::from_utf8_lossy(&output.stdout);
