@@ -147,43 +147,45 @@ Supported harnesses: `claude`, `pi`.
 
 #### `claude`
 
-Patches `~/.claude/settings.json` to register eleven hook entries that call
+Installs a self-contained Claude Code plugin at `~/.claude/skills/radr/`,
+consisting of a plugin manifest (`.claude-plugin/plugin.json`) and a hooks
+configuration (`hooks/hooks.json`) registering eleven hook entries that call
 `rd agent event` and `rd agent clear` at key Claude Code lifecycle events. Each
 hook command reads the hook's JSON payload from stdin via `jq` and forwards the
 extracted field (`session_id` or `tool_use_id`) as `--id` — **`jq` must be on
-`PATH`** for these hooks to work. The command is idempotent: re-running when all
-entries are already present reports `=` (no change) and does not rewrite the
-file.
+`PATH`** for these hooks to work.
+
+The command never reads from or writes to `~/.claude/settings.json`. Install is
+remove-then-write, not merge: any existing `~/.claude/skills/radr/` is deleted
+in full before the plugin is written fresh, so it's simple and idempotent by
+construction — re-running always produces the same on-disk result.
 
 ```bash
 rd install claude
 ```
 
-Example output (first install):
+Example output:
 
 ```
-Installed radr hooks for claude (11 entries):
-  + SessionStart (startup|resume|clear) → id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude
-  + UserPromptSubmit                    → id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude [async]
-  + PreToolUse                          → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --harness claude [async]
-  + PreToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude [async]
-  + PostToolUse                         → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --harness claude [async]
-  + PostToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude [async]
-  + PostToolUse                         → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id-$RANDOM" --type permission-prompt --harness claude [async]
-  + Notification (permission_prompt)    → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id-$RANDOM" --type permission-prompt --harness claude [async]
-  + Stop                                → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
-  + StopFailure                         → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
-  + SessionEnd                          → rd agent clear
+Installed radr plugin for claude (11 hook entries):
+  + ~/.claude/skills/radr/.claude-plugin/plugin.json
+  + ~/.claude/skills/radr/hooks/hooks.json
+    SessionStart (startup|resume|clear) → id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude
+    UserPromptSubmit                    → id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude [async]
+    PreToolUse                          → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --harness claude [async]
+    PreToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude [async]
+    PostToolUse                         → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --harness claude [async]
+    PostToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude [async]
+    PostToolUse                         → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id-$RANDOM" --type permission-prompt --harness claude [async]
+    Notification (permission_prompt)    → id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id-$RANDOM" --type permission-prompt --harness claude [async]
+    Stop                                → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
+    StopFailure                         → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
+    SessionEnd                          → rd agent clear
 (requires `jq` on PATH to parse hook payloads)
 ```
 
-On a subsequent run (all entries already present):
-
-```
-Installed radr hooks for claude (11 entries):
-  = SessionStart (startup|resume|clear) → id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude
-  ...
-```
+`rd uninstall claude` removes `~/.claude/skills/radr/` entirely (and is a no-op
+if it doesn't exist); it likewise never touches `~/.claude/settings.json`.
 
 **Claude lifecycle event → event mapping:**
 

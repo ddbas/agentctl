@@ -102,9 +102,8 @@ enum Commands {
     /// is a no-op that exits 0.
     ///
     /// - `pi`: deletes `~/.pi/agent/extensions/radr.ts` if present.
-    /// - `claude`: removes only the radr-managed hook entries from
-    ///   `~/.claude/settings.json`, pruning empty event arrays and the
-    ///   `hooks` key, but never deleting the settings file itself.
+    /// - `claude`: removes the `~/.claude/skills/radr/` plugin directory (and
+    ///   all its contents) if present; never touches `~/.claude/settings.json`.
     Uninstall {
         /// Harness to uninstall radr from.
         #[arg(value_name = "HARNESS")]
@@ -264,7 +263,7 @@ impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
 enum Harness {
     /// Pi coding agent — writes `~/.pi/agent/extensions/radr.ts`.
     Pi,
-    /// Claude Code — patches `~/.claude/settings.json`.
+    /// Claude Code — installs a plugin at `~/.claude/skills/radr/`.
     Claude,
 }
 
