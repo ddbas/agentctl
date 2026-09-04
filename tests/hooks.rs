@@ -188,23 +188,29 @@ async fn hooks_install_pi_idempotent() {
 
 // ── Claude integration tests (task 2.6 and 2.7) ───────────────────────────────
 
-/// `rd install claude` on a container with no `~/.claude/settings.json`:
-/// the file is created and contains all eleven radr hook entries.
+fn claude_plugin_dir(fake_home: &std::path::Path) -> std::path::PathBuf {
+    fake_home.join(".claude").join("skills").join("radr")
+}
+
+/// `rd install claude` on a container with no `~/.claude/skills/`: the plugin
+/// directory is created and contains all eleven radr hook entries.
 #[tokio::test]
-async fn hooks_install_claude_creates_settings_file() {
+async fn hooks_install_claude_creates_plugin_directory() {
     let env = common::TmuxEnv::new().await;
 
     // Use an isolated HOME so the install lands in a known location and never
-    // touches the developer's real ~/.claude/settings.json.
+    // touches the developer's real ~/.claude/skills/radr/.
     let fake_home = env.workspace_path.join("home_claude");
     fs::create_dir_all(&fake_home).expect("create fake home");
 
-    let settings_path = fake_home.join(".claude").join("settings.json");
+    let plugin_dir = claude_plugin_dir(&fake_home);
+    let hooks_json_path = plugin_dir.join("hooks").join("hooks.json");
+    let manifest_path = plugin_dir.join(".claude-plugin").join("plugin.json");
 
-    // Confirm the file does not exist before install.
+    // Confirm the plugin directory does not exist before install.
     assert!(
-        !settings_path.exists(),
-        "settings.json should not exist before install"
+        !plugin_dir.exists(),
+        "plugin directory should not exist before install"
     );
 
     let output = env
@@ -221,13 +227,18 @@ async fn hooks_install_claude_creates_settings_file() {
         String::from_utf8_lossy(&output.stderr),
     );
 
-    // File must exist.
-    assert!(settings_path.exists(), "settings.json should be created");
+    // Both files must exist.
+    assert!(manifest_path.exists(), "plugin.json should be created");
+    assert!(hooks_json_path.exists(), "hooks.json should be created");
+
+    let manifest_content = fs::read_to_string(&manifest_path).expect("read plugin.json");
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_content).expect("valid JSON");
+    assert_eq!(manifest["name"], "radr");
 
     // Parse and verify all seven distinct hook events are registered (eleven
     // entries total — PreToolUse and PostToolUse are each registered more
     // than once).
-    let content = fs::read_to_string(&settings_path).expect("read settings.json");
+    let content = fs::read_to_string(&hooks_json_path).expect("read hooks.json");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
     let hooks = &parsed["hooks"];
 
@@ -263,24 +274,26 @@ async fn hooks_install_claude_creates_settings_file() {
         "hooks.PostToolUse should have exactly three entries"
     );
 
-    // stdout should contain '+' for new entries.
+    // stdout should mention the two written files.
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains('+'),
-        "stdout should contain '+' for new entries; got:\n{stdout}"
+        stdout.contains("plugin.json") && stdout.contains("hooks.json"),
+        "stdout should mention the written plugin files; got:\n{stdout}"
     );
 }
 
-/// `rd install claude` run twice: second run is a no-op; file content
-/// is byte-for-byte identical to after the first run.
+/// `rd install claude` run twice: second run deletes and recreates the plugin
+/// directory; resulting files are byte-for-byte identical to after the first
+/// run.
 #[tokio::test]
-async fn hooks_install_claude_idempotent() {
+async fn hooks_install_claude_reinstall_produces_identical_content() {
     let env = common::TmuxEnv::new().await;
 
     let fake_home = env.workspace_path.join("home_claude2");
     fs::create_dir_all(&fake_home).expect("create fake home");
 
-    let settings_path = fake_home.join(".claude").join("settings.json");
+    let plugin_dir = claude_plugin_dir(&fake_home);
+    let hooks_json_path = plugin_dir.join("hooks").join("hooks.json");
 
     // First install.
     let out1 = env
@@ -291,13 +304,9 @@ async fn hooks_install_claude_idempotent() {
         .expect("first rd install claude");
     assert!(out1.status.success(), "first install should succeed");
 
-    let content_after_first = fs::read_to_string(&settings_path).expect("read after first");
-    let mtime_after_first = fs::metadata(&settings_path).unwrap().modified().unwrap();
+    let content_after_first = fs::read_to_string(&hooks_json_path).expect("read after first");
 
-    // Small sleep so that a write would produce a different mtime.
-    std::thread::sleep(std::time::Duration::from_millis(20));
-
-    // Second install.
+    // Second install (re-install: deletes then rewrites the directory).
     let out2 = env
         .rd()
         .args(["install", "claude"])
@@ -306,23 +315,57 @@ async fn hooks_install_claude_idempotent() {
         .expect("second rd install claude");
     assert!(out2.status.success(), "second install should succeed");
 
-    let content_after_second = fs::read_to_string(&settings_path).expect("read after second");
-    let mtime_after_second = fs::metadata(&settings_path).unwrap().modified().unwrap();
+    let content_after_second = fs::read_to_string(&hooks_json_path).expect("read after second");
 
     assert_eq!(
         content_after_first, content_after_second,
-        "file content should be byte-for-byte identical after idempotent re-run"
+        "hooks.json content should be byte-for-byte identical after re-install"
     );
-    assert_eq!(
-        mtime_after_first, mtime_after_second,
-        "file should not be rewritten on idempotent re-run"
+}
+
+/// `rd uninstall claude` removes the plugin directory entirely; running it
+/// again is a no-op that still exits 0.
+#[tokio::test]
+async fn hooks_uninstall_claude_removes_plugin_directory() {
+    let env = common::TmuxEnv::new().await;
+
+    let fake_home = env.workspace_path.join("home_claude_uninstall");
+    fs::create_dir_all(&fake_home).expect("create fake home");
+
+    let plugin_dir = claude_plugin_dir(&fake_home);
+
+    env.rd()
+        .args(["install", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("spawn rd install claude");
+    assert!(
+        plugin_dir.exists(),
+        "plugin directory should exist after install"
     );
 
-    // stdout should contain '=' on second run.
-    let stdout2 = String::from_utf8_lossy(&out2.stdout);
+    let out1 = env
+        .rd()
+        .args(["uninstall", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("spawn rd uninstall claude");
+    assert!(out1.status.success(), "uninstall should exit 0");
     assert!(
-        stdout2.contains('='),
-        "stdout should contain '=' for idempotent re-run; got:\n{stdout2}"
+        !plugin_dir.exists(),
+        "plugin directory should be removed after uninstall"
+    );
+
+    // Second uninstall is a no-op.
+    let out2 = env
+        .rd()
+        .args(["uninstall", "claude"])
+        .env("HOME", &fake_home)
+        .output()
+        .expect("spawn rd uninstall claude again");
+    assert!(
+        out2.status.success(),
+        "second uninstall should still exit 0"
     );
 }
 
@@ -336,7 +379,9 @@ async fn hooks_install_claude_tool_call_tracking_updates_active_tools() {
     let fake_home = env.workspace_path.join("home_claude3");
     fs::create_dir_all(&fake_home).expect("create fake home");
 
-    let settings_path = fake_home.join(".claude").join("settings.json");
+    let settings_path = claude_plugin_dir(&fake_home)
+        .join("hooks")
+        .join("hooks.json");
 
     let install_out = env
         .rd()
@@ -349,7 +394,7 @@ async fn hooks_install_claude_tool_call_tracking_updates_active_tools() {
         "install claude should succeed"
     );
 
-    let content = fs::read_to_string(&settings_path).expect("read settings.json");
+    let content = fs::read_to_string(&settings_path).expect("read hooks.json");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
 
     // Locate the unmatched, untyped PreToolUse entry (no matcher, no --type).

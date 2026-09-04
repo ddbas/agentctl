@@ -4,8 +4,11 @@
 //! include more in the future. Supported harnesses:
 //! - `pi`: writes (or deletes) a TypeScript extension at
 //!   `~/.pi/agent/extensions/radr.ts`.
-//! - `claude`: merges (or removes) radr-managed hook entries in
-//!   `~/.claude/settings.json`, leaving all other content untouched.
+//! - `claude`: writes (or removes) a self-contained Claude Code plugin at
+//!   `~/.claude/skills/radr/`, containing `.claude-plugin/plugin.json` and
+//!   `hooks/hooks.json`. Install is remove-then-write (no merge/diff against
+//!   an existing installation); this command never reads or writes
+//!   `~/.claude/settings.json`.
 //!
 //! `rd uninstall <harness>` is the structural inverse of `rd install
 //! <harness>` and shares the same `Harness` enum, so both dispatches
@@ -13,7 +16,6 @@
 //! wildcard arm.
 
 use crate::Harness;
-use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -224,7 +226,8 @@ pub(crate) fn tilde_collapse(path: &Path) -> String {
 
 // ── Claude harness ────────────────────────────────────────────────────────────
 
-/// A single radr hook entry for Claude Code's settings.
+/// A single radr hook entry, registered under `hooks/hooks.json` in the
+/// installed plugin.
 struct ClaudeHookDef {
     event: &'static str,
     matcher: Option<&'static str>,
@@ -232,7 +235,7 @@ struct ClaudeHookDef {
     async_: bool,
 }
 
-/// The eleven radr hook entries to register in `~/.claude/settings.json`.
+/// The eleven radr hook entries to register in the plugin's `hooks.json`.
 ///
 /// Every command reads the hook's JSON payload from stdin via `jq` and
 /// forwards the extracted field as `--id` to `rd agent event`/`rd agent
@@ -312,248 +315,45 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     },
 ];
 
-/// Returns `true` if `cmd` is a radr-managed command.
+/// Name of the radr plugin directory installed under `~/.claude/skills/`.
+const RADR_CLAUDE_PLUGIN_NAME: &str = "radr";
+
+/// Contents of the plugin manifest written to
+/// `~/.claude/skills/radr/.claude-plugin/plugin.json`.
 ///
-/// Radr commands match the current shell-snippet forms (containing
-/// `rd agent event `) or `rd agent clear`, the previous imperative forms
-/// (`rd agent status ` prefix), the intermediate pre-rename forms (`rd state
-/// set ` prefix or `rd state clear`), or the earliest pre-rename forms (`rd
-/// set-state ` prefix or `rd clear-state`), so installs from an older `rd`
-/// binary — of any vintage — are still recognized and cleaned up during
-/// migration. Also matches `rd agent watch ` (prefix) and `rd agent stop`
-/// (prefix), which leaked into some `~/.claude/settings.json` files from a
-/// build of `rd` implementing the never-merged `add-snoozed-agent-state`
-/// change (`new-agent-status-snoozed` branch); these have no corresponding
-/// entry in `RADR_CLAUDE_HOOKS`, so recognizing them here only feeds the
-/// existing superseded-entry-removal pass, which deletes them with no
-/// replacement.
-fn is_radr_command(cmd: &str) -> bool {
-    cmd.contains("rd agent event ")
-        || cmd == "rd agent clear"
-        || cmd.starts_with("rd agent status ")
-        || cmd.starts_with("rd state set ")
-        || cmd == "rd state clear"
-        || cmd.starts_with("rd set-state ")
-        || cmd == "rd clear-state"
-        || cmd.starts_with("rd agent watch ")
-        || cmd.starts_with("rd agent stop")
+/// Minimal manifest: no `version`, `author`, or other optional fields, none
+/// of which anything in `rd` currently requires. `hooks/hooks.json` is the
+/// default hooks path Claude Code looks for, so no explicit `hooks` field is
+/// needed here.
+fn claude_plugin_manifest() -> serde_json::Value {
+    json!({
+        "name": RADR_CLAUDE_PLUGIN_NAME,
+        "description": "radr agent-state lifecycle hooks for Claude Code",
+    })
 }
 
-/// Returns the single radr command string from `entry`'s inner hooks array,
-/// provided the entry contains exactly one hook and that hook has a radr
-/// command. Returns `None` otherwise (multi-hook entries or non-radr hooks).
-fn get_single_radr_command(entry: &serde_json::Value) -> Option<&str> {
-    let hooks = entry.get("hooks")?.as_array()?;
-    if hooks.len() != 1 {
-        return None;
-    }
-    let cmd = hooks[0].get("command")?.as_str()?;
-    if is_radr_command(cmd) {
-        Some(cmd)
-    } else {
-        None
-    }
-}
-
-/// Status of a radr hook after `install_claude_to` runs.
-#[derive(Debug, Clone, PartialEq)]
-pub enum HookStatus {
-    /// The hook was not present and was newly added.
-    New,
-    /// The hook was present but had a stale matcher; the matcher was updated.
-    Updated,
-    /// The hook was already correct; no change was made.
-    Unchanged,
-}
-
-/// Resolve the default Claude settings path: `~/.claude/settings.json`.
-fn default_claude_settings_path() -> Result<PathBuf> {
+/// Resolve the default radr plugin directory:
+/// `~/.claude/skills/radr`.
+///
+/// Exposed as a separate function so unit tests can call `install_claude_to`/
+/// `uninstall_claude_to` with a custom path, while production code uses this
+/// default — mirroring `default_pi_extension_path`'s pattern.
+fn default_claude_plugin_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().context("could not determine home directory")?;
-    Ok(home.join(".claude").join("settings.json"))
+    Ok(home
+        .join(".claude")
+        .join("skills")
+        .join(RADR_CLAUDE_PLUGIN_NAME))
 }
 
-/// Install radr hooks into `~/.claude/settings.json`.
-fn install_claude() -> Result<()> {
-    let path = default_claude_settings_path()?;
-    install_claude_to(&path)
+/// Path to the plugin manifest inside a plugin directory.
+fn claude_plugin_manifest_path(plugin_dir: &Path) -> PathBuf {
+    plugin_dir.join(".claude-plugin").join("plugin.json")
 }
 
-/// Install radr hooks into the given Claude settings path.
-///
-/// This is the testable core; production code calls `install_claude()` which
-/// supplies the default path.
-pub fn install_claude_to(dest: &Path) -> Result<()> {
-    // 1. Read existing content or start with an empty object.
-    let content = if dest.exists() {
-        fs::read_to_string(dest).with_context(|| format!("failed to read {}", dest.display()))?
-    } else {
-        "{}".to_string()
-    };
-
-    // 2. Parse JSON.
-    let mut root: serde_json::Value = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse JSON from {}", dest.display()))?;
-
-    // 3. Ensure root is an object with a "hooks" map.
-    let root_obj = root
-        .as_object_mut()
-        .context("settings.json root is not a JSON object")?;
-
-    let hooks_val = root_obj.entry("hooks").or_insert_with(|| json!({}));
-
-    let hooks_map = hooks_val
-        .as_object_mut()
-        .context("hooks field in settings.json is not a JSON object")?;
-
-    // 4. Build a lookup from (event, command) → &ClaudeHookDef for cleanup.
-    let radr_lookup: HashMap<(&str, &str), &ClaudeHookDef> = RADR_CLAUDE_HOOKS
-        .iter()
-        .map(|h| ((h.event, h.command), h))
-        .collect();
-
-    // 5. Cleanup pass: remove superseded radr entries and update stale matchers.
-    //
-    //    An entry is "superseded" when it has a single radr command that is no
-    //    longer registered under that event in RADR_CLAUDE_HOOKS (e.g. the old
-    //    general PreToolUse → working hook that was replaced by PostToolUse).
-    //
-    //    An entry is "stale" when its command is still registered but its matcher
-    //    differs (e.g. SessionStart with `startup` that should be
-    //    `startup|resume|clear`).
-    let mut removed: Vec<(String, String)> = Vec::new();
-    let mut updated_commands: HashSet<(String, String)> = HashSet::new();
-
-    let event_names: Vec<String> = hooks_map.keys().cloned().collect();
-    for event_name in &event_names {
-        let event_arr = match hooks_map
-            .get_mut(event_name.as_str())
-            .and_then(|v| v.as_array_mut())
-        {
-            Some(arr) => arr,
-            None => continue,
-        };
-
-        // Read pass: classify each entry.
-        let mut to_remove: Vec<usize> = Vec::new();
-        let mut to_update: Vec<(usize, Option<&'static str>)> = Vec::new();
-
-        for (i, entry) in event_arr.iter().enumerate() {
-            if let Some(cmd) = get_single_radr_command(entry) {
-                match radr_lookup.get(&(event_name.as_str(), cmd)) {
-                    None => {
-                        // Superseded — schedule for removal.
-                        to_remove.push(i);
-                        removed.push((event_name.clone(), cmd.to_owned()));
-                    }
-                    Some(&hook) => {
-                        // Present — check if matcher needs updating.
-                        let current_matcher = entry.get("matcher").and_then(|m| m.as_str());
-                        if current_matcher != hook.matcher {
-                            to_update.push((i, hook.matcher));
-                            updated_commands.insert((event_name.clone(), cmd.to_owned()));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Write pass: apply matcher updates (do before removals to keep indices stable).
-        for (i, new_matcher) in to_update {
-            if let Some(obj) = event_arr[i].as_object_mut() {
-                match new_matcher {
-                    Some(m) => {
-                        obj.insert("matcher".to_string(), json!(m));
-                    }
-                    None => {
-                        obj.remove("matcher");
-                    }
-                }
-            }
-        }
-
-        // Write pass: remove superseded entries in reverse order.
-        for i in to_remove.into_iter().rev() {
-            event_arr.remove(i);
-        }
-    }
-
-    // 6. Add-or-skip pass: register any hook not yet present.
-    let mut statuses: Vec<HookStatus> = Vec::new();
-
-    for hook in RADR_CLAUDE_HOOKS {
-        // Ensure the event key exists as an array.
-        let event_val = hooks_map.entry(hook.event).or_insert_with(|| json!([]));
-
-        let event_arr = event_val
-            .as_array_mut()
-            .with_context(|| format!("hooks.{} is not an array", hook.event))?;
-
-        // Check if this command is already registered under this event.
-        let already_exists = event_arr.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|c| c == hook.command)
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false)
-        });
-
-        if already_exists {
-            let was_updated =
-                updated_commands.contains(&(hook.event.to_string(), hook.command.to_string()));
-            statuses.push(if was_updated {
-                HookStatus::Updated
-            } else {
-                HookStatus::Unchanged
-            });
-        } else {
-            event_arr.push(build_claude_hook_entry(hook));
-            statuses.push(HookStatus::New);
-        }
-    }
-
-    // 7. Write updated JSON back atomically (write .tmp sibling, then rename).
-    //    Skip if nothing changed — preserves mtime for idempotency.
-    let any_changed = statuses.iter().any(|s| *s != HookStatus::Unchanged) || !removed.is_empty();
-    if any_changed {
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create directory {}", parent.display()))?;
-        }
-
-        let json_str =
-            serde_json::to_string_pretty(&root).context("failed to serialize settings JSON")?;
-
-        let tmp_path = {
-            let mut fname = dest
-                .file_name()
-                .context("settings path has no file name")?
-                .to_os_string();
-            fname.push(".tmp");
-            dest.with_file_name(fname)
-        };
-
-        fs::write(&tmp_path, &json_str)
-            .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
-        fs::rename(&tmp_path, dest).with_context(|| {
-            format!(
-                "failed to rename {} to {}",
-                tmp_path.display(),
-                dest.display()
-            )
-        })?;
-    }
-
-    // 8. Print human-readable summary.
-    println!("{}", format_claude_summary(&statuses, &removed));
-
-    Ok(())
+/// Path to the hooks configuration inside a plugin directory.
+fn claude_hooks_json_path(plugin_dir: &Path) -> PathBuf {
+    plugin_dir.join("hooks").join("hooks.json")
 }
 
 /// Build a single JSON hook entry object for the given hook definition.
@@ -577,36 +377,111 @@ fn build_claude_hook_entry(hook: &ClaudeHookDef) -> serde_json::Value {
     serde_json::Value::Object(entry)
 }
 
+/// Build the full `hooks/hooks.json` document: the wrapper shape
+/// `{ "hooks": { <event>: [ <entry>, ... ] } }`, with every `ClaudeHookDef` in
+/// `RADR_CLAUDE_HOOKS` contributing one entry to its event's array (so events
+/// registered by multiple hook defs, like `PreToolUse`/`PostToolUse`, collect
+/// multiple array entries).
+fn build_claude_hooks_json() -> serde_json::Value {
+    let mut hooks_map = serde_json::Map::new();
+
+    for hook in RADR_CLAUDE_HOOKS {
+        let entry = build_claude_hook_entry(hook);
+        hooks_map
+            .entry(hook.event.to_string())
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .expect("hooks_map entries are always initialized as arrays")
+            .push(entry);
+    }
+
+    json!({ "hooks": serde_json::Value::Object(hooks_map) })
+}
+
+/// Install the radr plugin into `~/.claude/skills/radr/`.
+fn install_claude() -> Result<()> {
+    let dir = default_claude_plugin_dir()?;
+    install_claude_to(&dir)
+}
+
+/// Install the radr plugin into the given plugin directory.
+///
+/// Remove-then-write, not merge: (1) create the parent `skills/` directory if
+/// absent, (2) delete `plugin_dir` and all its contents if it already exists,
+/// (3) write `.claude-plugin/plugin.json` and `hooks/hooks.json` fresh. Never
+/// reads from or writes to `~/.claude/settings.json`.
+///
+/// This is the testable core; production code calls `install_claude()` which
+/// supplies the default path.
+pub fn install_claude_to(plugin_dir: &Path) -> Result<()> {
+    // 1. Create the parent `skills/` directory if it does not already exist.
+    if let Some(parent) = plugin_dir.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+
+    // 2. Delete any existing plugin directory outright — no diffing.
+    if plugin_dir.exists() {
+        fs::remove_dir_all(plugin_dir)
+            .with_context(|| format!("failed to remove {}", plugin_dir.display()))?;
+    }
+
+    // 3. Write the manifest and hooks files fresh.
+    let manifest_path = claude_plugin_manifest_path(plugin_dir);
+    if let Some(parent) = manifest_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+    let manifest_json = serde_json::to_string_pretty(&claude_plugin_manifest())
+        .context("failed to serialize plugin.json")?;
+    fs::write(&manifest_path, manifest_json)
+        .with_context(|| format!("failed to write {}", manifest_path.display()))?;
+
+    let hooks_path = claude_hooks_json_path(plugin_dir);
+    if let Some(parent) = hooks_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+    let hooks_json = serde_json::to_string_pretty(&build_claude_hooks_json())
+        .context("failed to serialize hooks.json")?;
+    fs::write(&hooks_path, hooks_json)
+        .with_context(|| format!("failed to write {}", hooks_path.display()))?;
+
+    // 4. Print human-readable summary.
+    println!("{}", format_claude_install_summary(plugin_dir));
+
+    Ok(())
+}
+
 /// Build the human-readable install summary string.
 ///
 /// Exposed as a separate function so unit tests can assert on its output
-/// without capturing stdout.
-///
-/// - `+` newly added entry
-/// - `~` entry was present but had a stale matcher — updated in place
-/// - `=` entry was already correct — no change
-/// - `-` entry was superseded and removed
-pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String)]) -> String {
-    let mut lines = vec!["Installed radr hooks for claude (11 entries):".to_string()];
+/// without capturing stdout. Every hook is reported as freshly written (`+`)
+/// since install always deletes-then-recreates the plugin directory — there
+/// is no partial-update state to distinguish.
+pub fn format_claude_install_summary(plugin_dir: &Path) -> String {
+    let mut lines = vec![format!(
+        "Installed radr plugin for claude ({} hook entries):",
+        RADR_CLAUDE_HOOKS.len()
+    )];
 
-    // Show removed (superseded) entries first so they're visible.
-    for (event, cmd) in removed {
-        lines.push(format!("  - {event:<35} → {cmd} [removed]"));
-    }
+    lines.push(format!(
+        "  + {}",
+        tilde_collapse(&claude_plugin_manifest_path(plugin_dir))
+    ));
+    lines.push(format!(
+        "  + {}",
+        tilde_collapse(&claude_hooks_json_path(plugin_dir))
+    ));
 
-    for (hook, status) in RADR_CLAUDE_HOOKS.iter().zip(statuses.iter()) {
-        let prefix = match status {
-            HookStatus::New => '+',
-            HookStatus::Updated => '~',
-            HookStatus::Unchanged => '=',
-        };
+    for hook in RADR_CLAUDE_HOOKS {
         let event_display = match hook.matcher {
             Some(m) => format!("{} ({})", hook.event, m),
             None => hook.event.to_string(),
         };
         let async_label = if hook.async_ { " [async]" } else { "" };
         lines.push(format!(
-            "  {prefix} {event_display:<35} → {}{}",
+            "    {event_display:<35} → {}{}",
             hook.command, async_label
         ));
     }
@@ -614,135 +489,43 @@ pub fn format_claude_summary(statuses: &[HookStatus], removed: &[(String, String
     lines.join("\n")
 }
 
-/// Uninstall radr hooks from `~/.claude/settings.json`.
+/// Uninstall the radr plugin from `~/.claude/skills/radr/`.
 fn uninstall_claude() -> Result<()> {
-    let path = default_claude_settings_path()?;
-    uninstall_claude_to(&path)
+    let dir = default_claude_plugin_dir()?;
+    uninstall_claude_to(&dir)
 }
 
-/// Uninstall radr hooks from the given Claude settings path.
+/// Uninstall the radr plugin at the given plugin directory.
 ///
-/// Removes any hook entry whose single command matches `is_radr_command`
-/// (covering both current and pre-rename forms), regardless of whether the
-/// exact `(event, command)` pair is in the current `RADR_CLAUDE_HOOKS`
-/// table. Multi-command entries are left untouched. Event keys whose array
-/// becomes empty are pruned; the `hooks` key is pruned if it becomes an
-/// empty object. The settings file itself is never deleted, and the file is
-/// not written at all when nothing changed (preserves mtime).
+/// Deletes `plugin_dir` and all its contents if it exists; no-op (and exits
+/// 0) if it does not. Never touches `~/.claude/settings.json`, and never
+/// removes the parent `skills/` directory or any sibling entries within it.
 ///
 /// This is the testable core; production code calls `uninstall_claude()`
 /// which supplies the default path.
-pub fn uninstall_claude_to(dest: &Path) -> Result<()> {
-    // 1. Nothing to do if the settings file does not exist.
-    if !dest.exists() {
-        println!("{}", format_claude_uninstall_summary(&[]));
-        return Ok(());
+pub fn uninstall_claude_to(plugin_dir: &Path) -> Result<()> {
+    let removed = plugin_dir.exists();
+    if removed {
+        fs::remove_dir_all(plugin_dir)
+            .with_context(|| format!("failed to remove {}", plugin_dir.display()))?;
     }
 
-    // 2. Read and parse.
-    let content =
-        fs::read_to_string(dest).with_context(|| format!("failed to read {}", dest.display()))?;
-    let mut root: serde_json::Value = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse JSON from {}", dest.display()))?;
-
-    let mut removed: Vec<(String, String)> = Vec::new();
-
-    {
-        let root_obj = root
-            .as_object_mut()
-            .context("settings.json root is not a JSON object")?;
-
-        let hooks_present = root_obj.contains_key("hooks");
-        if hooks_present {
-            let hooks_map = root_obj
-                .get_mut("hooks")
-                .and_then(|v| v.as_object_mut())
-                .context("hooks field in settings.json is not a JSON object")?;
-
-            let event_names: Vec<String> = hooks_map.keys().cloned().collect();
-            let mut empty_events: Vec<String> = Vec::new();
-
-            for event_name in &event_names {
-                let event_arr = match hooks_map
-                    .get_mut(event_name.as_str())
-                    .and_then(|v| v.as_array_mut())
-                {
-                    Some(arr) => arr,
-                    None => continue,
-                };
-
-                let mut to_remove: Vec<usize> = Vec::new();
-                for (i, entry) in event_arr.iter().enumerate() {
-                    if let Some(cmd) = get_single_radr_command(entry) {
-                        to_remove.push(i);
-                        removed.push((event_name.clone(), cmd.to_owned()));
-                    }
-                }
-
-                for i in to_remove.into_iter().rev() {
-                    event_arr.remove(i);
-                }
-
-                if event_arr.is_empty() {
-                    empty_events.push(event_name.clone());
-                }
-            }
-
-            for event_name in &empty_events {
-                hooks_map.remove(event_name.as_str());
-            }
-
-            if hooks_map.is_empty() {
-                root_obj.remove("hooks");
-            }
-        }
-    }
-
-    // 3. Skip the write entirely if nothing was removed (preserves mtime).
-    if !removed.is_empty() {
-        let json_str =
-            serde_json::to_string_pretty(&root).context("failed to serialize settings JSON")?;
-
-        let tmp_path = {
-            let mut fname = dest
-                .file_name()
-                .context("settings path has no file name")?
-                .to_os_string();
-            fname.push(".tmp");
-            dest.with_file_name(fname)
-        };
-
-        fs::write(&tmp_path, &json_str)
-            .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
-        fs::rename(&tmp_path, dest).with_context(|| {
-            format!(
-                "failed to rename {} to {}",
-                tmp_path.display(),
-                dest.display()
-            )
-        })?;
-    }
-
-    // 4. Print summary.
-    println!("{}", format_claude_uninstall_summary(&removed));
+    println!("{}", format_claude_uninstall_summary(plugin_dir, removed));
 
     Ok(())
 }
 
 /// Build the human-readable uninstall summary string.
 ///
-/// - `-` entry was removed
-/// - `=` nothing needed removing
-pub fn format_claude_uninstall_summary(removed: &[(String, String)]) -> String {
-    if removed.is_empty() {
-        return "Uninstalled radr hooks for claude:\n  = nothing to remove".to_string();
+/// - `-` the plugin directory was removed
+/// - `=` there was nothing to remove
+pub fn format_claude_uninstall_summary(plugin_dir: &Path, removed: bool) -> String {
+    let path_display = tilde_collapse(plugin_dir);
+    if removed {
+        format!("Uninstalled radr plugin for claude:\n  - {path_display}")
+    } else {
+        format!("Uninstalled radr plugin for claude:\n  = {path_display} (nothing to remove)")
     }
-
-    let mut lines = vec!["Uninstalled radr hooks for claude:".to_string()];
-    for (event, cmd) in removed {
-        lines.push(format!("  - {event:<35} → {cmd}"));
-    }
-    lines.join("\n")
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -1045,26 +828,104 @@ mod tests {
     // Claude unit tests
     // ─────────────────────────────────────────────────────────────────────────
 
-    fn claude_settings_path(dir: &TempDir) -> PathBuf {
-        dir.path().join(".claude").join("settings.json")
+    fn claude_plugin_dir(dir: &TempDir) -> PathBuf {
+        dir.path()
+            .join(".claude")
+            .join("skills")
+            .join(RADR_CLAUDE_PLUGIN_NAME)
     }
 
-    // ── task 3.1: install on a clean (empty) settings file ──────────────────
+    fn read_hooks_json(plugin_dir: &Path) -> serde_json::Value {
+        let content = fs::read_to_string(claude_hooks_json_path(plugin_dir))
+            .expect("hooks.json should exist");
+        serde_json::from_str(&content).expect("hooks.json should be valid JSON")
+    }
+
+    fn read_plugin_manifest(plugin_dir: &Path) -> serde_json::Value {
+        let content = fs::read_to_string(claude_plugin_manifest_path(plugin_dir))
+            .expect("plugin.json should exist");
+        serde_json::from_str(&content).expect("plugin.json should be valid JSON")
+    }
+
+    // ── task 5.2: first-time install creates both files with correct content ──
 
     #[test]
-    fn install_claude_clean_file_writes_all_eleven_entries() {
+    fn install_claude_creates_plugin_files_when_absent() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
+        let plugin_dir = claude_plugin_dir(&tmp);
 
         assert!(
-            !dest.exists(),
-            "settings.json should not exist before install"
+            !plugin_dir.exists(),
+            "plugin directory should not exist before install"
         );
 
-        install_claude_to(&dest).expect("install_claude_to should succeed");
+        install_claude_to(&plugin_dir).expect("install_claude_to should succeed");
 
-        let content = fs::read_to_string(&dest).expect("settings.json should exist after install");
-        let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+        assert!(
+            claude_plugin_manifest_path(&plugin_dir).exists(),
+            "plugin.json should be created"
+        );
+        assert!(
+            claude_hooks_json_path(&plugin_dir).exists(),
+            "hooks.json should be created"
+        );
+
+        let manifest = read_plugin_manifest(&plugin_dir);
+        assert_eq!(manifest["name"], "radr");
+        assert_eq!(
+            manifest["description"],
+            "radr agent-state lifecycle hooks for Claude Code"
+        );
+    }
+
+    // ── task 5.2: `~/.claude/skills` is created when absent ──────────────────
+
+    #[test]
+    fn install_claude_creates_skills_directory_when_absent() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+        let skills_dir = plugin_dir.parent().unwrap();
+
+        assert!(!skills_dir.exists());
+
+        install_claude_to(&plugin_dir).expect("install should succeed");
+
+        assert!(skills_dir.exists(), "skills directory should be created");
+        assert!(plugin_dir.exists(), "plugin directory should be created");
+    }
+
+    // ── task 5.2: re-install deletes and recreates the plugin directory ──────
+
+    #[test]
+    fn install_claude_reinstall_replaces_existing_directory() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+
+        // Pre-populate the plugin directory with an unrelated file that a
+        // fresh install should wipe out.
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(plugin_dir.join("stray-file.txt"), "not written by rd").unwrap();
+
+        install_claude_to(&plugin_dir).expect("install should succeed");
+
+        assert!(
+            !plugin_dir.join("stray-file.txt").exists(),
+            "stray pre-existing file should be removed on re-install"
+        );
+        assert!(claude_plugin_manifest_path(&plugin_dir).exists());
+        assert!(claude_hooks_json_path(&plugin_dir).exists());
+    }
+
+    // ── task 5.3: hooks.json contains all eleven hook entries ─────────────────
+
+    #[test]
+    fn install_claude_hooks_json_contains_all_eleven_entries() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+
+        install_claude_to(&plugin_dir).expect("install should succeed");
+
+        let parsed = read_hooks_json(&plugin_dir);
         let hooks = &parsed["hooks"];
 
         for event in &[
@@ -1081,8 +942,6 @@ mod tests {
             assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
         }
 
-        // PreToolUse is registered twice: unmatched (every tool, untyped,
-        // drives active_tools) and matched (interactive tools, elicitation).
         let pre_tool_use = hooks["PreToolUse"]
             .as_array()
             .expect("hooks.PreToolUse should be an array");
@@ -1092,9 +951,6 @@ mod tests {
             "hooks.PreToolUse should have exactly two entries (unmatched + matched)"
         );
 
-        // PostToolUse is registered three times: unmatched untyped (drives
-        // active_tools), matched (interactive tools), and unmatched "perm-$id"
-        // (closes out permission-prompt blocks).
         let post_tool_use = hooks["PostToolUse"]
             .as_array()
             .expect("hooks.PostToolUse should be an array");
@@ -1103,150 +959,32 @@ mod tests {
             3,
             "hooks.PostToolUse should have exactly three entries"
         );
-    }
 
-    // ── task 3.2: idempotent re-run ──────────────────────────────────────────
-
-    #[test]
-    fn install_claude_idempotent_no_duplicates() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        install_claude_to(&dest).expect("first install");
-        let content_after_first = fs::read_to_string(&dest).unwrap();
-        let mtime_before = fs::metadata(&dest).unwrap().modified().unwrap();
-
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        install_claude_to(&dest).expect("second install");
-        let content_after_second = fs::read_to_string(&dest).unwrap();
-        let mtime_after = fs::metadata(&dest).unwrap().modified().unwrap();
-
-        // File should not be rewritten when nothing changed.
+        let total: usize = hooks
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|v| v.as_array().unwrap().len())
+            .sum();
         assert_eq!(
-            mtime_before, mtime_after,
-            "file should not be rewritten on idempotent re-run"
-        );
-        assert_eq!(
-            content_after_first, content_after_second,
-            "content should be identical"
-        );
-
-        // No duplicate entries — every event, each exactly once, except
-        // PreToolUse (unmatched + matched) and PostToolUse (unmatched
-        // untyped + matched + unmatched "perm-$id"), which are registered
-        // multiple times by design.
-        let parsed: serde_json::Value = serde_json::from_str(&content_after_second).unwrap();
-        for event in &[
-            "SessionStart",
-            "UserPromptSubmit",
-            "Stop",
-            "StopFailure",
-            "Notification",
-            "SessionEnd",
-        ] {
-            let arr = parsed["hooks"][event].as_array().unwrap();
-            assert_eq!(
-                arr.len(),
-                1,
-                "hooks.{event} should have no duplicates after second install"
-            );
-        }
-        let pre_tool_use = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(
-            pre_tool_use.len(),
-            2,
-            "hooks.PreToolUse should have exactly two entries (unmatched + matched) after second install"
-        );
-        let post_tool_use = parsed["hooks"]["PostToolUse"].as_array().unwrap();
-        assert_eq!(
-            post_tool_use.len(),
-            3,
-            "hooks.PostToolUse should have exactly three entries after second install"
+            total,
+            RADR_CLAUDE_HOOKS.len(),
+            "total entry count should be eleven"
         );
     }
 
-    // ── task 2.3: merges with existing non-radr hooks ────────────────────────
-
-    #[test]
-    fn install_claude_merges_with_existing_hooks() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with a custom non-radr hook under UserPromptSubmit.
-        let existing = serde_json::json!({
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            { "type": "command", "command": "my-custom-tool" }
-                        ]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        // UserPromptSubmit should now have two entries: custom + radr.
-        let user_prompt = parsed["hooks"]["UserPromptSubmit"].as_array().unwrap();
-        assert_eq!(
-            user_prompt.len(),
-            2,
-            "UserPromptSubmit should have custom + radr entries"
-        );
-
-        // The custom hook should still be present.
-        let has_custom = user_prompt.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str()) == Some("my-custom-tool")
-                    })
-                })
-                .unwrap_or(false)
-        });
-        assert!(has_custom, "custom hook should be preserved after install");
-
-        // The radr hook should also be present under UserPromptSubmit.
-        let has_radr = user_prompt.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|c| c.contains("rd agent event RUN_STARTED"))
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false)
-        });
-        assert!(has_radr, "radr hook should be added alongside custom hook");
-    }
-
-    // ── task 3.3: async flag correctness ─────────────────────────────────────
+    // ── task 5.3: async flag correctness ──────────────────────────────────────
 
     #[test]
     fn install_claude_async_flags_are_correct() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
+        let plugin_dir = claude_plugin_dir(&tmp);
 
-        install_claude_to(&dest).expect("install");
+        install_claude_to(&plugin_dir).expect("install");
 
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = read_hooks_json(&plugin_dir);
         let hooks = &parsed["hooks"];
 
-        // These events must have async: true.
         for event in &[
             "UserPromptSubmit",
             "PostToolUse",
@@ -1263,7 +1001,6 @@ mod tests {
             );
         }
 
-        // SessionStart and SessionEnd must NOT have the async field.
         for event in &["SessionStart", "SessionEnd"] {
             let hook_entry = &hooks[event][0]["hooks"][0];
             assert!(
@@ -1273,794 +1010,13 @@ mod tests {
         }
     }
 
-    // ── task 2.2: the two new general tool-call-tracking entries ─────────────
-
-    #[test]
-    fn general_tool_call_tracking_entries_have_no_type_flag_and_are_async() {
-        let pre = RADR_CLAUDE_HOOKS
-            .iter()
-            .find(|h| h.event == "PreToolUse" && h.matcher.is_none())
-            .expect("should have an unmatched PreToolUse entry");
-        assert!(pre.command.contains("tool_use_id"));
-        assert!(pre.command.contains("rd agent event TOOL_CALL_START"));
-        assert!(
-            !pre.command.contains("--type"),
-            "unmatched PreToolUse entry should not have a --type flag"
-        );
-        assert!(pre.async_, "unmatched PreToolUse entry should be async");
-
-        let post = RADR_CLAUDE_HOOKS
-            .iter()
-            .find(|h| {
-                h.event == "PostToolUse" && h.matcher.is_none() && !h.command.contains("perm-")
-            })
-            .expect("should have an untyped unmatched PostToolUse entry");
-        assert!(post.command.contains("tool_use_id"));
-        assert!(post.command.contains("rd agent event TOOL_CALL_RESULT"));
-        assert!(
-            !post.command.contains("--type"),
-            "untyped unmatched PostToolUse entry should not have a --type flag"
-        );
-        assert!(
-            post.async_,
-            "untyped unmatched PostToolUse entry should be async"
-        );
-    }
-
-    // ── task 3.4 / 5.5: summary output uses +, ~, = ────────────────────────────
-
-    #[test]
-    fn format_claude_summary_uses_plus_for_new_entries() {
-        let statuses = vec![HookStatus::New; RADR_CLAUDE_HOOKS.len()];
-        let summary = format_claude_summary(&statuses, &[]);
-        for line in summary.lines().skip(1) {
-            if line.starts_with('(') {
-                continue; // trailing jq note line
-            }
-            assert!(
-                line.trim_start().starts_with('+'),
-                "line should start with '+' for new entry: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn format_claude_summary_uses_equals_for_existing_entries() {
-        let statuses = vec![HookStatus::Unchanged; RADR_CLAUDE_HOOKS.len()];
-        let summary = format_claude_summary(&statuses, &[]);
-        for line in summary.lines().skip(1) {
-            if line.starts_with('(') {
-                continue; // trailing jq note line
-            }
-            assert!(
-                line.trim_start().starts_with('='),
-                "line should start with '=' for existing entry: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn format_claude_summary_uses_tilde_for_updated_entries() {
-        let statuses = vec![HookStatus::Updated; RADR_CLAUDE_HOOKS.len()];
-        let summary = format_claude_summary(&statuses, &[]);
-        for line in summary.lines().skip(1) {
-            if line.starts_with('(') {
-                continue; // trailing jq note line
-            }
-            assert!(
-                line.trim_start().starts_with('~'),
-                "line should start with '~' for updated entry: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn format_claude_summary_shows_removed_entries_with_dash() {
-        let statuses = vec![HookStatus::Unchanged; RADR_CLAUDE_HOOKS.len()];
-        let removed = vec![(
-            "PreToolUse".to_string(),
-            "rd agent status working --harness claude".to_string(),
-        )];
-        let summary = format_claude_summary(&statuses, &removed);
-        let lines: Vec<&str> = summary.lines().collect();
-        // Header is line 0; removed entries come before the hook lines.
-        assert!(
-            lines[1].trim_start().starts_with('-'),
-            "removed entry should start with '-': {}",
-            lines[1]
-        );
-        assert!(
-            lines[1].contains("PreToolUse"),
-            "removed line should contain event name"
-        );
-        assert!(
-            lines[1].contains("[removed]"),
-            "removed line should contain '[removed]'"
-        );
-    }
-
-    // ── task 5.5: migration — stale matcher update ────────────────────────────
-
-    #[test]
-    fn install_claude_updates_stale_session_start_matcher() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with old-style SessionStart hook (startup only).
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup",
-                        "hooks": [{ "type": "command", "command": "rd agent status idle --harness claude" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        // Matcher should be updated to startup|resume|clear.
-        let session_start = &parsed["hooks"]["SessionStart"];
-        let arr = session_start.as_array().unwrap();
-        // Still exactly one entry (not a duplicate).
-        assert_eq!(
-            arr.len(),
-            1,
-            "SessionStart should have exactly one entry after update"
-        );
-        assert_eq!(
-            arr[0].get("matcher").and_then(|v| v.as_str()),
-            Some("startup|resume|clear"),
-            "SessionStart matcher should be updated to startup|resume|clear"
-        );
-    }
-
-    // ── task 5.5: migration — superseded entry removal ──────────────────────
-
-    #[test]
-    fn install_claude_removes_superseded_pretooluse_working_entry() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with the old general PreToolUse → working hook (no matcher).
-        let existing = serde_json::json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": "rd agent status working --harness claude" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        let pretooluse = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-
-        // The old general working entry must be gone.
-        let has_old_general = pretooluse.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str())
-                            == Some("rd agent status working --harness claude")
-                    })
-                })
-                .unwrap_or(false)
-                && entry.get("matcher").is_none()
-        });
-        assert!(
-            !has_old_general,
-            "old general PreToolUse → working entry should be removed"
-        );
-
-        // The new specific blocked entry must be present.
-        let has_blocked = pretooluse.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|c| c.contains("rd agent event TOOL_CALL_START"))
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false)
-        });
-        assert!(
-            has_blocked,
-            "new AskUserQuestion|ExitPlanMode → TOOL_CALL_START entry should be present"
-        );
-    }
-
-    // ── task 2.3: install adds the two new general entries to a nine-entry file ──
-
-    #[test]
-    fn install_claude_adds_two_new_entries_to_pre_change_nine_entry_file() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with exactly the nine pre-change entries (the current
-        // table minus the two new unmatched PreToolUse/PostToolUse entries).
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"# }]
-                    }
-                ],
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"# }]
-                    }
-                ],
-                "PreToolUse": [
-                    {
-                        "matcher": "AskUserQuestion|ExitPlanMode",
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude"# }]
-                    }
-                ],
-                "PostToolUse": [
-                    {
-                        "matcher": "AskUserQuestion|ExitPlanMode",
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude"# }]
-                    },
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"# }]
-                    }
-                ],
-                "Notification": [
-                    {
-                        "matcher": "permission_prompt",
-                        "hooks": [{ "type": "command", "async": true, "command": r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"# }]
-                    }
-                ],
-                "Stop": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"# }]
-                    }
-                ],
-                "StopFailure": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"# }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent clear" }]
-                    }
-                ]
-            }
-        });
-        let existing_str = serde_json::to_string_pretty(&existing).unwrap();
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, &existing_str).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        // The nine existing entries should be byte-for-byte unchanged: re-parse
-        // the original and compare each entry's JSON value.
-        let original: serde_json::Value = serde_json::from_str(&existing_str).unwrap();
-        for (event, orig_arr) in original["hooks"].as_object().unwrap() {
-            let orig_entries = orig_arr.as_array().unwrap();
-            let new_entries = parsed["hooks"][event].as_array().unwrap();
-            for orig_entry in orig_entries {
-                assert!(
-                    new_entries.contains(orig_entry),
-                    "existing entry under {event} should remain unchanged: {orig_entry}"
-                );
-            }
-        }
-
-        // Exactly the two new unmatched, untyped entries should be added.
-        let pre = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(pre.len(), 2, "PreToolUse should now have two entries");
-        let new_pre = pre
-            .iter()
-            .find(|e| e.get("matcher").is_none())
-            .expect("new unmatched PreToolUse entry should be added");
-        let new_pre_cmd = new_pre["hooks"][0]["command"].as_str().unwrap();
-        assert!(new_pre_cmd.contains("rd agent event TOOL_CALL_START"));
-        assert!(!new_pre_cmd.contains("--type"));
-
-        let post = parsed["hooks"]["PostToolUse"].as_array().unwrap();
-        assert_eq!(post.len(), 3, "PostToolUse should now have three entries");
-        let new_post = post
-            .iter()
-            .find(|e| {
-                e.get("matcher").is_none()
-                    && !e["hooks"][0]["command"]
-                        .as_str()
-                        .unwrap_or("")
-                        .contains("perm-")
-            })
-            .expect("new unmatched, untyped PostToolUse entry should be added");
-        let new_post_cmd = new_post["hooks"][0]["command"].as_str().unwrap();
-        assert!(new_post_cmd.contains("rd agent event TOOL_CALL_RESULT"));
-        assert!(!new_post_cmd.contains("--type"));
-    }
-
-    // ── orphaned Monitor-watch/stop entries: removed with no replacement ────
-
-    #[test]
-    fn install_claude_removes_orphaned_monitor_watch_and_stop_entries() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with the four orphaned entries that leaked from a build
-        // of `rd` implementing the never-merged `add-snoozed-agent-state`
-        // change, alongside a non-radr hook entry that must be left untouched.
-        let existing = serde_json::json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Monitor",
-                        "hooks": [{ "type": "command", "command": "rd agent watch arm --harness claude" }]
-                    },
-                    {
-                        "hooks": [{ "type": "command", "command": "~/.claude/hooks/notify.sh" }]
-                    }
-                ],
-                "PostToolUse": [
-                    {
-                        "matcher": "Monitor",
-                        "hooks": [{ "type": "command", "command": "rd agent watch resolve --harness claude" }]
-                    }
-                ],
-                "Stop": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
-                    }
-                ],
-                "StopFailure": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        // All four orphaned commands must be gone from every event.
-        let orphaned_commands = [
-            "rd agent watch arm --harness claude",
-            "rd agent watch resolve --harness claude",
-            "rd agent stop --harness claude",
-        ];
-        for event in &["PreToolUse", "PostToolUse", "Stop", "StopFailure"] {
-            let arr = parsed["hooks"][event]
-                .as_array()
-                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
-
-            let has_orphaned = arr.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .map(|hs| {
-                        hs.iter().any(|h| {
-                            h.get("command")
-                                .and_then(|c| c.as_str())
-                                .map(|c| orphaned_commands.contains(&c))
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-            });
-            assert!(
-                !has_orphaned,
-                "hooks.{event} should have no orphaned Monitor-watch/stop command strings remaining"
-            );
-        }
-
-        // The pre-existing non-radr entry under PreToolUse must be untouched.
-        let pretooluse = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-        let has_notify = pretooluse.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str())
-                            == Some("~/.claude/hooks/notify.sh")
-                    })
-                })
-                .unwrap_or(false)
-        });
-        assert!(
-            has_notify,
-            "non-radr PreToolUse entry should be preserved untouched"
-        );
-
-        // All nine current entries should still be present/added as usual.
-        assert_eq!(
-            parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
-            "rd agent clear"
-        );
-    }
-
-    #[test]
-    fn format_claude_summary_shows_all_four_orphaned_entries_removed() {
-        let statuses = vec![HookStatus::Unchanged; RADR_CLAUDE_HOOKS.len()];
-        let removed = vec![
-            (
-                "PreToolUse".to_string(),
-                "rd agent watch arm --harness claude".to_string(),
-            ),
-            (
-                "PostToolUse".to_string(),
-                "rd agent watch resolve --harness claude".to_string(),
-            ),
-            (
-                "Stop".to_string(),
-                "rd agent stop --harness claude".to_string(),
-            ),
-            (
-                "StopFailure".to_string(),
-                "rd agent stop --harness claude".to_string(),
-            ),
-        ];
-        let summary = format_claude_summary(&statuses, &removed);
-
-        for (event, cmd) in &removed {
-            let expected = format!("{event:<35} → {cmd} [removed]");
-            assert!(
-                summary.contains(&expected),
-                "summary should contain removed line for {event}/{cmd}: {summary}"
-            );
-        }
-    }
-
-    #[test]
-    fn uninstall_claude_removes_orphaned_monitor_watch_and_stop_entries() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        let existing = serde_json::json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Monitor",
-                        "hooks": [{ "type": "command", "command": "rd agent watch arm --harness claude" }]
-                    }
-                ],
-                "PostToolUse": [
-                    {
-                        "matcher": "Monitor",
-                        "hooks": [{ "type": "command", "command": "rd agent watch resolve --harness claude" }]
-                    }
-                ],
-                "Stop": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
-                    }
-                ],
-                "StopFailure": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent stop --harness claude" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        assert!(
-            parsed.get("hooks").is_none(),
-            "hooks key should be pruned once all orphaned Monitor-watch/stop entries are removed"
-        );
-    }
-
-    #[test]
-    fn is_radr_command_recognizes_orphaned_watch_and_stop_forms() {
-        assert!(is_radr_command("rd agent watch arm --harness claude"));
-        assert!(is_radr_command("rd agent watch resolve --harness claude"));
-        assert!(is_radr_command("rd agent stop --harness claude"));
-    }
-
-    // ── task 3.2: migration — pre-rename command strings are upgraded ────────
-
-    #[test]
-    fn install_claude_migrates_pre_rename_command_strings() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with old-style radr hook entries using the pre-rename
-        // `rd set-state` / `rd clear-state` command strings, as a pre-rename
-        // `rd install claude` (formerly `rd hooks install claude`) would have
-        // written.
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": "rd set-state idle --harness claude" }]
-                    }
-                ],
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": "rd set-state working --harness claude" }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd clear-state" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        // Old-style commands must be gone from every event, and the new-style
-        // equivalents present, with no duplicates.
-        for event in &["SessionStart", "UserPromptSubmit", "SessionEnd"] {
-            let arr = parsed["hooks"][event]
-                .as_array()
-                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
-
-            let has_old_style = arr.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .map(|hs| {
-                        hs.iter().any(|h| {
-                            h.get("command")
-                                .and_then(|c| c.as_str())
-                                .map(|c| c.starts_with("rd set-state ") || c == "rd clear-state")
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-            });
-            assert!(
-                !has_old_style,
-                "hooks.{event} should have no pre-rename command strings remaining"
-            );
-
-            assert_eq!(
-                arr.len(),
-                1,
-                "hooks.{event} should have exactly one entry (no duplicates) after migration"
-            );
-        }
-
-        assert_eq!(
-            parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#
-        );
-        assert_eq!(
-            parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#
-        );
-        assert_eq!(
-            parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
-            "rd agent clear"
-        );
-    }
-
-    // ── task 4.1: migration — intermediate `rd state set`/`rd state clear` ───
-    // command strings are upgraded to `rd agent event`/`rd agent clear`.
-
-    #[test]
-    fn install_claude_migrates_state_command_strings() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with intermediate-generation radr hook entries using
-        // the `rd state set` / `rd state clear` command strings, as an `rd`
-        // binary installed after the `set-state`→`state set` rename but
-        // before this `state`→`agent` rename would have written.
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": "rd state set idle --harness claude" }]
-                    }
-                ],
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": "rd state set working --harness claude" }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd state clear" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        for event in &["SessionStart", "UserPromptSubmit", "SessionEnd"] {
-            let arr = parsed["hooks"][event]
-                .as_array()
-                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
-
-            let has_old_style = arr.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .map(|hs| {
-                        hs.iter().any(|h| {
-                            h.get("command")
-                                .and_then(|c| c.as_str())
-                                .map(|c| c.starts_with("rd state set ") || c == "rd state clear")
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-            });
-            assert!(
-                !has_old_style,
-                "hooks.{event} should have no intermediate rd state command strings remaining"
-            );
-
-            assert_eq!(
-                arr.len(),
-                1,
-                "hooks.{event} should have exactly one entry (no duplicates) after migration"
-            );
-        }
-
-        assert_eq!(
-            parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#
-        );
-        assert_eq!(
-            parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#
-        );
-        assert_eq!(
-            parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
-            "rd agent clear"
-        );
-    }
-
-    // ── task 6.2: migration — `rd agent status`/`rd agent clear` legacy forms ──
-    // are upgraded to `rd agent event`/`rd agent clear`.
-
-    #[test]
-    fn install_claude_migrates_agent_status_command_strings() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with radr hook entries using the `rd agent status` /
-        // `rd agent clear` command strings, as an `rd` binary installed after
-        // the `state`→`agent` rename but before this `status`→`event` rename
-        // would have written.
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": "rd agent status idle --harness claude" }]
-                    }
-                ],
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": "rd agent status working --harness claude" }]
-                    }
-                ],
-                "Stop": [
-                    {
-                        "hooks": [{ "type": "command", "async": true, "command": "rd agent status done --harness claude" }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent clear" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        for event in &["SessionStart", "UserPromptSubmit", "Stop"] {
-            let arr = parsed["hooks"][event]
-                .as_array()
-                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
-
-            let has_old_style = arr.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .map(|hs| {
-                        hs.iter().any(|h| {
-                            h.get("command")
-                                .and_then(|c| c.as_str())
-                                .map(|c| c.starts_with("rd agent status "))
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-            });
-            assert!(
-                !has_old_style,
-                "hooks.{event} should have no rd agent status command strings remaining"
-            );
-
-            assert_eq!(
-                arr.len(),
-                1,
-                "hooks.{event} should have exactly one entry (no duplicates) after migration"
-            );
-        }
-
-        assert_eq!(
-            parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event SESSION_STARTED --id "$id" --harness claude"#
-        );
-        assert_eq!(
-            parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
-            r#"id=$(cat | jq -r '.session_id'); rd agent event RUN_STARTED --id "$id" --harness claude"#
-        );
-        assert_eq!(
-            parsed["hooks"]["Stop"][0]["hooks"][0]["command"],
-            r#"payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); rd agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude"#
-        );
-        // SessionEnd's `rd agent clear` is already the current form, so it
-        // should remain unchanged (Unchanged status, not re-added).
-        assert_eq!(
-            parsed["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
-            "rd agent clear"
-        );
-    }
-
     #[test]
     fn install_claude_session_start_has_correct_matcher() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-        install_claude_to(&dest).expect("install");
+        let plugin_dir = claude_plugin_dir(&tmp);
+        install_claude_to(&plugin_dir).expect("install");
 
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = read_hooks_json(&plugin_dir);
         let session_start = &parsed["hooks"]["SessionStart"][0];
         assert_eq!(
             session_start.get("matcher").and_then(|v| v.as_str()),
@@ -2069,16 +1025,13 @@ mod tests {
         );
     }
 
-    // ── task 3.6: PreToolUse interactive-tools matcher ────────────────────────
-
     #[test]
     fn install_claude_pretooluse_blocked_has_correct_matcher() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-        install_claude_to(&dest).expect("install");
+        let plugin_dir = claude_plugin_dir(&tmp);
+        install_claude_to(&plugin_dir).expect("install");
 
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = read_hooks_json(&plugin_dir);
         let hooks = parsed["hooks"]["PreToolUse"]
             .as_array()
             .expect("PreToolUse should be an array");
@@ -2108,16 +1061,13 @@ mod tests {
         );
     }
 
-    // ── task 3.7: PostToolUse entry ───────────────────────────────────────────
-
     #[test]
     fn install_claude_posttooluse_has_three_entries() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-        install_claude_to(&dest).expect("install");
+        let plugin_dir = claude_plugin_dir(&tmp);
+        install_claude_to(&plugin_dir).expect("install");
 
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = read_hooks_json(&plugin_dir);
         let entries = parsed["hooks"]["PostToolUse"]
             .as_array()
             .expect("PostToolUse should be an array");
@@ -2136,9 +1086,6 @@ mod tests {
         assert!(matched_cmd.contains("rd agent event TOOL_CALL_RESULT"));
         assert!(matched_cmd.contains("--type elicitation"));
 
-        // Two unmatched entries: one untyped, id=tool_use_id (drives
-        // active_tools), one typed, id="perm-<session_id>" (closes out
-        // permission-prompt blocks).
         let unmatched: Vec<&serde_json::Value> = entries
             .iter()
             .filter(|e| e.get("matcher").is_none())
@@ -2180,36 +1127,82 @@ mod tests {
         assert!(perm_cmd.contains("--type permission-prompt"));
     }
 
-    // ── task 3.8: StopFailure entry ───────────────────────────────────────────
-
     #[test]
     fn install_claude_stopfailure_has_run_finished_command_async_and_no_matcher() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-        install_claude_to(&dest).expect("install");
+        let plugin_dir = claude_plugin_dir(&tmp);
+        install_claude_to(&plugin_dir).expect("install");
 
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = read_hooks_json(&plugin_dir);
         let entry = &parsed["hooks"]["StopFailure"][0];
 
-        // No matcher.
         assert!(
             entry.get("matcher").is_none(),
             "StopFailure entry should have no matcher"
         );
         let hook = &entry["hooks"][0];
-        // Command.
         let cmd = hook
             .get("command")
             .and_then(|v| v.as_str())
             .expect("StopFailure hook should have a command");
         assert!(cmd.contains("rd agent event RUN_FINISHED"));
-        // Async.
         assert_eq!(
             hook.get("async"),
             Some(&serde_json::Value::Bool(true)),
             "StopFailure should have async: true"
         );
+    }
+
+    #[test]
+    fn general_tool_call_tracking_entries_have_no_type_flag_and_are_async() {
+        let pre = RADR_CLAUDE_HOOKS
+            .iter()
+            .find(|h| h.event == "PreToolUse" && h.matcher.is_none())
+            .expect("should have an unmatched PreToolUse entry");
+        assert!(pre.command.contains("tool_use_id"));
+        assert!(pre.command.contains("rd agent event TOOL_CALL_START"));
+        assert!(
+            !pre.command.contains("--type"),
+            "unmatched PreToolUse entry should not have a --type flag"
+        );
+        assert!(pre.async_, "unmatched PreToolUse entry should be async");
+
+        let post = RADR_CLAUDE_HOOKS
+            .iter()
+            .find(|h| {
+                h.event == "PostToolUse" && h.matcher.is_none() && !h.command.contains("perm-")
+            })
+            .expect("should have an untyped unmatched PostToolUse entry");
+        assert!(post.command.contains("tool_use_id"));
+        assert!(post.command.contains("rd agent event TOOL_CALL_RESULT"));
+        assert!(
+            !post.command.contains("--type"),
+            "untyped unmatched PostToolUse entry should not have a --type flag"
+        );
+        assert!(
+            post.async_,
+            "untyped unmatched PostToolUse entry should be async"
+        );
+    }
+
+    // ── task 5.2/5.3: install summary output ──────────────────────────────────
+
+    #[test]
+    fn format_claude_install_summary_reports_all_entries_as_new() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+        let summary = format_claude_install_summary(&plugin_dir);
+
+        assert!(summary.contains("plugin.json"));
+        assert!(summary.contains("hooks.json"));
+        for hook in RADR_CLAUDE_HOOKS {
+            assert!(
+                summary.contains(hook.command),
+                "summary should mention command: {}",
+                hook.command
+            );
+        }
+        assert!(summary.contains("requires `jq` on PATH"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2283,336 +1276,109 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     // Claude uninstall unit tests
     // ─────────────────────────────────────────────────────────────────────────
 
-    // ── task 3.7: uninstall removes all eleven radr-managed entries ──────────
+    // ── task 5.4: uninstall removes an existing plugin directory ─────────────
 
     #[test]
-    fn uninstall_claude_removes_all_eleven_entries() {
+    fn uninstall_claude_removes_existing_plugin_directory() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
+        let plugin_dir = claude_plugin_dir(&tmp);
 
-        install_claude_to(&dest).expect("install first");
+        install_claude_to(&plugin_dir).expect("install first");
+        assert!(plugin_dir.exists());
 
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        // hooks key should be gone entirely (no non-radr content ever existed).
-        assert!(
-            parsed.get("hooks").is_none(),
-            "hooks key should be pruned once empty"
-        );
-    }
-
-    // ── task 3.8: uninstall preserves non-radr hooks under the same event ───
-
-    #[test]
-    fn uninstall_claude_preserves_non_radr_hook_under_same_event() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // Pre-populate with a custom non-radr hook under UserPromptSubmit.
-        let existing = serde_json::json!({
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            { "type": "command", "command": "my-custom-tool" }
-                        ]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        install_claude_to(&dest).expect("install should succeed");
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        let user_prompt = parsed["hooks"]["UserPromptSubmit"]
-            .as_array()
-            .expect("UserPromptSubmit should remain since custom hook is preserved");
-        assert_eq!(
-            user_prompt.len(),
-            1,
-            "only the custom hook should remain under UserPromptSubmit"
-        );
-        assert_eq!(
-            user_prompt[0]["hooks"][0]["command"].as_str(),
-            Some("my-custom-tool")
-        );
-    }
-
-    // ── task 3.9: uninstall recognizes pre-rename legacy entries ─────────────
-
-    #[test]
-    fn uninstall_claude_removes_pre_rename_legacy_entries() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": "rd set-state idle --harness claude" }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd clear-state" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        uninstall_claude_to(&plugin_dir).expect("uninstall should succeed");
 
         assert!(
-            parsed.get("hooks").is_none(),
-            "hooks key should be pruned once all legacy entries are removed"
+            !plugin_dir.exists(),
+            "plugin directory should be removed after uninstall"
         );
     }
 
-    // ── task 4.2: uninstall recognizes intermediate `rd state` legacy entries ──
+    // ── task 5.4: uninstall is a no-op when the plugin is absent ─────────────
 
     #[test]
-    fn uninstall_claude_removes_state_legacy_entries() {
+    fn uninstall_claude_noop_when_plugin_absent() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
+        let plugin_dir = claude_plugin_dir(&tmp);
 
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": "rd state set idle --harness claude" }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd state clear" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+        assert!(!plugin_dir.exists());
 
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
+        uninstall_claude_to(&plugin_dir).expect("uninstall should succeed even when absent");
 
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(!plugin_dir.exists());
+    }
+
+    // ── task 5.4: uninstall leaves sibling entries under skills/ untouched ───
+
+    #[test]
+    fn uninstall_claude_leaves_sibling_skills_entries_untouched() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+        let skills_dir = plugin_dir.parent().unwrap().to_path_buf();
+
+        install_claude_to(&plugin_dir).expect("install first");
+
+        // A sibling, non-radr plugin directory under ~/.claude/skills/.
+        let sibling_dir = skills_dir.join("other-plugin");
+        fs::create_dir_all(&sibling_dir).unwrap();
+        fs::write(sibling_dir.join("marker.txt"), "not radr").unwrap();
+
+        uninstall_claude_to(&plugin_dir).expect("uninstall should succeed");
 
         assert!(
-            parsed.get("hooks").is_none(),
-            "hooks key should be pruned once all intermediate rd state legacy entries are removed"
+            !plugin_dir.exists(),
+            "radr plugin directory should be removed"
         );
-    }
-
-    // ── task 6.2: uninstall recognizes `rd agent status` legacy entries ──────
-
-    #[test]
-    fn uninstall_claude_removes_agent_status_legacy_entries() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        let existing = serde_json::json!({
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "matcher": "startup|resume|clear",
-                        "hooks": [{ "type": "command", "command": "rd agent status idle --harness claude" }]
-                    }
-                ],
-                "SessionEnd": [
-                    {
-                        "hooks": [{ "type": "command", "command": "rd agent clear" }]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
         assert!(
-            parsed.get("hooks").is_none(),
-            "hooks key should be pruned once all rd agent status legacy entries are removed"
+            skills_dir.exists(),
+            "~/.claude/skills/ itself should remain in place"
         );
-    }
-
-    // ── task 3.10: uninstall prunes empty event keys and the hooks key ─────
-
-    #[test]
-    fn uninstall_claude_prunes_empty_event_and_hooks_key() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        install_claude_to(&dest).expect("install first");
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
         assert!(
-            parsed.get("hooks").is_none(),
-            "hooks key should be entirely removed once empty"
-        );
-        // Settings file itself must still exist.
-        assert!(dest.exists(), "settings.json should not be deleted");
-    }
-
-    // ── task 3.11: uninstall is a no-op when no radr entries are present ────
-
-    #[test]
-    fn uninstall_claude_noop_when_no_radr_entries() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        let existing = serde_json::json!({
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            { "type": "command", "command": "my-custom-tool" }
-                        ]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        let mtime_before = fs::metadata(&dest).unwrap().modified().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let mtime_after = fs::metadata(&dest).unwrap().modified().unwrap();
-        assert_eq!(
-            mtime_before, mtime_after,
-            "file should not be rewritten when there is nothing to remove"
+            sibling_dir.join("marker.txt").exists(),
+            "sibling plugin directory should be untouched"
         );
     }
 
-    // ── task 3.12: uninstall is a no-op when settings.json does not exist ───
-
-    #[test]
-    fn uninstall_claude_noop_when_file_absent() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        assert!(!dest.exists());
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed even when absent");
-
-        assert!(
-            !dest.exists(),
-            "uninstall should not create the settings file"
-        );
-    }
-
-    // ── task 3.13: running uninstall twice produces no further change ───────
+    // ── task 5.4: running uninstall twice produces no further change ─────────
 
     #[test]
     fn uninstall_claude_idempotent_second_run_noop() {
         let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
+        let plugin_dir = claude_plugin_dir(&tmp);
 
-        install_claude_to(&dest).expect("install first");
-        uninstall_claude_to(&dest).expect("first uninstall");
+        install_claude_to(&plugin_dir).expect("install first");
+        uninstall_claude_to(&plugin_dir).expect("first uninstall");
 
-        let mtime_before = fs::metadata(&dest).unwrap().modified().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(!plugin_dir.exists());
 
-        uninstall_claude_to(&dest).expect("second uninstall");
+        // Second uninstall is a no-op that still succeeds.
+        uninstall_claude_to(&plugin_dir).expect("second uninstall should also succeed");
 
-        let mtime_after = fs::metadata(&dest).unwrap().modified().unwrap();
-        assert_eq!(
-            mtime_before, mtime_after,
-            "second uninstall run should make no further changes"
-        );
+        assert!(!plugin_dir.exists());
     }
 
-    // ── task 3.14: uninstall does not touch multi-command hook entries ──────
-
-    #[test]
-    fn uninstall_claude_leaves_mixed_command_entry_untouched() {
-        let tmp = TempDir::new().unwrap();
-        let dest = claude_settings_path(&tmp);
-
-        // A single entry whose hooks array mixes a radr command with a
-        // non-radr command — cannot be safely attributed as radr-owned.
-        let existing = serde_json::json!({
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            { "type": "command", "command": "rd agent status working --harness claude" },
-                            { "type": "command", "command": "my-custom-tool" }
-                        ]
-                    }
-                ]
-            }
-        });
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        uninstall_claude_to(&dest).expect("uninstall should succeed");
-
-        let content = fs::read_to_string(&dest).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-
-        let user_prompt = parsed["hooks"]["UserPromptSubmit"]
-            .as_array()
-            .expect("UserPromptSubmit entry should remain untouched");
-        assert_eq!(
-            user_prompt.len(),
-            1,
-            "mixed-command entry should not be split or removed"
-        );
-        assert_eq!(
-            user_prompt[0]["hooks"].as_array().unwrap().len(),
-            2,
-            "mixed-command entry's hooks array should be untouched"
-        );
-    }
-
-    // ── format_claude_uninstall_summary output ───────────────────────────────
+    // ── format_claude_uninstall_summary output ────────────────────────────────
 
     #[test]
     fn format_claude_uninstall_summary_nothing_to_remove() {
-        let summary = format_claude_uninstall_summary(&[]);
-        assert!(summary.contains("= nothing to remove"));
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+        let summary = format_claude_uninstall_summary(&plugin_dir, false);
+        assert!(summary.contains("= "));
+        assert!(summary.contains("nothing to remove"));
     }
 
     #[test]
-    fn format_claude_uninstall_summary_lists_removed_entries() {
-        let removed = vec![(
-            "SessionStart".to_string(),
-            "rd agent status idle --harness claude".to_string(),
-        )];
-        let summary = format_claude_uninstall_summary(&removed);
+    fn format_claude_uninstall_summary_reports_removed_directory() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+        let summary = format_claude_uninstall_summary(&plugin_dir, true);
         let lines: Vec<&str> = summary.lines().collect();
         assert!(lines[1].trim_start().starts_with('-'));
-        assert!(lines[1].contains("SessionStart"));
-        assert!(lines[1].contains("rd agent status idle --harness claude"));
+        assert!(lines[1].contains("radr"));
     }
 }

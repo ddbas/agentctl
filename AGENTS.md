@@ -25,10 +25,13 @@ agent state is tracked in real time:
 rd install claude
 ```
 
-This patches `~/.claude/settings.json` to register six hook entries that call
-`rd state set` / `rd state clear` at key Claude lifecycle events
-(`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`,
-`SessionEnd`). The command is idempotent — re-running it is safe.
+This installs a Claude Code plugin at `~/.claude/skills/radr/` (containing
+`.claude-plugin/plugin.json` and `hooks/hooks.json`) registering eleven hook
+entries that call `rd agent event` / `rd agent clear` at key Claude Code
+lifecycle events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+`PostToolUse`, `Notification`, `Stop`, `StopFailure`, `SessionEnd`). The command
+never reads or writes `~/.claude/settings.json`, and is idempotent by
+construction — every run deletes and recreates `~/.claude/skills/radr/`.
 
 ## Running Tasks
 
