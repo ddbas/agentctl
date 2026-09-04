@@ -325,186 +325,98 @@ code 0 and write nothing when `$TMUX_PANE` is not set in the environment and
   `$TMUX_PANE` unset and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
-### Requirement: rd install claude registers handlers in user Claude settings
+### Requirement: rd install claude registers handlers via a Claude Code plugin
 
-The `rd install claude` subcommand SHALL patch `~/.claude/settings.json` to
-register eleven Claude hook entries using `rd agent event` and `rd agent clear`.
-`SessionStart` and `SessionEnd` are registered without `async` so they complete
-before Claude proceeds; all other hooks use `async: true`. The command SHALL be
-idempotent and SHALL merge into any existing hook configuration without
-overwriting it. If `~/.claude/settings.json` already contains hook entries
-registered by an older `rd` binary using the pre-rename
-`rd set-state`/`rd clear-state` commands, the subsequently renamed
-`rd state set`/`rd state clear` commands, or the subsequently renamed
-`rd agent status`/`rd agent clear` commands, those entries SHALL be recognized
-as radr-managed, removed as superseded, and replaced with the equivalent
-`rd agent event`/`rd agent clear` entries. If `~/.claude/settings.json` contains
-hook entries using `rd agent watch arm`, `rd agent watch resolve`, or
-`rd agent stop` command strings (from a build of `rd` implementing a feature
-never shipped on the mainline), those entries SHALL be recognized as
-radr-managed and removed as superseded, with no replacement entries added since
-no current hook set corresponds to them. If `~/.claude/settings.json` was
-written by an `rd` binary that predates the two general tool-call-tracking
-entries below, those two entries SHALL be added without disturbing any of the
-nine entries already present.
+The `rd install claude` subcommand SHALL install radr's eleven hook entries as a
+Claude Code plugin under `~/.claude/skills/radr/`, consisting of a plugin
+manifest at `~/.claude/skills/radr/.claude-plugin/plugin.json` and a hooks
+configuration at `~/.claude/skills/radr/hooks/hooks.json`. The command SHALL:
 
-The eleven entries are:
+1. Create `~/.claude/skills/` if it does not already exist.
+2. Delete `~/.claude/skills/radr/` and its full contents if it already exists
+   (`fs::remove_dir_all` or equivalent) — no diffing or in-place patching of an
+   existing plugin installation.
+3. Write `.claude-plugin/plugin.json` and `hooks/hooks.json` fresh, containing
+   the same eleven hook entries the prior `~/.claude/settings.json`-based
+   implementation registered.
 
-| Event              | Matcher                         | Command                                                                                                                                         | Async |
-| ------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `SessionStart`     | `startup\|resume\|clear`        | reads stdin for `session_id`, then `rd agent event SESSION_STARTED --id <session_id> --harness claude`                                          | no    |
-| `UserPromptSubmit` | —                               | reads stdin for `session_id`, then `rd agent event RUN_STARTED --id <session_id> --harness claude`                                              | yes   |
-| `PreToolUse`       | — (unmatched)                   | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_START --id <tool_use_id> --harness claude`                                        | yes   |
-| `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_START --id <tool_use_id> --type elicitation --harness claude`                     | yes   |
-| `PostToolUse`      | — (unmatched)                   | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude`                                       | yes   |
-| `PostToolUse`      | `AskUserQuestion\|ExitPlanMode` | reads stdin for `tool_use_id`, then `rd agent event TOOL_CALL_RESULT --id <tool_use_id> --type elicitation --harness claude`                    | yes   |
-| `PostToolUse`      | — (unmatched)                   | reads stdin for `session_id`, then `rd agent event TOOL_CALL_RESULT --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude` | yes   |
-| `Notification`     | `permission_prompt`             | reads stdin for `session_id`, then `rd agent event TOOL_CALL_START --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`  | yes   |
-| `Stop`             | —                               | reads stdin for `session_id`, then `rd agent event RUN_FINISHED --id <session_id> --harness claude`                                             | yes   |
-| `StopFailure`      | —                               | reads stdin for `session_id`, then `rd agent event RUN_FINISHED --id <session_id> --harness claude`                                             | yes   |
-| `SessionEnd`       | —                               | `rd agent clear`                                                                                                                                | no    |
+`hooks/hooks.json` SHALL use the plugin hooks wrapper format
+(`{ "hooks": { "<Event>": [ { "matcher"?: ..., "hooks": [ { "type": "command", "command": ..., "async"?: true } ] } ] } }`)
+and SHALL register the same event/matcher/command/async combinations as before:
+`SessionStart` and `SessionEnd` without `async` (so they complete before Claude
+proceeds); `UserPromptSubmit`, both `PreToolUse` entries, all three
+`PostToolUse` entries, `Notification`, `Stop`, and `StopFailure` with
+`async: true`.
 
-Note: `PreToolUse` and `PostToolUse` each appear twice — once unmatched (every
-tool, untyped, drives `active_tools`) and once matched (interactive tools only,
-`--type elicitation`, drives `blocked` status) — plus `PostToolUse` appears a
-third time unmatched with the `"perm-<session_id>"` id to close out
-permission-prompt blocks, for three `PostToolUse` entries total.
+This command SHALL NOT read from, write to, or otherwise inspect
+`~/.claude/settings.json`. It SHALL NOT attempt to detect, migrate, or clean up
+any radr hook entries a previous `rd` version may have registered in
+`~/.claude/settings.json`.
 
-#### Scenario: First-time install on a clean settings file
+#### Scenario: First-time install with no prior plugin present
+
+- **WHEN** the user runs `rd install claude` and neither `~/.claude/skills/` nor
+  `~/.claude/skills/radr/` exists
+- **THEN** `~/.claude/skills/` is created, `~/.claude/skills/radr/` is created
+  containing `.claude-plugin/plugin.json` and `hooks/hooks.json`, and
+  `hooks/hooks.json` registers all eleven radr hook entries
+
+#### Scenario: Re-install replaces the existing plugin directory
+
+- **WHEN** the user runs `rd install claude` and `~/.claude/skills/radr/`
+  already exists (from a prior install, with any contents, including files not
+  written by `rd`)
+- **THEN** the existing `~/.claude/skills/radr/` directory and all its contents
+  are deleted, and a fresh `~/.claude/skills/radr/` is written containing
+  exactly `.claude-plugin/plugin.json` and `hooks/hooks.json` with the current
+  eleven hook entries
+
+#### Scenario: Install does not touch settings.json
 
 - **WHEN** the user runs `rd install claude` and `~/.claude/settings.json`
-  contains no radr hook entries
-- **THEN** the file is updated with all eleven entries listed above
+  exists with unrelated user configuration or with radr hook entries from a
+  previous `rd` version
+- **THEN** `~/.claude/settings.json` is not read or modified in any way
 
-#### Scenario: Idempotent re-install
+#### Scenario: Install creates the skills directory when absent
 
-- **WHEN** the user runs `rd install claude` a second time
-- **THEN** no duplicate entries are added and the file content is identical to
-  after the first run
+- **WHEN** the user runs `rd install claude` and `~/.claude/skills/` does not
+  exist
+- **THEN** `~/.claude/skills/` is created before the `radr` plugin directory is
+  written
 
-#### Scenario: Install merges with existing hooks
+### Requirement: rd uninstall claude removes the radr plugin directory
 
-- **WHEN** `~/.claude/settings.json` already contains non-radr hook entries
-- **THEN** those existing entries are preserved and the radr entries are added
-  alongside them
+The `rd uninstall claude` subcommand SHALL remove the `~/.claude/skills/radr/`
+directory and all its contents if it exists. It SHALL NOT read from, write to,
+or otherwise inspect `~/.claude/settings.json`, and SHALL NOT attempt to remove
+any radr hook entries a previous `rd` version may have registered there. The
+command SHALL be idempotent: running it again after the directory has been
+removed (or when it never existed) SHALL make no further filesystem changes and
+SHALL exit 0.
 
-#### Scenario: Install migrates pre-rename hook commands
+#### Scenario: Uninstall removes an existing plugin directory
 
-- **WHEN** `~/.claude/settings.json` contains radr hook entries using the old
-  `rd set-state ...` / `rd clear-state` commands (from a `rd` binary installed
-  before any of the renames)
-- **THEN** running `rd install claude` removes the old entries and adds the
-  equivalent new-form entries, with no duplicate or leftover old-style entries
-  remaining
+- **WHEN** the user runs `rd uninstall claude` and `~/.claude/skills/radr/`
+  exists
+- **THEN** `~/.claude/skills/radr/` and all its contents are deleted, and the
+  command exits 0
 
-#### Scenario: Install migrates rd state to rd agent hook commands
+#### Scenario: Uninstall is a no-op when the plugin is not installed
 
-- **WHEN** `~/.claude/settings.json` contains radr hook entries using the
-  intermediate `rd state set ...` / `rd state clear` commands
-- **THEN** running `rd install claude` removes the old entries and adds the
-  equivalent new-form entries, with no duplicate or leftover old-style entries
-  remaining
+- **WHEN** the user runs `rd uninstall claude` and `~/.claude/skills/radr/` does
+  not exist (whether or not `~/.claude/skills/` itself exists)
+- **THEN** no filesystem changes occur and the command exits 0
 
-#### Scenario: Install migrates rd agent status to rd agent event hook commands
-
-- **WHEN** `~/.claude/settings.json` contains radr hook entries using the
-  `rd agent status ...` / `rd agent clear` commands (from a `rd` binary
-  installed after the `state`→`agent` rename but before this `status`→`event`
-  rename)
-- **THEN** running `rd install claude` removes the old entries and adds the
-  equivalent `rd agent event ...` / `rd agent clear` entries, with no duplicate
-  or leftover old-style entries remaining
-
-#### Scenario: Install removes orphaned Monitor-watch and stop entries with no replacement
-
-- **WHEN** `~/.claude/settings.json` contains a `PreToolUse` entry (matcher
-  `Monitor`) invoking `rd agent watch arm --harness claude`, a `PostToolUse`
-  entry (matcher `Monitor`) invoking `rd agent watch resolve --harness claude`,
-  and `Stop`/`StopFailure` entries invoking `rd agent stop --harness claude`
-  (left over from a build of `rd` implementing a feature never shipped on the
-  mainline)
-- **THEN** running `rd install claude` removes all four entries, reports each in
-  the summary's `[removed]` list, adds no replacement entries for them, and
-  still adds/leaves-unchanged the eleven current entries listed above
-
-#### Scenario: Install adds the two tool-call-tracking entries to a nine-entry file
-
-- **WHEN** `~/.claude/settings.json` contains the nine radr hook entries
-  installed by an `rd` binary that predates the general tool-call-tracking
-  entries, and none of the nine entries' commands, matchers, or async flags
-  differ from the current table
-- **THEN** running `rd install claude` adds the two new unmatched
-  `PreToolUse`/`PostToolUse` entries, leaves the nine existing entries
-  unchanged, and the file ends up with eleven radr entries total
-
-### Requirement: rd uninstall claude removes only radr-managed hook entries
-
-The `rd uninstall claude` subcommand SHALL remove radr-managed hook entries from
-`~/.claude/settings.json`, recognizing the current-form commands
-(`rd agent event ...` / `rd agent clear`) as well as all prior legacy forms
-(`rd agent status ...` / `rd agent clear`, `rd state set ...` /
-`rd state clear`, the earlier `rd set-state ...` / `rd clear-state`, and the
-never-shipped `rd agent watch arm`/`rd agent watch resolve`/`rd agent stop`
-forms) using the same recognition logic as `rd install claude`'s migration path.
-All non-radr content in the file, including non-radr hook entries under the same
-event and any other top-level settings keys, SHALL be preserved unchanged. The
-command SHALL be idempotent: running it again after all radr entries are removed
-SHALL make no further changes.
-
-#### Scenario: Uninstall removes all eleven radr hook entries
+#### Scenario: Uninstall does not touch settings.json
 
 - **WHEN** the user runs `rd uninstall claude` and `~/.claude/settings.json`
-  contains the eleven radr-managed hook entries installed by `rd install claude`
-- **THEN** all eleven entries are removed and the command prints a summary
-  listing each removed entry (prefixed with `-`)
+  contains radr hook entries from a previous `rd` version
+- **THEN** `~/.claude/settings.json` is not read or modified in any way
 
-#### Scenario: Uninstall preserves non-radr hooks under the same event
+#### Scenario: Uninstall leaves the skills directory itself in place
 
-- **WHEN** `~/.claude/settings.json` contains a non-radr hook entry under
-  `UserPromptSubmit` alongside the radr-managed entry for that event
-- **THEN** `rd uninstall claude` removes only the radr-managed entry and leaves
-  the non-radr entry in place
-
-#### Scenario: Uninstall removes legacy pre-rename entries
-
-- **WHEN** `~/.claude/settings.json` contains radr hook entries using any of the
-  earlier `rd set-state ...` / `rd clear-state`, `rd state set ...` /
-  `rd state clear`, or `rd agent status ...` / `rd agent clear` command strings
-  (from an older `rd` binary, not yet migrated by `rd install claude`)
-- **THEN** `rd uninstall claude` recognizes and removes those entries as
-  radr-managed
-
-#### Scenario: Uninstall removes orphaned Monitor-watch and stop entries
-
-- **WHEN** `~/.claude/settings.json` contains hook entries invoking
-  `rd agent watch arm --harness claude`,
-  `rd agent watch resolve --harness claude`, or `rd agent stop --harness claude`
-- **THEN** `rd uninstall claude` recognizes and removes those entries as
-  radr-managed, alongside any other radr entries present
-
-#### Scenario: Uninstall prunes empty event arrays and the hooks key
-
-- **WHEN** removing radr entries leaves an event's array empty
-- **THEN** that event key is removed from `hooks`; if `hooks` becomes an empty
-  object, the `hooks` key is removed from the settings file; the settings file
-  itself is never deleted
-
-#### Scenario: Uninstall is a no-op when no radr entries are present
-
-- **WHEN** the user runs `rd uninstall claude` and `~/.claude/settings.json`
-  contains no radr-managed hook entries (including when the file does not exist)
-- **THEN** no filesystem write occurs, the command prints a summary indicating
-  there was nothing to remove (prefixed with `=`), and exits 0
-
-#### Scenario: Uninstall is idempotent
-
-- **WHEN** the user runs `rd uninstall claude` twice in succession
-- **THEN** the second run makes no further changes and reports nothing left to
-  remove
-
-#### Scenario: Uninstall does not touch multi-command hook entries
-
-- **WHEN** a single hook entry's `hooks` array contains both a radr-managed
-  command and a non-radr command mixed together
-- **THEN** `rd uninstall claude` leaves that entry entirely untouched, since it
-  cannot be safely attributed as solely radr-owned
+- **WHEN** the user runs `rd uninstall claude` and `~/.claude/skills/` contains
+  other, non-radr entries alongside `radr/`
+- **THEN** only `~/.claude/skills/radr/` is removed; `~/.claude/skills/` and its
+  other contents are left untouched
