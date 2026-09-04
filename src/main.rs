@@ -37,9 +37,11 @@ enum Commands {
     ///
     /// Queries every pane across all tmux sessions via `tmux list-panes -a`
     /// and prints one line per pane whose foreground process is a known agent
-    /// harness (`claude` or `pi`).  By default, output has five left-aligned
-    /// columns: `<agent>  <session>  <window>.<pane>  <status>  <activeTools>`.
-    /// The rendered columns can be customized via `--columns`/`-c`.
+    /// harness (`claude` or `pi`).  By default, output has five tab-delimited
+    /// columns: `<agent>\t<session>\t<window>.<pane>\t<status>\t<activeTools>`.
+    /// Every row has the same number of tab-separated fields, even when a
+    /// trailing column is empty. The rendered columns can be customized via
+    /// `--columns`/`-c`.
     ///
     /// `node` panes are resolved to `pi` when the pane's shell has a direct
     /// child process whose argv[0] basename is `pi`.

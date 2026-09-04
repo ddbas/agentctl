@@ -2,10 +2,13 @@
 //!
 //! Shells out to `tmux list-panes -a` and prints one line per pane whose
 //! `pane_current_command` exactly matches a known agent name (`claude` or
-//! `pi`).  Output is columnar plain text; by default five left-aligned
-//! columns are shown: `<agent-name>  <session-name>  <window-index>.<pane-index>
-//!  <status>  <active-tools>`.  The rendered columns can be customized via
-//! `--columns`/`-c` (see [`Field`] and [`DEFAULT_COLUMNS`]).
+//! `pi`).  Output is tab-delimited plain text; by default five columns are
+//! shown, separated by a single tab character: `<agent-name>\t<session-name>
+//! \t<window-index>.<pane-index>\t<status>\t<active-tools>`.  Every row has
+//! the same number of tab-separated fields as `columns`, even when a
+//! trailing column's value is empty, so the output can be reliably parsed
+//! with tools like `cut -f` or `awk -F'\t'`.  The rendered columns can be
+//! customized via `--columns`/`-c` (see [`Field`] and [`DEFAULT_COLUMNS`]).
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -13,7 +16,6 @@ use std::io::IsTerminal;
 use std::process::Command;
 
 use owo_colors::OwoColorize;
-use unicode_width::UnicodeWidthStr;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -359,21 +361,20 @@ fn cell_value(
     }
 }
 
-/// Format a slice of agent pane references as columnar plain text.
+/// Format a slice of agent pane references as tab-delimited plain text.
 ///
 /// Produces one line per pane, rendering exactly the columns listed in
 /// `columns`, in the given order (duplicates rendered as repeated columns,
-/// no deduplication). Each column is padded to the maximum Unicode display
-/// width of its values across all rows, plus two spaces of separation; after
-/// all columns for a row are padded and joined, any trailing whitespace is
-/// trimmed from that row's line. Returns an empty string when `panes` is
-/// empty.
+/// no deduplication). Columns are separated by tab characters (`\t`) without
+/// padding, and every row always has `columns.len() - 1` tab separators —
+/// including when a trailing column's value is empty (e.g. an empty
+/// `activeTools` or `updatedAt` cell) — so downstream tools splitting on
+/// `\t` (e.g. `cut -f`, `awk -F'\t'`) see a consistent field count across
+/// all rows. Returns an empty string when `panes` is empty.
 ///
 /// When `use_color` is `true`, whichever column position(s) hold
 /// [`Field::Status`] are wrapped in an ANSI foreground color escape sequence
-/// keyed to the agent's state (see [`colorize_state`]); column widths are
-/// always computed from the plain (uncolored) text, so the escape sequences
-/// never affect alignment.
+/// keyed to the agent's state (see [`colorize_state`]).
 pub fn format_panes(
     panes: &[&PaneEntry],
     state_map: &HashMap<String, AgentInfo>,
@@ -408,31 +409,26 @@ pub fn format_panes(
         })
         .collect();
 
-    // Per-column width = widest cell's display width in that column.
-    let mut widths = vec![0usize; columns.len()];
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.width());
-        }
-    }
+    // With tab delimiters, we don't need to compute column widths for padding.
+    // Every row keeps exactly `columns.len()` tab-separated fields, even when
+    // a trailing field is empty, so machine consumers can rely on a fixed
+    // field count per line.
 
     let mut output = String::new();
     for (row, status) in rows.iter().zip(statuses.iter()) {
-        let mut line = String::new();
-        for (i, field) in columns.iter().enumerate() {
-            let cell = &row[i];
-            let rendered = if *field == Field::Status {
-                colorize_state(*status, cell, use_color)
-            } else {
-                cell.clone()
-            };
-            line.push_str(&rendered);
-            if i + 1 < columns.len() {
-                let pad = widths[i] + 2 - cell.width();
-                line.push_str(&" ".repeat(pad));
-            }
-        }
-        output.push_str(line.trim_end());
+        let rendered_cells: Vec<String> = columns
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let cell = &row[i];
+                if *field == Field::Status {
+                    colorize_state(*status, cell, use_color)
+                } else {
+                    cell.clone()
+                }
+            })
+            .collect();
+        output.push_str(&rendered_cells.join("\t"));
         output.push('\n');
     }
     output
@@ -610,8 +606,9 @@ mod tests {
     // ── format_panes ────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn format_panes_aligns_columns_with_wide_unicode() {
-        // 🌳 is a wide character (2 terminal columns, 4 UTF-8 bytes, 1 scalar)
+    fn format_panes_handles_wide_unicode_with_tabs() {
+        // With tab delimiters, wide unicode characters (like 🌳) don't affect column alignment
+        // since tabs provide the delimiter, not padding.
         let data = vec![
             pane_with_id("pi", "dotfiles", 0, 0, "%1"),
             pane_with_id("pi", "🌳 radr (claude-hooks)", 0, 0, "%2"),
@@ -623,29 +620,11 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3);
 
-        // Find the byte offset of the state column start on each line.
-        // Because the session column is padded to the same display width,
-        // the state token should appear at the same display-column position.
-        // We check this by measuring the display width of everything before
-        // the final whitespace-delimited token on each line.
-        fn state_display_col(line: &str) -> usize {
-            // The state is the last whitespace-delimited word.
-            let state_start = line.rfind(|c: char| c == ' ').map(|i| i + 1).unwrap_or(0);
-            UnicodeWidthStr::width(&line[..state_start])
-        }
-
-        let col0 = state_display_col(lines[0]);
-        let col1 = state_display_col(lines[1]);
-        let col2 = state_display_col(lines[2]);
-
-        assert_eq!(
-            col0, col1,
-            "state column misaligned between ASCII and emoji rows:\n{output}"
-        );
-        assert_eq!(
-            col0, col2,
-            "state column misaligned between ASCII and emoji rows:\n{output}"
-        );
+        // All lines should have tab-separated columns (5 columns with 4 tabs,
+        // including the trailing tab before the empty activeTools cell).
+        assert_eq!(lines[0], "pi\tdotfiles\t0.0\tunknown\t");
+        assert_eq!(lines[1], "pi\t🌳 radr (claude-hooks)\t0.0\tunknown\t");
+        assert_eq!(lines[2], "pi\t🌳 radr (list-sort)\t0.0\tunknown\t");
     }
 
     #[test]
@@ -661,9 +640,9 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3, "expected 3 lines, got:\n{output}");
 
-        assert_eq!(lines[0], "claude  my-session    0.0  unknown");
-        assert_eq!(lines[1], "pi      work-session  1.0  unknown");
-        assert_eq!(lines[2], "pi      work-session  2.3  unknown");
+        assert_eq!(lines[0], "claude\tmy-session\t0.0\tunknown\t");
+        assert_eq!(lines[1], "pi\twork-session\t1.0\tunknown\t");
+        assert_eq!(lines[2], "pi\twork-session\t2.3\tunknown\t");
     }
 
     #[test]
@@ -671,7 +650,7 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
-        assert_eq!(output, "claude  dev  0.0  unknown\n");
+        assert_eq!(output, "claude\tdev\t0.0\tunknown\t\n");
     }
 
     #[test]
@@ -707,7 +686,7 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
-        assert_eq!(output, "claude  dev  0.0  working  1 tool\n");
+        assert_eq!(output, "claude\tdev\t0.0\tworking\t1 tool\n");
     }
 
     #[test]
@@ -720,7 +699,7 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
-        assert_eq!(output, "claude  dev  0.0  working  3 tools\n");
+        assert_eq!(output, "claude\tdev\t0.0\tworking\t3 tools\n");
     }
 
     #[test]
@@ -732,7 +711,9 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
-        assert_eq!(output, "claude  dev  0.0  working\n");
+        // The trailing activeTools column is empty but its tab separator is
+        // still present, so every row has the same field count.
+        assert_eq!(output, "claude	dev	0.0	working	\n");
     }
 
     #[test]
@@ -742,7 +723,7 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%missing")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
-        assert_eq!(output, "claude  dev  0.0  unknown\n");
+        assert_eq!(output, "claude	dev	0.0	unknown	\n");
     }
 
     #[test]
@@ -761,8 +742,8 @@ mod tests {
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "claude  dev  0.0  working  1 tool");
-        assert_eq!(lines[1], "pi      dev  0.1  idle");
+        assert_eq!(lines[0], "claude\tdev\t0.0\tworking\t1 tool");
+        assert_eq!(lines[1], "pi\tdev\t0.1\tidle\t");
     }
 
     // ── DEFAULT_COLUMNS_STR / DEFAULT_COLUMNS consistency ─────────────────
@@ -788,7 +769,7 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, &[Field::Status, Field::Agent]);
-        assert_eq!(output, "working  claude\n");
+        assert_eq!(output, "working\tclaude\n");
     }
 
     #[test]
@@ -809,7 +790,11 @@ mod tests {
             false,
             &[Field::Agent, Field::Agent],
         );
-        assert_eq!(output, "claude  claude\n");
+        assert_eq!(
+            output,
+            "claude	claude
+"
+        );
     }
 
     #[test]
@@ -856,7 +841,14 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, &[Field::Agent, Field::UpdatedAt]);
-        assert_eq!(output, format!("claude  {expected}\n"));
+        assert_eq!(
+            output,
+            format!(
+                "claude	{}
+",
+                expected
+            )
+        );
     }
 
     #[test]
@@ -869,8 +861,9 @@ mod tests {
             false,
             &[Field::Agent, Field::UpdatedAt],
         );
-        // Trailing whitespace trim removes the empty last column entirely.
-        assert_eq!(output, "claude\n");
+        // The empty updatedAt cell still gets a tab separator, keeping every
+        // row at a fixed 2-field count.
+        assert_eq!(output, "claude\t\n");
     }
 
     // ── generalized status coloring at arbitrary positions ──────────────────
@@ -884,9 +877,9 @@ mod tests {
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, true, &[Field::Status, Field::Agent]);
-        assert!(output.starts_with("\u{1b}[33mworking\u{1b}[39m"));
+        assert!(output.starts_with("\u{1b}[33mworking\u{1b}[39m\t"));
         // Only the status column is colorized; agent is never colorized.
-        let after_status = output.trim_end().rsplit("  ").next().unwrap();
+        let after_status = output.trim_end().split('\t').last().unwrap();
         assert_eq!(after_status, "claude");
     }
 
@@ -911,10 +904,10 @@ mod tests {
         );
     }
 
-    // ── generalized trailing whitespace trim for a custom last column ───────
+    // ── generalized fixed field count for a custom last column ──────────────
 
     #[test]
-    fn format_panes_trims_trailing_whitespace_for_custom_last_column() {
+    fn format_panes_keeps_fixed_field_count_for_custom_last_column() {
         let data = vec![
             pane_with_id("claude", "dev", 0, 0, "%missing1"),
             pane_with_id("pi", "dev", 0, 1, "%missing2"),
@@ -926,11 +919,14 @@ mod tests {
             false,
             &[Field::Agent, Field::UpdatedAt],
         );
+        // Every row must split into exactly 2 tab-separated fields, even
+        // though the trailing `updatedAt` column is empty for both panes.
         for line in output.lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
             assert_eq!(
-                line,
-                line.trim_end(),
-                "line has trailing whitespace: {line:?}"
+                fields.len(),
+                2,
+                "expected 2 tab-separated fields, got {fields:?} from line: {line:?}"
             );
         }
     }
@@ -953,11 +949,9 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 2);
 
-        fn agent_display_col(line: &str) -> usize {
-            let start = line.rfind(|c: char| c == ' ').map(|i| i + 1).unwrap_or(0);
-            UnicodeWidthStr::width(&line[..start])
-        }
-        assert_eq!(agent_display_col(lines[0]), agent_display_col(lines[1]));
+        // Tab-delimited format should have session and agent separated by tabs
+        assert_eq!(lines[0], "dotfiles\tclaude");
+        assert_eq!(lines[1], "🌳 radr (claude-hooks)\tpi");
     }
 
     // ── colorize_state ───────────────────────────────────────────────────────────────────
@@ -1031,7 +1025,7 @@ mod tests {
         assert!(output.contains("\u{1b}[32mdone\u{1b}[39m"));
         // unknown remains uncolored
         let unknown_line = output.lines().last().unwrap();
-        assert!(unknown_line.ends_with("unknown"));
+        assert!(unknown_line.ends_with("unknown\t"));
         assert!(!unknown_line.contains("\u{1b}["));
     }
 
@@ -1046,9 +1040,9 @@ mod tests {
         let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
 
         let lines: Vec<&str> = output.lines().collect();
-        assert_eq!(lines[0], "claude  my-session    0.0  unknown");
-        assert_eq!(lines[1], "pi      work-session  1.0  unknown");
-        assert_eq!(lines[2], "pi      work-session  2.3  unknown");
+        assert_eq!(lines[0], "claude\tmy-session\t0.0\tunknown\t");
+        assert_eq!(lines[1], "pi\twork-session\t1.0\tunknown\t");
+        assert_eq!(lines[2], "pi\twork-session\t2.3\tunknown\t");
         assert!(!output.contains("\u{1b}["));
     }
 

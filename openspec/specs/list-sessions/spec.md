@@ -38,22 +38,22 @@ If tmux is unreachable the reconciliation steps above are skipped entirely (no
 state files are deleted) and the command exits 0 with no output.
 
 By default (no `--columns` given), each output line SHALL contain five
-left-aligned columns:
-`<agent-name>  <session-name>  <window-index>.<pane-index>  <status>  <active-tools>`.
+tab-delimited columns:
+`<agent-name>\t<session-name>\t<window-index>.<pane-index>\t<status>\t<active-tools>`.
 The `status` column SHALL display the current `AgentState` for the agent (as
 lowercase string), or `unknown` if the pane has no state file or a contradictory
 one. The full set of selectable columns, their names, per-column rendering rules
 (including `activeTools`'s `N tool`/`N tools`/empty format and `updatedAt`'s RFC
-3339 format), status-column coloring, the trailing-whitespace trimming rule, and
-`--columns`-driven customization are defined by the `list-columns` capability.
+3339 format), status-column coloring, the tab-delimiter and fixed-field-count
+rules, and `--columns`-driven customization are defined by the `list-columns`
+capability.
 
-Column widths SHALL be computed using **Unicode terminal display width** (the
-number of terminal columns a string occupies), not byte length or Unicode scalar
-count. This behaviour is unchanged by the introduction of `--columns` and MUST
-NOT regress; the precise, testable alignment rules (two-space separation,
-per-column width equal to its widest cell, identical start position across rows)
-are defined by the `list-columns` capability and apply regardless of which
-columns are selected.
+Columns SHALL be separated by a single tab character (`\t`) with no padding.
+This behaviour is unchanged by the introduction of `--columns` and MUST NOT
+regress; the precise, testable delimiter rules (single tab between columns, no
+padding, fixed field count per row regardless of empty trailing values) are
+defined by the `list-columns` capability and apply regardless of which columns
+are selected.
 
 #### Scenario: Agent panes exist across multiple sessions
 
@@ -63,13 +63,11 @@ columns are selected.
 - **THEN** the output contains exactly two lines — one for `claude` and one for
   `pi` — and panes running unrelated processes are omitted
 
-#### Scenario: Default output is columnar and left-aligned
+#### Scenario: Default output is tab-delimited
 
 - **WHEN** two or more matching panes are printed with no `--columns` flag
 - **THEN** all five default columns (agent, session, window.pane, status,
-  activeTools) are left-aligned, each padded to the display width of the longest
-  value in that column plus two spaces, where display width is measured in
-  terminal columns
+  activeTools) are separated by a single tab character, with no padding
 
 #### Scenario: Agent name appears in the first column by default
 
@@ -124,12 +122,13 @@ columns are selected.
 - **THEN** no state files are deleted and the command exits with code 0 and no
   output (consistent with existing no-tmux behaviour)
 
-#### Scenario: Columns align correctly when session name contains wide Unicode characters
+#### Scenario: Session names containing wide Unicode characters render normally
 
 - **WHEN** the user runs `rd list` and one session name contains an emoji (e.g.
   `🌳 radr (claude-hooks)`) while another contains only ASCII (e.g. `dotfiles`)
-- **THEN** the `status` column for every row starts at the same terminal column
-  position, despite the emoji occupying two terminal columns
+- **THEN** each row renders that session name verbatim as one tab-delimited
+  field, with no padding or alignment applied (wide characters no longer affect
+  column positioning since there is no padding to compute)
 
 #### Scenario: Default sort puts most recently active agents first
 
