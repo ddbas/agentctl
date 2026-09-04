@@ -4,8 +4,8 @@
 
 Specification for radr's Claude harness integration: the eleven Claude lifecycle
 hook entries (`SessionStart`, `UserPromptSubmit`, `PreToolUse` (unmatched and
-matched), `PostToolUse` (unmatched untyped, matched, and unmatched "perm-" id),
-`Stop`, `StopFailure`, `Notification`, `SessionEnd`) that keep the agent state
+matched), `PostToolUse` (unmatched and matched), `PostToolUseFailure` (unmatched
+and matched), `Stop`, `StopFailure`, `SessionEnd`) that keep the agent state
 file in sync with Claude's current activity, and the `rd install claude` command
 that registers them.
 
@@ -117,13 +117,12 @@ matcher (firing for every tool) to invoke a command that reads the hook's JSON
 payload from stdin, extracts `tool_use_id`, and invokes
 `rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude` (async, no
 `--type`), decrementing the pane's `active_tools` count for every completed tool
-call, mirroring the pi extension's `tool_result` handler. This entry is
-independent of the unmatched `PostToolUse` →
-`TOOL_CALL_RESULT --id "perm-<session_id>-<nonce>" --type permission-prompt`
-entry, which continues to serve only permission-prompt block closure and is
-unaffected by this requirement.
+call, mirroring the pi extension's `tool_result` handler. This entry only fires
+for tool calls that succeed; failed tool calls are covered by the matching
+unmatched `PostToolUseFailure` registration instead, since Claude Code fires
+exactly one of the two per tool call.
 
-#### Scenario: Any tool call completion decrements active_tools
+#### Scenario: Any successful tool call completion decrements active_tools
 
 - **WHEN** Claude fires the unmatched `PostToolUse` hook for any tool call and
   `$TMUX_PANE` is set
@@ -159,87 +158,49 @@ the same tool call.
   `PostToolUse` hook fires for that tool call, and `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"status": "working"`
 
-### Requirement: Unmatched PostToolUse hook closes out permission-prompt blocks
+### Requirement: PostToolUseFailure hook calls rd agent event TOOL_CALL_RESULT for every failed tool call
 
-The Claude `PostToolUse` hook SHALL additionally be registered without a tool
-matcher (firing for every tool) to invoke a command that reads the hook's JSON
-payload from stdin, extracts `session_id`, and invokes
-`rd agent event TOOL_CALL_RESULT --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`
-(async), where `<nonce>` is a per-invocation unique value (e.g. a random number)
-distinguishing this invocation's `events.jsonl` entry from other
-permission-prompt events in the same session. This closes out a `blocked` status
-opened by the `Notification` hook's `permission_prompt` registration,
-decrementing the pane's `blocked_prompts` counter by one; `blocked` is only
-cleared once `blocked_prompts` returns to `0`, so a still-pending, concurrent
-permission prompt opened separately is not prematurely cleared. Unlike the
-previous `--type elicitation` form, this entry does NOT mutate the pane's
-`active_tools` counter (see the `agent-events` spec's `blocked_prompts`
-requirement).
+The Claude `PostToolUseFailure` hook SHALL be registered without a tool matcher
+(firing for every tool whose call fails) to invoke a command that reads the
+hook's JSON payload from stdin, extracts `tool_use_id`, and invokes
+`rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude` (async, no
+`--type`), decrementing the pane's `active_tools` count for every failed tool
+call, exactly mirroring the untyped `PostToolUse` registration. This closes out
+the `TOOL_CALL_START` opened by the unmatched `PreToolUse` registration for tool
+calls that fail rather than succeed, since Claude Code fires exactly one of
+`PostToolUse`/`PostToolUseFailure` per tool call, never both.
 
-#### Scenario: Tool call after a resolved permission prompt clears blocked
+#### Scenario: A failed tool call still decrements active_tools
 
-- **WHEN** a `permission_prompt` `Notification` set the pane's status to
-  `blocked` (with `blocked_prompts` `1`), the user grants permission, the tool
-  executes, and Claude fires the unmatched `PostToolUse` hook for that tool call
-- **THEN** the agent's state file is updated to `"status": "working"` and
-  `blocked_prompts` becomes `0`
+- **WHEN** Claude fires the unmatched `PostToolUseFailure` hook for a tool call
+  that errored (e.g. a nonzero Bash exit or an MCP tool error) and `$TMUX_PANE`
+  is set
+- **THEN** the state file's `active_tools` count is decremented by one (never
+  below zero)
 
-#### Scenario: Tool call with no outstanding permission prompt is a no-op for status
+#### Scenario: Success and failure never both fire for the same tool call
 
-- **WHEN** no `permission_prompt` `Notification` is outstanding for the current
-  session (`blocked_prompts` is `0`) and Claude fires the unmatched
-  `PostToolUse` hook after any tool call
-- **THEN** the `TOOL_CALL_RESULT` event is dispatched and logged but the agent's
-  status is unchanged (`blocked_prompts` remains `0`, clamped)
+- **WHEN** a single tool call completes
+- **THEN** Claude Code fires exactly one of the unmatched `PostToolUse` or
+  unmatched `PostToolUseFailure` hooks for that `tool_use_id`, never both, so
+  `active_tools` is decremented exactly once per completed tool call regardless
+  of outcome
 
-#### Scenario: Resolving one of two concurrent permission prompts does not clear blocked
+### Requirement: PostToolUseFailure hook calls rd agent event TOOL_CALL_RESULT for failed interactive tools
 
-- **WHEN** two `permission_prompt` `Notification`s have each set the pane's
-  status to `blocked` (`blocked_prompts` is `2`), and Claude fires the unmatched
-  `PostToolUse` hook once (closing one of the two)
-- **THEN** the agent's state file's `status` remains `"blocked"` and
-  `blocked_prompts` becomes `1`
+The Claude `PostToolUseFailure` hook SHALL invoke a command that reads the
+hook's JSON payload from stdin, extracts `tool_use_id`, and invokes
+`rd agent event TOOL_CALL_RESULT --id <tool_use_id> --type elicitation --harness claude`
+(async) when registered with `matcher: "AskUserQuestion|ExitPlanMode"`, closing
+out the `blocked` status opened by the matching `PreToolUse` registration for
+the same tool call, for the (rare) case where an interactive tool call itself
+fails rather than completing normally.
 
-#### Scenario: Unmatched PostToolUse close does not mutate active_tools
+#### Scenario: AskUserQuestion tool call fails inside tmux
 
-- **WHEN** a pane's `active_tools` is `1` (a real tool call genuinely in flight)
-  and Claude fires the unmatched `PostToolUse` permission-close hook
-- **THEN** `active_tools` remains `1`
-
-### Requirement: Notification hook calls rd agent event TOOL_CALL_START on permission prompts
-
-The Claude `Notification` hook SHALL invoke a command that reads the hook's JSON
-payload from stdin, extracts `session_id`, and invokes
-`rd agent event TOOL_CALL_START --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`
-(async) when registered with `matcher: "permission_prompt"`, where `<nonce>` is
-a per-invocation unique value (e.g. a random number) distinguishing this
-invocation's `events.jsonl` entry from other permission-prompt events in the
-same session. Because Claude's hook system only fires the hook when the matcher
-matches, no notification-type branching logic is required inside `rd`. This
-increments the pane's `blocked_prompts` counter by one (see the `agent-events`
-spec) and does NOT mutate `active_tools`.
-
-#### Scenario: permission_prompt notification fires inside tmux
-
-- **WHEN** Claude fires the `Notification` hook with `notification_type` of
-  `permission_prompt` and `$TMUX_PANE` is set
-- **THEN** the agent's state file is updated to `"status": "blocked"` and
-  `blocked_prompts` is incremented by one
-
-#### Scenario: Non-permission notification is not forwarded
-
-- **WHEN** Claude fires the `Notification` hook with any `notification_type`
-  other than `permission_prompt`
-- **THEN** the hook is not triggered (filtered by Claude's `matcher`) and no
-  status change occurs
-
-#### Scenario: A second concurrent permission_prompt notification opens independently
-
-- **WHEN** a pane's status is already `blocked` with `blocked_prompts` `1`, and
-  Claude fires a second `Notification` hook with `notification_type` of
-  `permission_prompt` (for a different, concurrent tool awaiting approval)
-- **THEN** the agent's state file's `status` remains `"blocked"` and
-  `blocked_prompts` becomes `2`
+- **WHEN** Claude's `AskUserQuestion` tool call fails and Claude fires the
+  matched `PostToolUseFailure` hook, and `$TMUX_PANE` is set
+- **THEN** the agent's state file is updated to `"status": "working"`
 
 ### Requirement: Stop hook calls rd agent event RUN_FINISHED
 
@@ -344,9 +305,12 @@ configuration at `~/.claude/skills/radr/hooks/hooks.json`. The command SHALL:
 (`{ "hooks": { "<Event>": [ { "matcher"?: ..., "hooks": [ { "type": "command", "command": ..., "async"?: true } ] } ] } }`)
 and SHALL register the same event/matcher/command/async combinations as before:
 `SessionStart` and `SessionEnd` without `async` (so they complete before Claude
-proceeds); `UserPromptSubmit`, both `PreToolUse` entries, all three
-`PostToolUse` entries, `Notification`, `Stop`, and `StopFailure` with
-`async: true`.
+proceeds); `UserPromptSubmit`, both `PreToolUse` entries, both `PostToolUse`
+entries, both `PostToolUseFailure` entries, `Stop`, and `StopFailure` with
+`async: true`. The eleven entries are: `SessionStart`, `UserPromptSubmit`,
+`PreToolUse` (unmatched and matched), `PostToolUse` (unmatched and matched),
+`PostToolUseFailure` (unmatched and matched), `Stop`, `StopFailure`, and
+`SessionEnd`. There is no `Notification` registration.
 
 This command SHALL NOT read from, write to, or otherwise inspect
 `~/.claude/settings.json`. It SHALL NOT attempt to detect, migrate, or clean up
@@ -359,7 +323,8 @@ any radr hook entries a previous `rd` version may have registered in
   `~/.claude/skills/radr/` exists
 - **THEN** `~/.claude/skills/` is created, `~/.claude/skills/radr/` is created
   containing `.claude-plugin/plugin.json` and `hooks/hooks.json`, and
-  `hooks/hooks.json` registers all eleven radr hook entries
+  `hooks/hooks.json` registers all eleven radr hook entries, including both
+  `PostToolUseFailure` entries and no `Notification` entry
 
 #### Scenario: Re-install replaces the existing plugin directory
 

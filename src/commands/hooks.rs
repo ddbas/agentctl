@@ -239,13 +239,15 @@ struct ClaudeHookDef {
 ///
 /// Every command reads the hook's JSON payload from stdin via `jq` and
 /// forwards the extracted field as `--id` to `rd agent event`/`rd agent
-/// clear`, per `specs/claude-state-hooks/spec.md`. `PreToolUse` and
-/// `PostToolUse` each appear twice: once unmatched (every tool, untyped,
-/// drives `active_tools` via plain `TOOL_CALL_START`/`TOOL_CALL_RESULT`) and
-/// once matched (interactive tools only, `--type elicitation`, drives
-/// plus `PostToolUse` appears a third time unmatched with the
-/// `"perm-<session_id>-<nonce>"` id (`--type permission-prompt`) to close out
-/// permission-prompt blocks.
+/// clear`, per `specs/claude-state-hooks/spec.md`. `PreToolUse`, `PostToolUse`,
+/// and `PostToolUseFailure` each appear twice: once unmatched (every tool,
+/// untyped, drives `active_tools` via plain
+/// `TOOL_CALL_START`/`TOOL_CALL_RESULT`) and once matched (interactive tools
+/// only, `--type elicitation`). `PostToolUse` and `PostToolUseFailure` share
+/// the same `tool_use_id`-keyed `TOOL_CALL_RESULT` command for each matcher,
+/// since Claude Code fires exactly one of the two per tool call (success vs.
+/// failure) and either closes out the `TOOL_CALL_START` opened by
+/// `PreToolUse`.
 const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
     ClaudeHookDef {
         event: "SessionStart",
@@ -284,15 +286,15 @@ const RADR_CLAUDE_HOOKS: &[ClaudeHookDef] = &[
         async_: true,
     },
     ClaudeHookDef {
-        event: "PostToolUse",
+        event: "PostToolUseFailure",
         matcher: None,
-        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_RESULT --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"#,
+        command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
-        event: "Notification",
-        matcher: Some("permission_prompt"),
-        command: r#"id=$(cat | jq -r '.session_id'); rd agent event TOOL_CALL_START --id "perm-$id-$RANDOM" --type permission-prompt --harness claude"#,
+        event: "PostToolUseFailure",
+        matcher: Some("AskUserQuestion|ExitPlanMode"),
+        command: r#"id=$(cat | jq -r '.tool_use_id'); rd agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude"#,
         async_: true,
     },
     ClaudeHookDef {
@@ -933,7 +935,6 @@ mod tests {
             "UserPromptSubmit",
             "Stop",
             "StopFailure",
-            "Notification",
             "SessionEnd",
         ] {
             let arr = hooks[event]
@@ -942,23 +943,21 @@ mod tests {
             assert_eq!(arr.len(), 1, "hooks.{event} should have exactly one entry");
         }
 
-        let pre_tool_use = hooks["PreToolUse"]
-            .as_array()
-            .expect("hooks.PreToolUse should be an array");
-        assert_eq!(
-            pre_tool_use.len(),
-            2,
-            "hooks.PreToolUse should have exactly two entries (unmatched + matched)"
+        assert!(
+            hooks.get("Notification").is_none(),
+            "hooks.json should not register a Notification handler"
         );
 
-        let post_tool_use = hooks["PostToolUse"]
-            .as_array()
-            .expect("hooks.PostToolUse should be an array");
-        assert_eq!(
-            post_tool_use.len(),
-            3,
-            "hooks.PostToolUse should have exactly three entries"
-        );
+        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure"] {
+            let arr = hooks[event]
+                .as_array()
+                .unwrap_or_else(|| panic!("hooks.{event} should be an array"));
+            assert_eq!(
+                arr.len(),
+                2,
+                "hooks.{event} should have exactly two entries (unmatched + matched)"
+            );
+        }
 
         let total: usize = hooks
             .as_object()
@@ -988,10 +987,10 @@ mod tests {
         for event in &[
             "UserPromptSubmit",
             "PostToolUse",
+            "PostToolUseFailure",
             "PreToolUse",
             "Stop",
             "StopFailure",
-            "Notification",
         ] {
             let hook_entry = &hooks[event][0]["hooks"][0];
             assert_eq!(
@@ -1062,7 +1061,7 @@ mod tests {
     }
 
     #[test]
-    fn install_claude_posttooluse_has_three_entries() {
+    fn install_claude_posttooluse_has_two_entries() {
         let tmp = TempDir::new().unwrap();
         let plugin_dir = claude_plugin_dir(&tmp);
         install_claude_to(&plugin_dir).expect("install");
@@ -1071,7 +1070,7 @@ mod tests {
         let entries = parsed["hooks"]["PostToolUse"]
             .as_array()
             .expect("PostToolUse should be an array");
-        assert_eq!(entries.len(), 3, "PostToolUse should have three entries");
+        assert_eq!(entries.len(), 2, "PostToolUse should have two entries");
 
         let matched = entries
             .iter()
@@ -1086,45 +1085,60 @@ mod tests {
         assert!(matched_cmd.contains("rd agent event TOOL_CALL_RESULT"));
         assert!(matched_cmd.contains("--type elicitation"));
 
-        let unmatched: Vec<&serde_json::Value> = entries
+        let unmatched = entries
             .iter()
-            .filter(|e| e.get("matcher").is_none())
-            .collect();
-        assert_eq!(unmatched.len(), 2, "should have two unmatched entries");
-
-        let untyped = unmatched
-            .iter()
-            .find(|e| {
-                let cmd = e["hooks"][0]
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                cmd.contains("rd agent event TOOL_CALL_RESULT") && !cmd.contains("--type")
-            })
-            .expect("should have an untyped unmatched PostToolUse entry");
-        let untyped_cmd = untyped["hooks"][0]
+            .find(|e| e.get("matcher").is_none())
+            .expect("should have an unmatched PostToolUse entry");
+        let unmatched_cmd = unmatched["hooks"][0]
             .get("command")
             .and_then(|v| v.as_str())
             .unwrap();
-        assert!(untyped_cmd.contains("tool_use_id"));
-        assert!(!untyped_cmd.contains("perm-"));
+        assert!(unmatched_cmd.contains("tool_use_id"));
+        assert!(!unmatched_cmd.contains("--type"));
+        assert!(!unmatched_cmd.contains("perm-"));
+    }
 
-        let perm = unmatched
-            .iter()
-            .find(|e| {
-                let cmd = e["hooks"][0]
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                cmd.contains("perm-")
-            })
-            .expect("should have the perm-$id unmatched PostToolUse entry");
-        let perm_cmd = perm["hooks"][0]
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap();
-        assert!(perm_cmd.contains("rd agent event TOOL_CALL_RESULT"));
-        assert!(perm_cmd.contains("--type permission-prompt"));
+    #[test]
+    fn install_claude_posttoolusefailure_mirrors_posttooluse() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = claude_plugin_dir(&tmp);
+        install_claude_to(&plugin_dir).expect("install");
+
+        let parsed = read_hooks_json(&plugin_dir);
+        let post_tool_use = parsed["hooks"]["PostToolUse"]
+            .as_array()
+            .expect("PostToolUse should be an array");
+        let post_tool_use_failure = parsed["hooks"]["PostToolUseFailure"]
+            .as_array()
+            .expect("PostToolUseFailure should be an array");
+
+        assert_eq!(
+            post_tool_use_failure.len(),
+            2,
+            "PostToolUseFailure should have two entries"
+        );
+
+        // Every PostToolUse entry has a PostToolUseFailure counterpart with an
+        // identical matcher and command (only the event name differs).
+        for entry in post_tool_use {
+            let matcher = entry.get("matcher").cloned();
+            let command = entry["hooks"][0].get("command").cloned();
+            let found = post_tool_use_failure.iter().any(|f| {
+                f.get("matcher").cloned() == matcher
+                    && f["hooks"][0].get("command").cloned() == command
+            });
+            assert!(
+                found,
+                "PostToolUseFailure should mirror PostToolUse entry with matcher {matcher:?}"
+            );
+        }
+
+        assert!(
+            post_tool_use_failure
+                .iter()
+                .all(|e| e["hooks"][0].get("async") == Some(&serde_json::Value::Bool(true))),
+            "every PostToolUseFailure entry should be async"
+        );
     }
 
     #[test]

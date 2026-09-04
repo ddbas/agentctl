@@ -240,7 +240,6 @@ enum AgentEventSubcommand {
 enum ToolCallTypeArg {
     Custom,
     Elicitation,
-    PermissionPrompt,
 }
 
 impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
@@ -248,7 +247,6 @@ impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
         match value {
             ToolCallTypeArg::Custom => status_fsm::ToolCallType::Custom,
             ToolCallTypeArg::Elicitation => status_fsm::ToolCallType::Elicitation,
-            ToolCallTypeArg::PermissionPrompt => status_fsm::ToolCallType::PermissionPrompt,
         }
     }
 }

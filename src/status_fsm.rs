@@ -19,7 +19,6 @@ use crate::state::AgentState;
 pub enum ToolCallType {
     Custom,
     Elicitation,
-    PermissionPrompt,
 }
 
 /// The five events accepted by `rd agent event`, as FSM inputs.
@@ -36,13 +35,8 @@ pub enum Event {
     ToolCallStart {
         r#type: Option<ToolCallType>,
     },
-    /// A tool call finished. `blocked_prompts` carries the reconciled
-    /// `blocked_prompts` count, populated only for `PermissionPrompt`-typed
-    /// events (`None` for every other type); the `Blocked` → `Working`
-    /// transition for `PermissionPrompt` is gated on this being `0`.
     ToolCallResult {
         r#type: Option<ToolCallType>,
-        blocked_prompts: Option<u32>,
     },
 }
 
@@ -58,7 +52,7 @@ impl StateMachineImpl for StatusFsm {
 
     fn transition(state: &Self::State, input: &Self::Input) -> Option<Self::State> {
         use AgentState::*;
-        use ToolCallType::{Elicitation, PermissionPrompt};
+        use ToolCallType::Elicitation;
 
         // Wildcard reset: SESSION_STARTED always moves to Idle, regardless of
         // the current status (including a stale Working/Blocked left over
@@ -89,29 +83,8 @@ impl StateMachineImpl for StatusFsm {
                 Blocked,
                 Event::ToolCallResult {
                     r#type: Some(Elicitation),
-                    ..
                 },
             ) => Some(Working),
-            (
-                Working,
-                Event::ToolCallStart {
-                    r#type: Some(PermissionPrompt),
-                },
-            ) => Some(Blocked),
-            (
-                Blocked,
-                Event::ToolCallResult {
-                    r#type: Some(PermissionPrompt),
-                    blocked_prompts: Some(0),
-                },
-            ) => Some(Working),
-            (
-                Blocked,
-                Event::ToolCallResult {
-                    r#type: Some(PermissionPrompt),
-                    ..
-                },
-            ) => None,
             // Every other combination (custom/no-type tool call events, or an
             // event that doesn't match the current status, e.g. a stray
             // TOOL_CALL_RESULT when not Blocked) is a no-op for status.
@@ -231,7 +204,6 @@ mod tests {
     fn elicitation_tool_call_result_moves_blocked_to_working() {
         let event = Event::ToolCallResult {
             r#type: Some(ToolCallType::Elicitation),
-            blocked_prompts: None,
         };
         assert_eq!(apply_event(Blocked, &event), Working);
     }
@@ -248,7 +220,6 @@ mod tests {
     fn custom_type_tool_call_result_is_noop() {
         let event = Event::ToolCallResult {
             r#type: Some(ToolCallType::Custom),
-            blocked_prompts: None,
         };
         assert_eq!(apply_event(Working, &event), Working);
     }
@@ -261,10 +232,7 @@ mod tests {
 
     #[test]
     fn no_type_tool_call_result_is_noop() {
-        let event = Event::ToolCallResult {
-            r#type: None,
-            blocked_prompts: None,
-        };
+        let event = Event::ToolCallResult { r#type: None };
         assert_eq!(apply_event(Working, &event), Working);
     }
 
@@ -273,7 +241,6 @@ mod tests {
         // Idle has no defined transition for an elicitation tool call result.
         let event = Event::ToolCallResult {
             r#type: Some(ToolCallType::Elicitation),
-            blocked_prompts: None,
         };
         assert_eq!(apply_event(Idle, &event), Idle);
     }
@@ -290,42 +257,5 @@ mod tests {
             apply_event(Done, &Event::RunFinished { active_tools: 0 }),
             Done
         );
-    }
-
-    // ── permission-prompt ─────────────────────────────────────────────────
-
-    #[test]
-    fn permission_prompt_tool_call_start_moves_working_to_blocked() {
-        let event = Event::ToolCallStart {
-            r#type: Some(ToolCallType::PermissionPrompt),
-        };
-        assert_eq!(apply_event(Working, &event), Blocked);
-    }
-
-    #[test]
-    fn permission_prompt_tool_call_result_moves_blocked_to_working_when_zero() {
-        let event = Event::ToolCallResult {
-            r#type: Some(ToolCallType::PermissionPrompt),
-            blocked_prompts: Some(0),
-        };
-        assert_eq!(apply_event(Blocked, &event), Working);
-    }
-
-    #[test]
-    fn permission_prompt_tool_call_result_stays_blocked_when_nonzero() {
-        let event = Event::ToolCallResult {
-            r#type: Some(ToolCallType::PermissionPrompt),
-            blocked_prompts: Some(1),
-        };
-        assert_eq!(apply_event(Blocked, &event), Blocked);
-    }
-
-    #[test]
-    fn permission_prompt_tool_call_result_with_no_count_is_noop() {
-        let event = Event::ToolCallResult {
-            r#type: Some(ToolCallType::PermissionPrompt),
-            blocked_prompts: None,
-        };
-        assert_eq!(apply_event(Blocked, &event), Blocked);
     }
 }
