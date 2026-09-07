@@ -21,7 +21,7 @@ This ordering is independent of enum variant declaration order.
 - **WHEN** all five variants are sorted in ascending order
 - **THEN** the result is `[Blocked, Done, Working, Idle, Unknown]`
 
-### Requirement: rd list accepts --sort-by flag
+### Requirement: agentctl list accepts --sort-by flag
 
 The `list` subcommand SHALL accept a `--sort-by` flag that controls which
 property is used to sort the output rows. Accepted values are: `state`, `agent`,
@@ -30,41 +30,41 @@ SHALL be `updated-at`.
 
 #### Scenario: Default sort is by updated-at descending
 
-- **WHEN** the user runs `rd list` without any sort flags
+- **WHEN** the user runs `agentctl list` without any sort flags
 - **THEN** the output rows are ordered by the `updated_at` timestamp descending
   (most recently active agent first; panes with no state file appear last)
 
 #### Scenario: Sort by agent name
 
-- **WHEN** the user runs `rd list --sort-by agent`
+- **WHEN** the user runs `agentctl list --sort-by agent`
 - **THEN** the output rows are ordered alphabetically by agent name (e.g.
   `claude` before `pi`)
 
 #### Scenario: Sort by session name
 
-- **WHEN** the user runs `rd list --sort-by session`
+- **WHEN** the user runs `agentctl list --sort-by session`
 - **THEN** the output rows are ordered lexicographically by tmux session name
 
 #### Scenario: Sort by pane position
 
-- **WHEN** the user runs `rd list --sort-by pane`
+- **WHEN** the user runs `agentctl list --sort-by pane`
 - **THEN** the output rows are ordered numerically: by window index first, then
   pane index within the window
 
 #### Scenario: Sort by updated-at timestamp
 
-- **WHEN** the user runs `rd list --sort-by updated-at`
+- **WHEN** the user runs `agentctl list --sort-by updated-at`
 - **THEN** the output rows are ordered chronologically by the `updated_at` field
   in the state file; panes with no state file are treated as having the oldest
   possible timestamp (sort last in ascending order)
 
 #### Scenario: Invalid sort-by value is rejected
 
-- **WHEN** the user runs `rd list --sort-by foobar`
+- **WHEN** the user runs `agentctl list --sort-by foobar`
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing valid values
 
-### Requirement: rd list accepts --reverse flag
+### Requirement: agentctl list accepts --reverse flag
 
 The `list` subcommand SHALL accept a `--reverse` flag (short: `-r`) that
 reverses the sort order. It is a boolean flag: absent means ascending, present
@@ -72,12 +72,12 @@ means descending. It may be combined with any `--sort-by` value.
 
 #### Scenario: Ascending order (default)
 
-- **WHEN** the user runs `rd list` without `--reverse`
+- **WHEN** the user runs `agentctl list` without `--reverse`
 - **THEN** rows are sorted in ascending order according to the active sort key
 
 #### Scenario: Descending order when --reverse is present
 
-- **WHEN** the user runs `rd list --reverse`
+- **WHEN** the user runs `agentctl list --reverse`
 - **THEN** rows are sorted in descending order according to the active sort key,
   so e.g. with `--sort-by state`, Unknown appears first and Blocked appears last
 

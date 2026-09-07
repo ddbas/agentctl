@@ -1,4 +1,4 @@
-//! `rd list` — enumerate tmux panes running known agent harness processes.
+//! `agentctl list` — enumerate tmux panes running known agent harness processes.
 //!
 //! Shells out to `tmux list-panes -a` and prints one line per pane whose
 //! `pane_current_command` exactly matches a known agent name (`claude` or
@@ -18,7 +18,7 @@ use crate::state::{AgentInfo, AgentState, delete_state_in, list_agent_infos_in};
 
 // ── SortKey ──────────────────────────────────────────────────────────────────
 
-/// The property to sort `rd list` output by.
+/// The property to sort `agentctl list` output by.
 #[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum, Default)]
 pub enum SortKey {
     /// Agent harness name, lexicographically.
@@ -381,14 +381,14 @@ pub fn sort_panes(
 
 // ── Subcommand entry point ────────────────────────────────────────────────────
 
-/// Entry point for the `rd list` subcommand.
+/// Entry point for the `agentctl list` subcommand.
 ///
 /// Resolves the tmux server socket in priority order:
 /// 1. `--server` / `-s` CLI flag
-/// 2. `RD_TMUX_SOCKET` environment variable (used by the test harness)
+/// 2. `AGENTCTL_TMUX_SOCKET` environment variable (used by the test harness)
 /// 3. Default tmux server (no `-S` flag)
 pub fn run(server: Option<String>, sort_by: SortKey, reverse: bool) -> Result<()> {
-    let server = server.or_else(|| std::env::var("RD_TMUX_SOCKET").ok());
+    let server = server.or_else(|| std::env::var("AGENTCTL_TMUX_SOCKET").ok());
 
     let panes = tmux_panes(server.as_deref())?;
     let mut agent_panes = filter_agent_panes(&panes);
@@ -488,8 +488,8 @@ mod tests {
         // 🌳 is a wide character (2 terminal columns, 4 UTF-8 bytes, 1 scalar)
         let data = vec![
             pane_with_id("pi", "dotfiles", 0, 0, "%1"),
-            pane_with_id("pi", "🌳 radr (claude-hooks)", 0, 0, "%2"),
-            pane_with_id("pi", "🌳 radr (list-sort)", 0, 0, "%3"),
+            pane_with_id("pi", "🌳 agentctl (claude-hooks)", 0, 0, "%2"),
+            pane_with_id("pi", "🌳 agentctl (list-sort)", 0, 0, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &empty_state_map());
@@ -874,8 +874,12 @@ mod tests {
     fn invalid_sort_by_rejected_by_clap() {
         // Clap's ValueEnum parsing rejects unknown values at argument parse time.
         // We verify this by using try_parse_from on the CLI root.
-        let result =
-            <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--sort-by", "foobar"]);
+        let result = <crate::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--sort-by",
+            "foobar",
+        ]);
         assert!(
             result.is_err(),
             "expected clap error for unknown sort-by value"

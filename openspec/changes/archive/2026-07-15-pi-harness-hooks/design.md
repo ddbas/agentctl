@@ -5,10 +5,11 @@ in-process modules that subscribe to lifecycle events. This is fundamentally
 different from Claude's subprocess-hook model: pi extensions run _inside_ the
 agent process rather than being spawned as one-shot child processes.
 
-`rd hooks install pi` must therefore produce a TypeScript extension file and
-place it in pi's auto-discovery directory (`~/.pi/agent/extensions/`). Once
+`agentctl hooks install pi` must therefore produce a TypeScript extension file
+and place it in pi's auto-discovery directory (`~/.pi/agent/extensions/`). Once
 present, pi loads the extension automatically on every startup; the extension
-shells out to `rd set-state` / `rd clear-state` at the right lifecycle moments.
+shells out to `agentctl set-state` / `agentctl clear-state` at the right
+lifecycle moments.
 
 ## Goals / Non-Goals
 
@@ -16,8 +17,8 @@ shells out to `rd set-state` / `rd clear-state` at the right lifecycle moments.
 
 - Map the relevant pi lifecycle events to the five canonical `AgentState`
   transitions (`idle`, `working`, `done`) plus `clear-state`.
-- Provide an idempotent `rd hooks install pi` command that writes
-  `~/.pi/agent/extensions/radr.ts` and reports what changed.
+- Provide an idempotent `agentctl hooks install pi` command that writes
+  `~/.pi/agent/extensions/agentctl.ts` and reports what changed.
 - Ensure the generated extension compiles under `jiti` (no build step needed)
   and can be loaded by pi without any additional `npm install`.
 
@@ -28,22 +29,22 @@ shells out to `rd set-state` / `rd clear-state` at the right lifecycle moments.
   transition.
 - Supporting the `blocked` state: pi does not expose a native permission-prompt
   lifecycle event, so there is no reliable signal to map to
-  `rd set-state blocked --harness pi`.
+  `agentctl set-state blocked --harness pi`.
 - Hot-reloading or version-upgrading the generated file — the user can re-run
-  `rd hooks install pi` to overwrite with a newer version.
+  `agentctl hooks install pi` to overwrite with a newer version.
 
 ## Decisions
 
 ### D1 — Pi lifecycle event → state mapping
 
-**Decision**: Four pi events are mapped to `rd` commands as follows.
+**Decision**: Four pi events are mapped to `agentctl` commands as follows.
 
-| Pi event             | Command                             | Notes                                     |
-| -------------------- | ----------------------------------- | ----------------------------------------- |
-| `session_start`      | `rd set-state idle --harness pi`    | Fires at startup, new, resume, and fork   |
-| `before_agent_start` | `rd set-state working --harness pi` | Fires as soon as the user submits input   |
-| `agent_settled`      | `rd set-state done --harness pi`    | Fires only when pi will not auto-continue |
-| `session_shutdown`   | `rd clear-state`                    | Fires on quit, reload, new, resume, fork  |
+| Pi event             | Command                                   | Notes                                     |
+| -------------------- | ----------------------------------------- | ----------------------------------------- |
+| `session_start`      | `agentctl set-state idle --harness pi`    | Fires at startup, new, resume, and fork   |
+| `before_agent_start` | `agentctl set-state working --harness pi` | Fires as soon as the user submits input   |
+| `agent_settled`      | `agentctl set-state done --harness pi`    | Fires only when pi will not auto-continue |
+| `session_shutdown`   | `agentctl clear-state`                    | Fires on quit, reload, new, resume, fork  |
 
 **Why `before_agent_start` over `agent_start`?**  
 `before_agent_start` fires immediately after the user submits a prompt, before
@@ -63,30 +64,31 @@ is noted as a future opportunity if pi introduces such an event.
 
 ---
 
-### D2 — Extension delivery: generated file at `~/.pi/agent/extensions/radr.ts`
+### D2 — Extension delivery: generated file at `~/.pi/agent/extensions/agentctl.ts`
 
-**Decision**: `rd hooks install pi` writes the extension as a static TypeScript
-source file to `~/.pi/agent/extensions/radr.ts`. The file content is embedded as
-a constant string in the `rd` binary.
+**Decision**: `agentctl hooks install pi` writes the extension as a static
+TypeScript source file to `~/.pi/agent/extensions/agentctl.ts`. The file content
+is embedded as a constant string in the `agentctl` binary.
 
 **Why a generated file over an installed npm package?**  
 The extension has no external dependencies (only Node.js built-ins and the
 `@earendil-works/pi-coding-agent` type import). A single generated file requires
 no `npm install`, no `package.json`, and no network access. The user can inspect
-it, modify it, and re-generate it with `rd hooks install pi`.
+it, modify it, and re-generate it with `agentctl hooks install pi`.
 
 **Why embed in the binary?**  
-The extension content is small, deterministic, and versioned alongside `rd`.
-Embedding avoids a separate asset-distribution problem.
+The extension content is small, deterministic, and versioned alongside
+`agentctl`. Embedding avoids a separate asset-distribution problem.
 
 ---
 
 ### D3 — Idempotency and update strategy
 
-**Decision**: `rd hooks install pi` reads `~/.pi/agent/extensions/radr.ts` if it
-exists, compares it byte-for-byte to the content it would write, and skips the
-write if they are identical (reporting `=` for every entry). If different, it
-overwrites the file (reporting `~` for a modified entry or `+` for a new file).
+**Decision**: `agentctl hooks install pi` reads
+`~/.pi/agent/extensions/agentctl.ts` if it exists, compares it byte-for-byte to
+the content it would write, and skips the write if they are identical (reporting
+`=` for every entry). If different, it overwrites the file (reporting `~` for a
+modified entry or `+` for a new file).
 
 The `~/.pi/agent/extensions/` directory is created if it does not exist.
 
@@ -94,65 +96,66 @@ The `~/.pi/agent/extensions/` directory is created if it does not exist.
 
 ### D4 — Generated extension content
 
-The full content written to `~/.pi/agent/extensions/radr.ts`:
+The full content written to `~/.pi/agent/extensions/agentctl.ts`:
 
 ```typescript
-// Generated by rd hooks install pi — do not edit by hand.
-// Re-run `rd hooks install pi` to update.
+// Generated by agentctl hooks install pi — do not edit by hand.
+// Re-run `agentctl hooks install pi` to update.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
 
-function rd(...args: string[]): void {
+function agentctl(...args: string[]): void {
   try {
-    execFileSync("rd", args, { timeout: 5000, stdio: "ignore" });
+    execFileSync("agentctl", args, { timeout: 5000, stdio: "ignore" });
   } catch {
-    // Silently ignore errors (e.g. rd not in PATH, outside tmux)
+    // Silently ignore errors (e.g. agentctl not in PATH, outside tmux)
   }
 }
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async () => {
-    rd("set-state", "idle", "--harness", "pi");
+    agentctl("set-state", "idle", "--harness", "pi");
   });
 
   pi.on("before_agent_start", async () => {
-    rd("set-state", "working", "--harness", "pi");
+    agentctl("set-state", "working", "--harness", "pi");
   });
 
   pi.on("agent_settled", async () => {
-    rd("set-state", "done", "--harness", "pi");
+    agentctl("set-state", "done", "--harness", "pi");
   });
 
   pi.on("session_shutdown", async () => {
-    rd("clear-state");
+    agentctl("clear-state");
   });
 }
 ```
 
-`execFileSync` is used instead of `execSync` to avoid shell injection; `rd` is
-invoked with an explicit argument list. All errors are swallowed so the
-extension never disrupts pi if `rd` is not on `$PATH` or `$TMUX_PANE` is unset.
+`execFileSync` is used instead of `execSync` to avoid shell injection;
+`agentctl` is invoked with an explicit argument list. All errors are swallowed
+so the extension never disrupts pi if `agentctl` is not on `$PATH` or
+`$TMUX_PANE` is unset.
 
 ---
 
-### D5 — Output of `rd hooks install pi`
+### D5 — Output of `agentctl hooks install pi`
 
 The command prints a human-readable summary of what changed:
 
 ```
-Installed radr extension for pi:
-  + ~/.pi/agent/extensions/radr.ts
-    session_start        → rd set-state idle --harness pi
-    before_agent_start   → rd set-state working --harness pi
-    agent_settled        → rd set-state done --harness pi
-    session_shutdown     → rd clear-state
+Installed agentctl extension for pi:
+  + ~/.pi/agent/extensions/agentctl.ts
+    session_start        → agentctl set-state idle --harness pi
+    before_agent_start   → agentctl set-state working --harness pi
+    agent_settled        → agentctl set-state done --harness pi
+    session_shutdown     → agentctl clear-state
 ```
 
 On an idempotent re-run, the `+` prefix is replaced with `=`:
 
 ```
-Installed radr extension for pi:
-  = ~/.pi/agent/extensions/radr.ts (already up to date)
+Installed agentctl extension for pi:
+  = ~/.pi/agent/extensions/agentctl.ts (already up to date)
 ```
 
 On an overwrite (file existed but content differed), the prefix is `~`.
@@ -164,19 +167,19 @@ On an overwrite (file existed but content differed), the prefix is `~`.
   still load but the affected event handler will silently never fire.
   Mitigation: pin the event names in unit tests and document the pi version the
   extension was authored against.
-- **Extension runs outside tmux** (`$TMUX_PANE` unset): `rd set-state` and
-  `rd clear-state` exit 0 silently when outside tmux — identical behaviour to
-  the Claude integration. No pi-specific logic is needed.
-- **User edits `radr.ts`**: A re-run of `rd hooks install pi` will report `~`
-  and overwrite user edits. This is intentional; the file header warns against
-  manual edits.
+- **Extension runs outside tmux** (`$TMUX_PANE` unset): `agentctl set-state` and
+  `agentctl clear-state` exit 0 silently when outside tmux — identical behaviour
+  to the Claude integration. No pi-specific logic is needed.
+- **User edits `agentctl.ts`**: A re-run of `agentctl hooks install pi` will
+  report `~` and overwrite user edits. This is intentional; the file header
+  warns against manual edits.
 
 ## Migration Plan
 
-1. Add the `pi` branch to the `rd hooks install <harness>` dispatcher, replacing
-   the current exit-1 for `pi`.
+1. Add the `pi` branch to the `agentctl hooks install <harness>` dispatcher,
+   replacing the current exit-1 for `pi`.
 2. Embed the extension source string and implement the write-with-idempotency
    logic.
 3. Write unit and integration tests.
-4. Update the README and `AGENTS.md` to document `rd hooks install pi` as the
-   required one-time setup step.
+4. Update the README and `AGENTS.md` to document `agentctl hooks install pi` as
+   the required one-time setup step.

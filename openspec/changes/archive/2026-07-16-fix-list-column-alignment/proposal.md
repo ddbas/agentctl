@@ -1,10 +1,10 @@
 ## Why
 
-The `rd list` command produces misaligned columns when session names contain
-emoji or other Unicode wide characters (e.g. `🌳 radr (claude-hooks)`). Column
-padding is calculated using byte lengths and Rust's `{:<N$}` formatter (which
-pads by Unicode scalar count), neither of which accounts for the extra terminal
-columns occupied by wide characters.
+The `agentctl list` command produces misaligned columns when session names
+contain emoji or other Unicode wide characters (e.g.
+`🌳 agentctl (claude-hooks)`). Column padding is calculated using byte lengths
+and Rust's `{:<N$}` formatter (which pads by Unicode scalar count), neither of
+which accounts for the extra terminal columns occupied by wide characters.
 
 ## What Changes
 
@@ -23,7 +23,7 @@ _(none — this is a bug fix with no new user-facing capability)_
 
 ### Modified Capabilities
 
-- `list-sessions`: The column-alignment requirement of `rd list` output is
+- `list-sessions`: The column-alignment requirement of `agentctl list` output is
   tightened: columns MUST be aligned by terminal display width, not byte or
   scalar count.
 

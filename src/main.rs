@@ -6,9 +6,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "rd",
-    about = "📡 rd — tmux based agent multiplexer",
-    long_about = "📡 rd — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
+    name = "agentctl",
+    about = "📡 agentctl — tmux based agent multiplexer",
+    long_about = "📡 agentctl — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
     version,
     propagate_version = true,
     // Disable built-in `help` subcommand so we can define our own.
@@ -40,7 +40,7 @@ enum Commands {
     List {
         /// Target a specific tmux server socket file.
         /// Forwarded as `tmux -S <path>`.  Falls back to the
-        /// `RD_TMUX_SOCKET` environment variable when not set.
+        /// `AGENTCTL_TMUX_SOCKET` environment variable when not set.
         #[arg(short, long, value_name = "PATH")]
         server: Option<String>,
 
@@ -104,7 +104,7 @@ enum HooksSubcommand {
     /// Install hooks for a harness.
     ///
     /// Writes the necessary hook files for the chosen harness so that
-    /// `rd list` shows real-time agent state without polling.
+    /// `agentctl list` shows real-time agent state without polling.
     Install {
         /// Harness to install hooks for.
         #[arg(value_name = "HARNESS")]
@@ -112,10 +112,10 @@ enum HooksSubcommand {
     },
 }
 
-/// Harnesses supported by `rd hooks install`.
+/// Harnesses supported by `agentctl hooks install`.
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Harness {
-    /// Pi coding agent — writes `~/.pi/agent/extensions/radr.ts`.
+    /// Pi coding agent — writes `~/.pi/agent/extensions/agentctl.ts`.
     Pi,
     /// Claude Code — patches `~/.claude/settings.json`.
     Claude,

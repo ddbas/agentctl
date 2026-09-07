@@ -2,7 +2,7 @@
 
 Define the canonical `AgentState` enum and the state file schema used to persist
 agent state across tmux panes, along with read/write/delete helpers and
-last-resort stale-state validation performed by `rd list`.
+last-resort stale-state validation performed by `agentctl list`.
 
 ## Requirements
 
@@ -21,7 +21,7 @@ the canonical representation of agent state throughout the codebase.
 ### Requirement: State file schema
 
 The system SHALL persist agent state as a JSON file at
-`$XDG_DATA_HOME/radr/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
+`$XDG_DATA_HOME/agentctl/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
 defaults to `~/.local/share` and `<pane-id>` is the value of `$TMUX_PANE`, e.g.
 `%12`). The file SHALL contain the fields `pane_id` (string), `harness`
 (string), `state` (string matching an `AgentState` variant in snake_case), and
@@ -72,9 +72,9 @@ handler so that state is cleaned up when a session exits normally.
 - **WHEN** `delete_state` is called for a pane that has no state file
 - **THEN** the call succeeds without error
 
-### Requirement: Last-resort stale state validation by rd list
+### Requirement: Last-resort stale state validation by agentctl list
 
-The system SHALL validate each state file when `rd list` runs and tmux is
+The system SHALL validate each state file when `agentctl list` runs and tmux is
 reachable. A state file SHALL be deleted if either of the following is true:
 
 - Its `pane_id` does not correspond to any currently live tmux pane.
@@ -88,26 +88,26 @@ valid state due to a transient error.
 
 #### Scenario: State file deleted when pane no longer exists
 
-- **WHEN** `rd list` runs and a state file's `pane_id` is not in the live tmux
-  pane set
+- **WHEN** `agentctl list` runs and a state file's `pane_id` is not in the live
+  tmux pane set
 - **THEN** that state file is deleted before the output is printed
 
 #### Scenario: State file deleted when harness no longer matches
 
-- **WHEN** `rd list` runs and a state file's `pane_id` exists but the pane's
-  current command does not match the `harness` field
+- **WHEN** `agentctl list` runs and a state file's `pane_id` exists but the
+  pane's current command does not match the `harness` field
 - **THEN** that state file is deleted before the output is printed
 
 #### Scenario: State file preserved when pane and harness both match
 
-- **WHEN** `rd list` runs and a state file's `pane_id` exists and its
+- **WHEN** `agentctl list` runs and a state file's `pane_id` exists and its
   `pane_current_command` matches `harness`
 - **THEN** the state file is not deleted
 
 #### Scenario: State file preserved when harness is unknown
 
-- **WHEN** `rd list` runs and a state file's `harness` field is `"unknown"`
-  (regardless of what the pane's current command is)
+- **WHEN** `agentctl list` runs and a state file's `harness` field is
+  `"unknown"` (regardless of what the pane's current command is)
 - **THEN** the state file is not deleted on account of the harness check (only
   the pane-existence check still applies)
 

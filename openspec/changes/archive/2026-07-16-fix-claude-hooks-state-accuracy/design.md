@@ -1,9 +1,9 @@
 ## Context
 
-Radr tracks Claude Code session state via Claude's hook system. The current
+Agentctl tracks Claude Code session state via Claude's hook system. The current
 implementation registers six hooks in `~/.claude/settings.json` that call
-`rd set-state` / `rd clear-state` at key lifecycle events. Three gaps were
-identified through empirical testing:
+`agentctl set-state` / `agentctl clear-state` at key lifecycle events. Three
+gaps were identified through empirical testing:
 
 1. **`SessionStart` matcher is `"startup"` only** — resumed sessions fire
    `SessionStart` with `source: "resume"`, which doesn't match, so state stays
@@ -17,7 +17,7 @@ identified through empirical testing:
    specific `PreToolUse(AskUserQuestion) → blocked` hook alongside the general
    one (all matching hooks fire in parallel).
 
-The fix spans `src/commands/hooks.rs` (the `RADR_CLAUDE_HOOKS` constant and
+The fix spans `src/commands/hooks.rs` (the `AGENTCTL_CLAUDE_HOOKS` constant and
 associated tests) and the `claude-state-hooks` spec.
 
 ## Goals / Non-Goals
@@ -28,7 +28,7 @@ associated tests) and the `claude-state-hooks` spec.
 - API-error stops correctly report "done"
 - Interactive tool dialogs (`AskUserQuestion`, `ExitPlanMode`) report "blocked"
 - No race conditions in hook execution
-- `rd hooks install claude` remains idempotent
+- `agentctl hooks install claude` remains idempotent
 
 **Non-Goals:**
 
@@ -73,8 +73,8 @@ PostToolUse(*) → working                 ← fires after AskUserQuestion compl
 non-deterministic and fragile across OS schedulers.
 
 **Semantics note:** `PostToolUse` fires only on tool success.
-`PostToolUseFailure` is separate. For radr's purposes "working" after a failed
-tool is also correct (Claude processes the failure and continues), so no
+`PostToolUseFailure` is separate. For agentctl's purposes "working" after a
+failed tool is also correct (Claude processes the failure and continues), so no
 `PostToolUseFailure` hook is added.
 
 ### Decision: `StopFailure → done` (not a new `error` state)
@@ -89,16 +89,16 @@ expanding the state model.
 
 The final registered hooks are:
 
-| #   | Event              | Matcher                         | Command                | Async |
-| --- | ------------------ | ------------------------------- | ---------------------- | ----- |
-| 1   | `SessionStart`     | `startup\|resume\|clear`        | `rd set-state idle`    | no    |
-| 2   | `UserPromptSubmit` | —                               | `rd set-state working` | yes   |
-| 3   | `PostToolUse`      | —                               | `rd set-state working` | yes   |
-| 4   | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `rd set-state blocked` | yes   |
-| 5   | `Stop`             | —                               | `rd set-state done`    | yes   |
-| 6   | `StopFailure`      | —                               | `rd set-state done`    | yes   |
-| 7   | `Notification`     | `permission_prompt`             | `rd set-state blocked` | yes   |
-| 8   | `SessionEnd`       | —                               | `rd clear-state`       | no    |
+| #   | Event              | Matcher                         | Command                      | Async |
+| --- | ------------------ | ------------------------------- | ---------------------------- | ----- |
+| 1   | `SessionStart`     | `startup\|resume\|clear`        | `agentctl set-state idle`    | no    |
+| 2   | `UserPromptSubmit` | —                               | `agentctl set-state working` | yes   |
+| 3   | `PostToolUse`      | —                               | `agentctl set-state working` | yes   |
+| 4   | `PreToolUse`       | `AskUserQuestion\|ExitPlanMode` | `agentctl set-state blocked` | yes   |
+| 5   | `Stop`             | —                               | `agentctl set-state done`    | yes   |
+| 6   | `StopFailure`      | —                               | `agentctl set-state done`    | yes   |
+| 7   | `Notification`     | `permission_prompt`             | `agentctl set-state blocked` | yes   |
+| 8   | `SessionEnd`       | —                               | `agentctl clear-state`       | no    |
 
 Hook 3 (`PreToolUse` → working) is removed and replaced by hook 3 above.
 
@@ -108,7 +108,7 @@ Hook 3 (`PreToolUse` → working) is removed and replaced by hook 3 above.
   "working" is never refreshed. `UserPromptSubmit` already set it at turn start,
   so state is correct; this is not a regression.
 - **Widening `SessionStart` matcher** → existing installs have
-  `matcher: "startup"`. `rd hooks install claude` is idempotent by command
+  `matcher: "startup"`. `agentctl hooks install claude` is idempotent by command
   string — the old `startup`-matcher entry and the new
   `startup|resume|clear`-matcher entry have different structures, so both would
   coexist after re-install. The installer MUST detect and replace the old entry,
@@ -123,11 +123,11 @@ Hook 3 (`PreToolUse` → working) is removed and replaced by hook 3 above.
 
 ## Migration Plan
 
-Users who already ran `rd hooks install claude` will have the old hook set.
-After updating `rd`:
+Users who already ran `agentctl hooks install claude` will have the old hook
+set. After updating `agentctl`:
 
-1. Run `rd hooks install claude` again — new hooks (PostToolUse, StopFailure,
-   AskUserQuestion-scoped PreToolUse) are added.
+1. Run `agentctl hooks install claude` again — new hooks (PostToolUse,
+   StopFailure, AskUserQuestion-scoped PreToolUse) are added.
 2. The old `PreToolUse(*)` → working entry remains (no removal logic). It is
    harmless alongside the new `PostToolUse(*)` → working entry; the duplicate
    "working" signal on `PreToolUse` is benign.

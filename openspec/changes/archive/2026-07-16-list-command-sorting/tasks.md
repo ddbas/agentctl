@@ -47,15 +47,15 @@
 
 ## 5. Tests
 
-- [x] 5.1 Add unit test: `rd list` with no flags sorts by `updated_at`
+- [x] 5.1 Add unit test: `agentctl list` with no flags sorts by `updated_at`
       descending (most recently active first, no-state-file panes last)
-- [x] 5.2 Add unit test: `rd list --sort-by agent` sorts alphabetically by agent
-      name
-- [x] 5.3 Add unit test: `rd list --sort-by session` sorts by session name
-- [x] 5.4 Add unit test: `rd list --sort-by pane` sorts by window index then
-      pane index
-- [x] 5.5 Add unit test: `rd list --sort-by state --reverse` puts unknown first
-      and blocked last
+- [x] 5.2 Add unit test: `agentctl list --sort-by agent` sorts alphabetically by
+      agent name
+- [x] 5.3 Add unit test: `agentctl list --sort-by session` sorts by session name
+- [x] 5.4 Add unit test: `agentctl list --sort-by pane` sorts by window index
+      then pane index
+- [x] 5.5 Add unit test: `agentctl list --sort-by state --reverse` puts unknown
+      first and blocked last
 - [x] 5.6 Add unit test: invalid `--sort-by` value exits non-zero with error
       message
 

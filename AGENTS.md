@@ -1,32 +1,33 @@
-# radr
+# agentctl
 
 This project implements a **tmux-based agent multiplexer**.
 
 ## Required One-Time Setup for Pi Agents
 
-If you are running inside pi, install the radr lifecycle hooks so your agent
+If you are running inside pi, install the agentctl lifecycle hooks so your agent
 state is tracked in real time:
 
 ```bash
-rd hooks install pi
+agentctl hooks install pi
 ```
 
-This writes `~/.pi/agent/extensions/radr.ts`, a TypeScript extension that
+This writes `~/.pi/agent/extensions/agentctl.ts`, a TypeScript extension that
 subscribes to pi lifecycle events (`session_start`, `before_agent_start`,
-`agent_settled`, `session_shutdown`) and calls `rd set-state` / `rd clear-state`
-automatically. The command is idempotent — re-running it is safe.
+`agent_settled`, `session_shutdown`) and calls `agentctl set-state` /
+`agentctl clear-state` automatically. The command is idempotent — re-running it
+is safe.
 
 ## Required One-Time Setup for Claude Agents
 
-If you are running inside Claude Code, install the radr lifecycle hooks so your
-agent state is tracked in real time:
+If you are running inside Claude Code, install the agentctl lifecycle hooks so
+your agent state is tracked in real time:
 
 ```bash
-rd hooks install claude
+agentctl hooks install claude
 ```
 
 This patches `~/.claude/settings.json` to register six hook entries that call
-`rd set-state` / `rd clear-state` at key Claude lifecycle events
+`agentctl set-state` / `agentctl clear-state` at key Claude lifecycle events
 (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`,
 `SessionEnd`). The command is idempotent — re-running it is safe.
 
