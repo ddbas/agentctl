@@ -8,13 +8,13 @@ If you are running inside pi, install the agentctl lifecycle hooks so your agent
 state is tracked in real time:
 
 ```bash
-agentctl hooks install pi
+agentctl install pi
 ```
 
 This writes `~/.pi/agent/extensions/agentctl.ts`, a TypeScript extension that
 subscribes to pi lifecycle events (`session_start`, `before_agent_start`,
-`agent_settled`, `session_shutdown`) and calls `agentctl set-state` /
-`agentctl clear-state` automatically. The command is idempotent — re-running it
+`agent_settled`, `session_shutdown`) and calls `agentctl state set` /
+`agentctl state clear` automatically. The command is idempotent — re-running it
 is safe.
 
 ## Required One-Time Setup for Claude Agents
@@ -23,13 +23,16 @@ If you are running inside Claude Code, install the agentctl lifecycle hooks so
 your agent state is tracked in real time:
 
 ```bash
-agentctl hooks install claude
+agentctl install claude
 ```
 
-This patches `~/.claude/settings.json` to register six hook entries that call
-`agentctl set-state` / `agentctl clear-state` at key Claude lifecycle events
-(`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`,
-`SessionEnd`). The command is idempotent — re-running it is safe.
+This installs a Claude Code plugin at `~/.claude/skills/agentctl/` (containing
+`.claude-plugin/plugin.json` and `hooks/hooks.json`) registering eleven hook
+entries that call `agentctl agent event` / `agentctl agent clear` at key Claude
+Code lifecycle events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+`PostToolUse`, `Notification`, `Stop`, `StopFailure`, `SessionEnd`). The command
+never reads or writes `~/.claude/settings.json`, and is idempotent by
+construction — every run deletes and recreates `~/.claude/skills/agentctl/`.
 
 ## Running Tasks
 

@@ -1,3 +1,8 @@
+post-checkout:
+  parallel: true
+  jobs:
+    - name: codegraph
+      run: mise exec -- codegraph init
 pre-commit:
   parallel: true
   jobs:
@@ -19,6 +24,11 @@ pre-commit:
       stage_fixed: true
     - name: test
       run: cargo test
+      glob:
+        - "Cargo.toml"
+        - "Cargo.lock"
+        - "src/**/*.rs"
+        - "tests/**/*.rs"
     - name: openspec-validate
       glob: "openspec/**"
       run: bash scripts/openspec-validate-staged.sh {staged_files}

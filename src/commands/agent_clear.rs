@@ -1,10 +1,10 @@
-//! `agentctl clear-state` — remove the state file for the current agent pane.
+//! `agentctl agent clear` — remove the state file for the current agent pane.
 
 use anyhow::Result;
 
 use crate::state::delete_state;
 
-/// Entry point for `agentctl clear-state [--pane <id>]`.
+/// Entry point for `agentctl agent clear [--pane <id>]`.
 ///
 /// Resolution order for pane ID:
 ///   1. `--pane` flag

@@ -4,6 +4,13 @@
 //! with an isolated Docker container running `alpine:latest` + `tmux`.  The
 //! container's tmux server is accessible from the host via `AGENTCTL_TMUX_SOCKET`.
 //! State files are isolated via `XDG_DATA_HOME` pointing at a per-test dir.
+//!
+//! Every test spawns `agentctl` via [`std::process::Command::output`], which
+//! captures stdout through an OS pipe rather than a pseudo-terminal. Per
+//! `agentctl list`'s TTY-detection logic (`std::io::stdout().is_terminal()`),
+//! `use_color` is therefore always `false` here, so assertions below can
+//! safely compare against plain, uncolored text without stripping ANSI
+//! escape sequences.
 
 mod common;
 
@@ -292,5 +299,106 @@ async fn list_unknown_harness_state_file_not_deleted() {
     assert!(
         env.state_file_path(&pane_id).exists(),
         "state file with harness='unknown' should NOT be deleted by agentctl list"
+    );
+}
+
+// ── --columns end to end ─────────────────────────────────────────────────────
+
+/// `agentctl list --columns ...` with no agent panes should still exit 0 with no
+/// output, exercising the flag's plumbing without requiring a live pane.
+#[tokio::test]
+async fn list_columns_flag_with_no_panes_exits_zero_with_no_output() {
+    let env = common::TmuxEnv::new().await;
+
+    let output = env
+        .agentctl()
+        .args(["list", "--columns", "status,agent,updatedAt,activeTools"])
+        .output()
+        .expect("failed to spawn agentctl list --columns");
+
+    assert!(
+        output.status.success(),
+        "`agentctl list --columns ...` should exit 0 when no agent panes exist; stderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(output.stdout.is_empty());
+}
+
+/// `agentctl list --sort-by status/updatedAt/activeTools` with no agent panes
+/// should still exit 0, exercising the renamed/new sort keys' plumbing.
+#[tokio::test]
+async fn list_sort_by_new_keys_with_no_panes_exits_zero() {
+    let env = common::TmuxEnv::new().await;
+
+    for key in ["status", "updatedAt", "activeTools"] {
+        let output = env
+            .agentctl()
+            .args(["list", "--sort-by", key])
+            .output()
+            .unwrap_or_else(|_| panic!("failed to spawn agentctl list --sort-by {key}"));
+
+        assert!(
+            output.status.success(),
+            "`agentctl list --sort-by {key}` should exit 0; stderr: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
+
+/// Old kebab-case/`state`-named `--sort-by` values are rejected outright now
+/// that the vocabulary has been renamed to `status`/`updatedAt`.
+#[tokio::test]
+async fn list_sort_by_old_names_rejected() {
+    let env = common::TmuxEnv::new().await;
+
+    for key in ["state", "updated-at"] {
+        let output = env
+            .agentctl()
+            .args(["list", "--sort-by", key])
+            .output()
+            .unwrap_or_else(|_| panic!("failed to spawn agentctl list --sort-by {key}"));
+
+        assert!(
+            !output.status.success(),
+            "`agentctl list --sort-by {key}` should be rejected",
+        );
+    }
+}
+
+/// End-to-end `agentctl list --columns` with a custom subset/order (including
+/// `activeTools` and `updatedAt`) against a live agent pane with a state file.
+///
+/// **macOS Docker Desktop skip**: see note in
+/// `list_agent_pane_with_state_file_shows_state`.
+#[tokio::test]
+#[ignore = "requires host → container Unix socket access (fails on macOS Docker Desktop)"]
+async fn list_columns_custom_subset_and_order_end_to_end() {
+    let env = common::TmuxEnv::new().await;
+
+    let pane_id = env.create_fake_agent_pane("claude").await;
+    env.write_state_file(&pane_id, "claude", "working");
+
+    let output = env
+        .agentctl()
+        .args(["list", "--columns", "status,agent,activeTools,updatedAt"])
+        .output()
+        .expect("failed to spawn agentctl list --columns");
+
+    assert!(
+        output.status.success(),
+        "`agentctl list --columns ...` should exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next().expect("expected one output line");
+    // status column comes first now.
+    assert!(
+        line.trim_start().starts_with("working"),
+        "expected status column first; got:\n{line}"
+    );
+    assert!(
+        line.contains("claude"),
+        "expected agent column; got:\n{line}"
     );
 }
