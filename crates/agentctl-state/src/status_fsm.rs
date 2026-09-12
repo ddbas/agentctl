@@ -12,7 +12,7 @@
 
 use rust_fsm::StateMachineImpl;
 
-use crate::state::AgentState;
+use crate::AgentState;
 
 /// The optional payload type carried by `TOOL_CALL_START` / `TOOL_CALL_RESULT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,8 +27,8 @@ pub enum Event {
     SessionStarted,
     RunStarted,
     /// A run finished. Carries the reconciled `active_tools` count (computed
-    /// by `agent_event.rs` before calling the FSM); the transition to `Done`
-    /// is gated on this being `0`.
+    /// by the caller before invoking the FSM); the transition to `Done` is
+    /// gated on this being `0`.
     RunFinished {
         active_tools: u32,
     },

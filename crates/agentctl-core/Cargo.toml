@@ -1,0 +1,17 @@
+[package]
+name = "agentctl-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+agentctl-state.workspace = true
+agentctl-tmux.workspace = true
+agentctl-harness.workspace = true
+agentctl-logging.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+owo-colors.workspace = true
+
+[dev-dependencies]
+agentctl-state-fs.workspace = true
+tempfile.workspace = true

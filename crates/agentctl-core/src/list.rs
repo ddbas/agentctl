@@ -1,33 +1,22 @@
-//! `agentctl list` — enumerate tmux panes running known agent harness processes.
-//!
-//! Shells out to `tmux list-panes -a` and prints one line per pane whose
-//! `pane_current_command` exactly matches a known agent name (`claude` or
-//! `pi`).  Output is tab-delimited plain text; by default five columns are
-//! shown, separated by a single tab character: `<agent-name>\t<session-name>
-//! \t<window-index>.<pane-index>\t<status>\t<active-tools>`.  Every row has
-//! the same number of tab-separated fields as `columns`, even when a
-//! trailing column's value is empty, so the output can be reliably parsed
-//! with tools like `cut -f` or `awk -F'\t'`.  The rendered columns can be
-//! customized via `--columns`/`-c` (see [`Field`] and [`DEFAULT_COLUMNS`]).
+//! Sorting, filtering-adjacent rendering, and the shared `Field` vocabulary
+//! for `agentctl list`. Moved here (out of the former CLI-facing
+//! `commands/list.rs`) because sorting rules and text/color rendering are
+//! business rules a future non-CLI adapter should still be able to reach.
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::io::IsTerminal;
-use std::process::Command;
 
+use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
 
-use anyhow::Result;
-use chrono::{DateTime, Utc};
-
-use crate::state::{AgentInfo, AgentState, delete_state_in, list_agent_infos_in};
+use agentctl_state::{AgentInfo, AgentState};
+use agentctl_tmux::PaneEntry;
 
 // ── Field ────────────────────────────────────────────────────────────────────
 
 /// The shared vocabulary of properties accepted by both `--sort-by` and
 /// `--columns`. Every value accepted by one flag is accepted by the other,
 /// using the identical camelCase spelling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Field {
     /// Agent harness name, lexicographically.
     Agent,
@@ -39,10 +28,8 @@ pub enum Field {
     Status,
     /// Last state-file update timestamp. Newest first by default when sorted.
     #[default]
-    #[value(name = "updatedAt")]
     UpdatedAt,
     /// In-flight tool-call count. Busiest first by default when sorted.
-    #[value(name = "activeTools")]
     ActiveTools,
 }
 
@@ -64,9 +51,7 @@ impl std::fmt::Display for Field {
 /// `state` → `status` and unnamed-fifth-column → `activeTools` renames).
 ///
 /// Exposed for tests and as the source of truth kept in sync with
-/// [`DEFAULT_COLUMNS_STR`] (the clap `--columns` default). The CLI's actual
-/// default column set at runtime is enforced via `--columns`'s clap
-/// `default_value`, which is derived from this same set.
+/// [`DEFAULT_COLUMNS_STR`] (the bin's `--columns` clap default).
 #[allow(dead_code)]
 pub const DEFAULT_COLUMNS: &[Field] = &[
     Field::Agent,
@@ -76,231 +61,11 @@ pub const DEFAULT_COLUMNS: &[Field] = &[
     Field::ActiveTools,
 ];
 
-/// The literal, comma-delimited string form of [`DEFAULT_COLUMNS`], used as
-/// the `--columns` flag's clap `default_value` so `--help` shows the actual
-/// default. Kept in sync with `DEFAULT_COLUMNS` by the
+/// The literal, comma-delimited string form of [`DEFAULT_COLUMNS`], used by
+/// the bin as the `--columns` flag's clap `default_value` so `--help` shows
+/// the actual default. Kept in sync with `DEFAULT_COLUMNS` by the
 /// `default_columns_str_matches_default_columns_const` test.
 pub const DEFAULT_COLUMNS_STR: &str = "agent,session,pane,status,activeTools";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/// Exact process names that are considered known agent harness processes.
-const KNOWN_AGENTS: &[&str] = &["claude", "pi"];
-
-// ── Data types ────────────────────────────────────────────────────────────────
-
-/// A single tmux pane entry returned by `tmux list-panes -a`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PaneEntry {
-    /// Foreground process name as reported by `#{pane_current_command}`.
-    /// For `pi` panes this is initially `"node"` and is resolved to `"pi"`
-    /// by [`resolve_node_agents`] after querying the process table.
-    pub agent: String,
-    /// Tmux session name.
-    pub session: String,
-    /// Window index within the session.
-    pub window_index: u32,
-    /// Pane index within the window.
-    pub pane_index: u32,
-    /// PID of the pane's shell process (used to resolve `node` → `pi`).
-    pub pane_pid: u32,
-    /// Tmux pane ID (e.g. `%12`), used to correlate with state files.
-    pub pane_id: String,
-}
-
-// ── tmux interaction ──────────────────────────────────────────────────────────
-
-/// Query every pane across all tmux sessions via `tmux list-panes -a`.
-///
-/// - Returns an empty [`Vec`] if no tmux server is running (tmux exits
-///   non-zero).
-/// - Returns an [`anyhow::Error`] containing "tmux not found" if the `tmux`
-///   binary cannot be found on `PATH`.
-///
-/// If `server` is [`Some`] the value is forwarded as `tmux -S <socket>` so
-/// callers can target a specific server socket.
-pub fn tmux_panes(server: Option<&str>) -> Result<Vec<PaneEntry>> {
-    let mut cmd = Command::new("tmux");
-
-    if let Some(socket) = server {
-        cmd.args(["-S", socket]);
-    }
-
-    cmd.args([
-        "list-panes",
-        "-a",
-        "-F",
-        "#{pane_current_command}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_pid}\t#{pane_id}",
-    ]);
-
-    let output = cmd.output().map_err(|e| {
-        if e.kind() == ErrorKind::NotFound {
-            anyhow::anyhow!("tmux not found — is tmux installed and on PATH?")
-        } else {
-            anyhow::Error::from(e).context("failed to run tmux")
-        }
-    })?;
-
-    // Non-zero exit means no server running → treat as empty list
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut panes = Vec::new();
-
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.splitn(6, '\t').collect();
-        if parts.len() < 6 {
-            continue;
-        }
-        let window_index = parts[2].parse::<u32>().unwrap_or(0);
-        let pane_index = parts[3].parse::<u32>().unwrap_or(0);
-        let pane_pid = parts[4].parse::<u32>().unwrap_or(0);
-        panes.push(PaneEntry {
-            agent: parts[0].to_owned(),
-            session: parts[1].to_owned(),
-            window_index,
-            pane_index,
-            pane_pid,
-            pane_id: parts[5].to_owned(),
-        });
-    }
-
-    resolve_node_agents(&mut panes);
-
-    Ok(panes)
-}
-
-// ── node → pi resolution ─────────────────────────────────────────────────────
-
-/// Build a map of parent-PID → argv[0] basenames of its direct children by
-/// running `ps -A -o pid=,ppid=,args=` once.
-///
-/// Returns an empty map if `ps` cannot be run or exits non-zero (best-effort;
-/// `node` panes simply remain unresolved in that case).
-pub fn build_process_table() -> HashMap<u32, Vec<String>> {
-    let output = Command::new("ps")
-        .args(["-A", "-o", "pid=,ppid=,args="])
-        .output();
-
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return HashMap::new(),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut table: HashMap<u32, Vec<String>> = HashMap::new();
-
-    for line in stdout.lines() {
-        let mut tokens = line.split_whitespace();
-        let pid = tokens.next().and_then(|s| s.parse::<u32>().ok());
-        let ppid = tokens.next().and_then(|s| s.parse::<u32>().ok());
-        let argv0 = tokens.next().unwrap_or("");
-        let basename = argv0.rsplit('/').next().unwrap_or(argv0);
-
-        if let (Some(_pid), Some(ppid)) = (pid, ppid) {
-            table.entry(ppid).or_default().push(basename.to_owned());
-        }
-    }
-
-    table
-}
-
-/// Mutate any `PaneEntry` whose `agent == "node"` to the resolved agent name
-/// when the pane's shell PID has a direct child whose argv[0] basename matches
-/// a known agent (`pi`).
-///
-/// This is a pure function over a pre-built `table`; use
-/// [`resolve_node_agents`] for the full workflow.
-pub fn resolve_from_process_table(panes: &mut [PaneEntry], table: &HashMap<u32, Vec<String>>) {
-    for pane in panes.iter_mut() {
-        if pane.agent != "node" {
-            continue;
-        }
-        if let Some(children) = table.get(&pane.pane_pid)
-            && children.iter().any(|a| a == "pi")
-        {
-            pane.agent = "pi".to_owned();
-        }
-    }
-}
-
-/// Resolve `node` panes to their real agent name.
-///
-/// Skips the `ps` call entirely when no `node` panes are present.
-fn resolve_node_agents(panes: &mut [PaneEntry]) {
-    if !panes.iter().any(|p| p.agent == "node") {
-        return;
-    }
-    let table = build_process_table();
-    resolve_from_process_table(panes, &table);
-}
-
-// ── Filtering ─────────────────────────────────────────────────────────────────
-
-/// Keep only panes whose `agent` exactly matches a known harness name.
-pub fn filter_agent_panes(panes: &[PaneEntry]) -> Vec<&PaneEntry> {
-    panes
-        .iter()
-        .filter(|p| KNOWN_AGENTS.contains(&p.agent.as_str()))
-        .collect()
-}
-
-// ── State file validation / stale cleanup ─────────────────────────────────────
-
-/// Build a `pane_id → AgentInfo` lookup map from all state files under `base`.
-pub fn load_state_map_from(base: &std::path::Path) -> HashMap<String, AgentInfo> {
-    list_agent_infos_in(base)
-        .into_iter()
-        .map(|info| (info.pane_id.clone(), info))
-        .collect()
-}
-
-/// Build a `pane_id → AgentInfo` lookup map using the XDG base directory.
-pub fn load_state_map() -> HashMap<String, AgentInfo> {
-    load_state_map_from(&crate::state::xdg_data_home())
-}
-
-/// Validate state files against the live pane set under `base` and delete stale ones.
-pub fn validate_state_files_in(
-    base: &std::path::Path,
-    state_map: &mut HashMap<String, AgentInfo>,
-    live_panes: &[PaneEntry],
-) {
-    let live: HashMap<&str, &str> = live_panes
-        .iter()
-        .map(|p| (p.pane_id.as_str(), p.agent.as_str()))
-        .collect();
-
-    let stale_ids: Vec<String> = state_map
-        .values()
-        .filter(|info| match live.get(info.pane_id.as_str()) {
-            None => true,
-            Some(cmd) => info.harness != "unknown" && *cmd != info.harness.as_str(),
-        })
-        .map(|info| info.pane_id.clone())
-        .collect();
-
-    for pane_id in &stale_ids {
-        let _ = delete_state_in(base, pane_id);
-        state_map.remove(pane_id);
-    }
-}
-
-/// Validate state files against the live pane set (XDG base) and delete stale ones.
-///
-/// A state file is deleted when:
-///   - Its `pane_id` is not in the live pane set (orphaned).
-///   - Its `pane_id` is in the live set **and** the live pane's
-///     `pane_current_command` does not match `harness`, **and** `harness` is
-///     not `"unknown"` (contradictory state from a different harness).
-///
-/// Files whose `harness` is `"unknown"` are only deleted when their pane no
-/// longer exists — the harness-match check is skipped.
-pub fn validate_state_files(state_map: &mut HashMap<String, AgentInfo>, live_panes: &[PaneEntry]) {
-    validate_state_files_in(&crate::state::xdg_data_home(), state_map, live_panes);
-}
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -374,7 +139,7 @@ fn cell_value(
 ///
 /// When `use_color` is `true`, whichever column position(s) hold
 /// [`Field::Status`] are wrapped in an ANSI foreground color escape sequence
-/// keyed to the agent's state (see [`colorize_state`]).
+/// keyed to the agent's state (see `colorize_state`).
 pub fn format_panes(
     panes: &[&PaneEntry],
     state_map: &HashMap<String, AgentInfo>,
@@ -408,11 +173,6 @@ pub fn format_panes(
                 .collect()
         })
         .collect();
-
-    // With tab delimiters, we don't need to compute column widths for padding.
-    // Every row keeps exactly `columns.len()` tab-separated fields, even when
-    // a trailing field is empty, so machine consumers can rely on a fixed
-    // field count per line.
 
     let mut output = String::new();
     for (row, status) in rows.iter().zip(statuses.iter()) {
@@ -495,57 +255,11 @@ pub fn sort_panes(
     }
 }
 
-// ── Subcommand entry point ────────────────────────────────────────────────────
-
-/// Entry point for the `agentctl list` subcommand.
-///
-/// Resolves the tmux server socket in priority order:
-/// 1. `--server` / `-s` CLI flag
-/// 2. `AGENTCTL_TMUX_SOCKET` environment variable (used by the test harness)
-/// 3. Default tmux server (no `-S` flag)
-pub fn run(
-    server: Option<String>,
-    sort_by: Field,
-    reverse: bool,
-    columns: Vec<Field>,
-) -> Result<()> {
-    let server = server.or_else(|| std::env::var("AGENTCTL_TMUX_SOCKET").ok());
-
-    let panes = tmux_panes(server.as_deref())?;
-    let mut agent_panes = filter_agent_panes(&panes);
-
-    // Load state files and validate / clean up stale ones (best effort; only
-    // when tmux was reachable, which is guaranteed at this point since
-    // tmux_panes returned Ok).
-    let mut state_map = load_state_map();
-    validate_state_files(&mut state_map, &panes);
-
-    sort_panes(&mut agent_panes, sort_by, reverse, &state_map);
-
-    let use_color = std::io::stdout().is_terminal();
-    let output = format_panes(&agent_panes, &state_map, use_color, &columns);
-    print!("{output}");
-
-    Ok(())
-}
-
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AgentState, write_state_to};
-
-    fn pane(agent: &str, session: &str, window: u32, pane: u32) -> PaneEntry {
-        PaneEntry {
-            agent: agent.to_owned(),
-            session: session.to_owned(),
-            window_index: window,
-            pane_index: pane,
-            pane_pid: 0,
-            pane_id: format!("%{window}{pane}"),
-        }
-    }
 
     fn pane_with_id(agent: &str, session: &str, window: u32, p: u32, id: &str) -> PaneEntry {
         PaneEntry {
@@ -562,53 +276,30 @@ mod tests {
         HashMap::new()
     }
 
-    // ── filter_agent_panes ─────────────────────────────────────────────────────────────────
-
-    #[test]
-    fn filter_keeps_claude_and_pi_drops_others() {
-        let panes = vec![
-            pane("claude", "dev", 0, 0),
-            pane("pi", "work", 1, 0),
-            pane("zsh", "dev", 0, 1),
-            pane("nvim", "dev", 0, 2),
-            pane("bash", "other", 2, 0),
-        ];
-        let filtered = filter_agent_panes(&panes);
-        assert_eq!(filtered.len(), 2);
-        assert_eq!(filtered[0].agent, "claude");
-        assert_eq!(filtered[1].agent, "pi");
-    }
-
-    #[test]
-    fn filter_empty_input_returns_empty() {
-        let panes: Vec<PaneEntry> = vec![];
-        assert!(filter_agent_panes(&panes).is_empty());
-    }
-
-    #[test]
-    fn filter_excludes_near_matches() {
-        let panes = vec![
-            pane("pilot", "dev", 0, 0),
-            pane("Claude", "dev", 0, 1),
-            pane("PI", "dev", 0, 2),
-            pane("claude2", "dev", 0, 3),
-            pane("xpi", "dev", 0, 4),
-            pane("", "dev", 0, 5),
-        ];
-        let filtered = filter_agent_panes(&panes);
-        assert!(
-            filtered.is_empty(),
-            "expected no matches, got: {:?}",
-            filtered
+    fn state_map_with(
+        pane_id: &str,
+        harness: &str,
+        status: AgentState,
+        active_tools: u32,
+    ) -> HashMap<String, AgentInfo> {
+        let mut map = HashMap::new();
+        map.insert(
+            pane_id.to_string(),
+            AgentInfo {
+                pane_id: pane_id.to_string(),
+                harness: harness.to_string(),
+                status,
+                updated_at: Utc::now(),
+                active_tools,
+            },
         );
+        map
     }
 
-    // ── format_panes ────────────────────────────────────────────────────────────────────
+    // ── format_panes ────────────────────────────────────────────────────────
 
     #[test]
     fn format_panes_handles_wide_unicode_with_tabs() {
-        // With tab delimiters, wide unicode characters (like 🌳) don't affect column alignment
-        // since tabs provide the delimiter, not padding.
         let data = vec![
             pane_with_id("pi", "dotfiles", 0, 0, "%1"),
             pane_with_id("pi", "🌳 agentctl (claude-hooks)", 0, 0, "%2"),
@@ -620,8 +311,6 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3);
 
-        // All lines should have tab-separated columns (5 columns with 4 tabs,
-        // including the trailing tab before the empty activeTools cell).
         assert_eq!(lines[0], "pi\tdotfiles\t0.0\tunknown\t");
         assert_eq!(lines[1], "pi\t🌳 agentctl (claude-hooks)\t0.0\tunknown\t");
         assert_eq!(lines[2], "pi\t🌳 agentctl (list-sort)\t0.0\tunknown\t");
@@ -661,10 +350,7 @@ mod tests {
 
     #[test]
     fn format_panes_shows_state_from_map() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%5", "claude", AgentState::Working).unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%5", "claude", AgentState::Working, 0);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
@@ -678,11 +364,7 @@ mod tests {
 
     #[test]
     fn format_panes_singular_tool_column() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        crate::state::write_state_with_tools_to(tmp.path(), "%5", "claude", AgentState::Working, 1)
-            .unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%5", "claude", AgentState::Working, 1);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
@@ -691,11 +373,7 @@ mod tests {
 
     #[test]
     fn format_panes_plural_tool_column() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        crate::state::write_state_with_tools_to(tmp.path(), "%5", "claude", AgentState::Working, 3)
-            .unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%5", "claude", AgentState::Working, 3);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
@@ -704,21 +382,15 @@ mod tests {
 
     #[test]
     fn format_panes_empty_tool_column_when_zero() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%5", "claude", AgentState::Working).unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%5", "claude", AgentState::Working, 0);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%5")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
-        // The trailing activeTools column is empty but its tab separator is
-        // still present, so every row has the same field count.
         assert_eq!(output, "claude	dev	0.0	working	\n");
     }
 
     #[test]
     fn format_panes_unknown_state_never_shows_tool_count() {
-        // No state file for this pane at all → unknown state, no tool count.
         let state_map = empty_state_map();
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%missing")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
@@ -728,11 +400,8 @@ mod tests {
 
     #[test]
     fn format_panes_column_alignment_mixed_tool_counts() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        crate::state::write_state_with_tools_to(tmp.path(), "%1", "claude", AgentState::Working, 1)
-            .unwrap();
-        write_state_to(tmp.path(), "%2", "pi", AgentState::Idle).unwrap();
-        let state_map = load_state_map_from(tmp.path());
+        let mut state_map = state_map_with("%1", "claude", AgentState::Working, 1);
+        state_map.extend(state_map_with("%2", "pi", AgentState::Idle, 0));
 
         let data = vec![
             pane_with_id("claude", "dev", 0, 0, "%1"),
@@ -758,14 +427,11 @@ mod tests {
         assert_eq!(computed, DEFAULT_COLUMNS_STR);
     }
 
-    // ── --columns: subset, order, duplicates, invalid values ────────────────
+    // ── --columns: subset, order, duplicates ────────────────
 
     #[test]
     fn format_panes_columns_subset_and_custom_order() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%1", "claude", AgentState::Working, 0);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, false, &[Field::Status, Field::Agent]);
@@ -797,57 +463,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn invalid_columns_value_rejected_by_clap() {
-        let result = <crate::Cli as clap::Parser>::try_parse_from([
-            "agentctl",
-            "list",
-            "--columns",
-            "bogus",
-        ]);
-        assert!(
-            result.is_err(),
-            "expected clap error for unknown --columns value"
-        );
-    }
-
-    #[test]
-    fn columns_and_sort_by_share_identical_vocabulary() {
-        for value in [
-            "agent",
-            "session",
-            "pane",
-            "status",
-            "updatedAt",
-            "activeTools",
-        ] {
-            let sort_result = <crate::Cli as clap::Parser>::try_parse_from([
-                "agentctl",
-                "list",
-                "--sort-by",
-                value,
-            ]);
-            let columns_result = <crate::Cli as clap::Parser>::try_parse_from([
-                "agentctl",
-                "list",
-                "--columns",
-                value,
-            ]);
-            assert!(sort_result.is_ok(), "--sort-by {value} should be accepted");
-            assert!(
-                columns_result.is_ok(),
-                "--columns {value} should be accepted"
-            );
-        }
-    }
-
     // ── updatedAt rendering ───────────────────────────────────────────────────
 
     #[test]
     fn format_panes_updated_at_renders_rfc3339_when_state_file_exists() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
-        let state_map = load_state_map_from(tmp.path());
+        let state_map = state_map_with("%1", "claude", AgentState::Working, 0);
         let expected = state_map["%1"].updated_at.to_rfc3339();
 
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
@@ -873,8 +493,6 @@ mod tests {
             false,
             &[Field::Agent, Field::UpdatedAt],
         );
-        // The empty updatedAt cell still gets a tab separator, keeping every
-        // row at a fixed 2-field count.
         assert_eq!(output, "claude\t\n");
     }
 
@@ -882,25 +500,18 @@ mod tests {
 
     #[test]
     fn format_panes_status_colorized_when_not_in_default_position() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%1", "claude", AgentState::Working, 0);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &state_map, true, &[Field::Status, Field::Agent]);
         assert!(output.starts_with("\u{1b}[33mworking\u{1b}[39m\t"));
-        // Only the status column is colorized; agent is never colorized.
         let after_status = output.trim_end().split('\t').last().unwrap();
         assert_eq!(after_status, "claude");
     }
 
     #[test]
     fn format_panes_repeated_status_columns_each_colorized() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Blocked).unwrap();
-        let state_map = load_state_map_from(tmp.path());
-
+        let state_map = state_map_with("%1", "claude", AgentState::Blocked, 0);
         let data = vec![pane_with_id("claude", "dev", 0, 0, "%1")];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(
@@ -931,8 +542,6 @@ mod tests {
             false,
             &[Field::Agent, Field::UpdatedAt],
         );
-        // Every row must split into exactly 2 tab-separated fields, even
-        // though the trailing `updatedAt` column is empty for both panes.
         for line in output.lines() {
             let fields: Vec<&str> = line.split('\t').collect();
             assert_eq!(
@@ -961,12 +570,11 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 2);
 
-        // Tab-delimited format should have session and agent separated by tabs
         assert_eq!(lines[0], "dotfiles\tclaude");
         assert_eq!(lines[1], "🌳 agentctl (claude-hooks)\tpi");
     }
 
-    // ── colorize_state ───────────────────────────────────────────────────────────────────
+    // ── colorize_state ───────────────────────────────────────────────────────
 
     #[test]
     fn colorize_state_use_color_false_returns_plain_text() {
@@ -1012,16 +620,14 @@ mod tests {
         assert_eq!(out, "unknown");
     }
 
-    // ── format_panes color wiring ────────────────────────────────────────────────────────
+    // ── format_panes color wiring ────────────────────────────────────────────
 
     #[test]
     fn format_panes_use_color_true_wraps_state_in_ansi_codes() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Idle).unwrap();
-        write_state_to(tmp.path(), "%2", "claude", AgentState::Working).unwrap();
-        write_state_to(tmp.path(), "%3", "claude", AgentState::Blocked).unwrap();
-        write_state_to(tmp.path(), "%4", "claude", AgentState::Done).unwrap();
-        let state_map = load_state_map_from(tmp.path());
+        let mut state_map = state_map_with("%1", "claude", AgentState::Idle, 0);
+        state_map.extend(state_map_with("%2", "claude", AgentState::Working, 0));
+        state_map.extend(state_map_with("%3", "claude", AgentState::Blocked, 0));
+        state_map.extend(state_map_with("%4", "claude", AgentState::Done, 0));
 
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
@@ -1035,7 +641,6 @@ mod tests {
         assert!(output.contains("\u{1b}[33mworking\u{1b}[39m"));
         assert!(output.contains("\u{1b}[31mblocked\u{1b}[39m"));
         assert!(output.contains("\u{1b}[32mdone\u{1b}[39m"));
-        // unknown remains uncolored
         let unknown_line = output.lines().last().unwrap();
         assert!(unknown_line.ends_with("unknown\t"));
         assert!(!unknown_line.contains("\u{1b}["));
@@ -1060,10 +665,8 @@ mod tests {
 
     #[test]
     fn format_panes_color_does_not_break_alignment() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Idle).unwrap();
-        write_state_to(tmp.path(), "%2", "claude", AgentState::Blocked).unwrap();
-        let state_map = load_state_map_from(tmp.path());
+        let mut state_map = state_map_with("%1", "claude", AgentState::Idle, 0);
+        state_map.extend(state_map_with("%2", "claude", AgentState::Blocked, 0));
 
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
@@ -1072,14 +675,11 @@ mod tests {
         let colored = format_panes(&refs, &state_map, true, DEFAULT_COLUMNS);
         let plain = format_panes(&refs, &state_map, false, DEFAULT_COLUMNS);
 
-        // Strip ANSI escape sequences from the colored output and compare
-        // display-column start offsets against the plain-text version.
         fn strip_ansi(s: &str) -> String {
             let mut out = String::new();
             let mut chars = s.chars().peekable();
             while let Some(c) = chars.next() {
                 if c == '\u{1b}' {
-                    // Skip until 'm' terminator.
                     for c2 in chars.by_ref() {
                         if c2 == 'm' {
                             break;
@@ -1101,112 +701,8 @@ mod tests {
         }
     }
 
-    // ── validate_state_files ───────────────────────────────────────────────────────────
+    // ── sort_panes ───────────────────────────────────────────────────────────
 
-    #[test]
-    fn validate_deletes_orphaned_state_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%orphan", "claude", AgentState::Idle).unwrap();
-        let mut map = load_state_map_from(tmp.path());
-        assert!(map.contains_key("%orphan"));
-
-        // No live panes → all state files are orphaned
-        validate_state_files_in(tmp.path(), &mut map, &[]);
-        assert!(!map.contains_key("%orphan"));
-        assert!(!crate::state::state_file_path_in(tmp.path(), "%orphan").exists());
-    }
-
-    #[test]
-    fn validate_deletes_contradictory_harness() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Working).unwrap();
-        let mut map = load_state_map_from(tmp.path());
-
-        let live = vec![pane_with_id("pi", "dev", 0, 0, "%1")];
-        validate_state_files_in(tmp.path(), &mut map, &live);
-        assert!(!map.contains_key("%1"));
-    }
-
-    #[test]
-    fn validate_keeps_matching_state_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%2", "claude", AgentState::Done).unwrap();
-        let mut map = load_state_map_from(tmp.path());
-
-        let live = vec![pane_with_id("claude", "dev", 0, 0, "%2")];
-        validate_state_files_in(tmp.path(), &mut map, &live);
-        assert!(map.contains_key("%2"));
-    }
-
-    #[test]
-    fn validate_keeps_unknown_harness_even_if_command_differs() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%3", "unknown", AgentState::Idle).unwrap();
-        let mut map = load_state_map_from(tmp.path());
-
-        let live = vec![pane_with_id("claude", "dev", 0, 0, "%3")];
-        validate_state_files_in(tmp.path(), &mut map, &live);
-        assert!(map.contains_key("%3"));
-    }
-
-    // ── resolve_from_process_table ───────────────────────────────────────────────────
-
-    fn make_table(entries: &[(u32, &str)]) -> HashMap<u32, Vec<String>> {
-        let mut map: HashMap<u32, Vec<String>> = HashMap::new();
-        for (ppid, argv0) in entries {
-            map.entry(*ppid).or_default().push(argv0.to_string());
-        }
-        map
-    }
-
-    #[test]
-    fn resolve_node_pane_with_pi_child_becomes_pi() {
-        let mut panes = vec![PaneEntry {
-            agent: "node".to_owned(),
-            session: "dev".to_owned(),
-            window_index: 0,
-            pane_index: 0,
-            pane_pid: 100,
-            pane_id: "%1".to_owned(),
-        }];
-        let table = make_table(&[(100, "pi")]);
-        resolve_from_process_table(&mut panes, &table);
-        assert_eq!(panes[0].agent, "pi");
-    }
-
-    #[test]
-    fn resolve_node_pane_with_no_pi_child_stays_node() {
-        let mut panes = vec![PaneEntry {
-            agent: "node".to_owned(),
-            session: "dev".to_owned(),
-            window_index: 0,
-            pane_index: 0,
-            pane_pid: 100,
-            pane_id: "%1".to_owned(),
-        }];
-        let table = make_table(&[(100, "webpack")]);
-        resolve_from_process_table(&mut panes, &table);
-        assert_eq!(panes[0].agent, "node");
-    }
-
-    #[test]
-    fn resolve_leaves_claude_panes_unchanged() {
-        let mut panes = vec![PaneEntry {
-            agent: "claude".to_owned(),
-            session: "dev".to_owned(),
-            window_index: 0,
-            pane_index: 0,
-            pane_pid: 200,
-            pane_id: "%2".to_owned(),
-        }];
-        let table = make_table(&[(200, "pi")]);
-        resolve_from_process_table(&mut panes, &table);
-        assert_eq!(panes[0].agent, "claude");
-    }
-
-    // ── sort_panes ───────────────────────────────────────────────────────────────────────
-
-    /// Build a state map from (pane_id, state, updated_at) tuples.
     fn state_map_with_times(
         entries: &[(&str, AgentState, chrono::DateTime<chrono::Utc>)],
     ) -> HashMap<String, AgentInfo> {
@@ -1229,8 +725,6 @@ mod tests {
         chrono::DateTime::from_timestamp(secs, 0).expect("valid timestamp")
     }
 
-    // ── 5.1: default sort = updated-at descending (newest first) ─────────────
-
     #[test]
     fn sort_panes_default_updated_at_newest_first() {
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
@@ -1243,7 +737,6 @@ mod tests {
         ]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
         sort_panes(&mut refs, Field::UpdatedAt, false, &map);
-        // Newest first: p2 (3000) > p3 (2000) > p1 (1000)
         assert_eq!(
             refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
             vec!["%2", "%3", "%1"]
@@ -1257,7 +750,6 @@ mod tests {
         let map = state_map_with_times(&[("%1", AgentState::Idle, t(1000))]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
         sort_panes(&mut refs, Field::UpdatedAt, false, &map);
-        // p1 has a real timestamp; p2 gets MIN_UTC → sorts last
         assert_eq!(refs[0].pane_id, "%1");
         assert_eq!(refs[1].pane_id, "%2");
     }
@@ -1272,12 +764,9 @@ mod tests {
         ]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2];
         sort_panes(&mut refs, Field::UpdatedAt, true, &map);
-        // Reversed: oldest first → p1 (1000) before p2 (3000)
         assert_eq!(refs[0].pane_id, "%1");
         assert_eq!(refs[1].pane_id, "%2");
     }
-
-    // ── 5.2: --sort-by agent ──────────────────────────────────────────────────────
 
     #[test]
     fn sort_panes_by_agent_alphabetical() {
@@ -1299,8 +788,6 @@ mod tests {
         assert_eq!(refs[1].agent, "claude");
     }
 
-    // ── 5.3: --sort-by session ───────────────────────────────────────────────────
-
     #[test]
     fn sort_panes_by_session_alphabetical() {
         let p1 = pane_with_id("claude", "work", 0, 0, "%1");
@@ -1314,8 +801,6 @@ mod tests {
         );
     }
 
-    // ── 5.4: --sort-by pane ───────────────────────────────────────────────────────
-
     #[test]
     fn sort_panes_by_pane_window_then_pane_index() {
         let p1 = pane_with_id("claude", "dev", 1, 2, "%1");
@@ -1324,7 +809,6 @@ mod tests {
         let p4 = pane_with_id("pi", "dev", 0, 0, "%4");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3, &p4];
         sort_panes(&mut refs, Field::Pane, false, &empty_state_map());
-        // Expected: window 0 pane 0, window 0 pane 5, window 1 pane 0, window 1 pane 2
         assert_eq!(
             refs.iter()
                 .map(|p| (p.window_index, p.pane_index))
@@ -1333,17 +817,13 @@ mod tests {
         );
     }
 
-    // ── 5.5: --sort-by state --reverse ─────────────────────────────────────────
-
     #[test]
     fn sort_panes_state_ascending_blocked_first() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Unknown).unwrap();
-        write_state_to(tmp.path(), "%2", "claude", AgentState::Idle).unwrap();
-        write_state_to(tmp.path(), "%3", "claude", AgentState::Blocked).unwrap();
-        write_state_to(tmp.path(), "%4", "claude", AgentState::Working).unwrap();
-        write_state_to(tmp.path(), "%5", "claude", AgentState::Done).unwrap();
-        let map = load_state_map_from(tmp.path());
+        let mut map = state_map_with("%1", "claude", AgentState::Unknown, 0);
+        map.extend(state_map_with("%2", "claude", AgentState::Idle, 0));
+        map.extend(state_map_with("%3", "claude", AgentState::Blocked, 0));
+        map.extend(state_map_with("%4", "claude", AgentState::Working, 0));
+        map.extend(state_map_with("%5", "claude", AgentState::Done, 0));
 
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
@@ -1368,11 +848,9 @@ mod tests {
 
     #[test]
     fn sort_panes_state_reverse_unknown_first() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        write_state_to(tmp.path(), "%1", "claude", AgentState::Blocked).unwrap();
-        write_state_to(tmp.path(), "%2", "claude", AgentState::Unknown).unwrap();
-        write_state_to(tmp.path(), "%3", "claude", AgentState::Idle).unwrap();
-        let map = load_state_map_from(tmp.path());
+        let mut map = state_map_with("%1", "claude", AgentState::Blocked, 0);
+        map.extend(state_map_with("%2", "claude", AgentState::Unknown, 0));
+        map.extend(state_map_with("%3", "claude", AgentState::Idle, 0));
 
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("claude", "dev", 0, 1, "%2");
@@ -1384,9 +862,6 @@ mod tests {
         assert_eq!(map[refs[2].pane_id.as_str()].status, AgentState::Blocked);
     }
 
-    // ── 5.7: --sort-by activeTools ────────────────────────────────────────────
-
-    /// Build a state map from (pane_id, state, active_tools) tuples.
     fn state_map_with_tools(entries: &[(&str, AgentState, u32)]) -> HashMap<String, AgentInfo> {
         entries
             .iter()
@@ -1414,7 +889,6 @@ mod tests {
         ]);
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
         sort_panes(&mut refs, Field::ActiveTools, false, &map);
-        // Busiest first: %2 (5) > %1 (1) > %3 (no state file → 0)
         assert_eq!(
             refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
             vec!["%2", "%1", "%3"]
@@ -1439,7 +913,6 @@ mod tests {
     fn sort_panes_active_tools_unknown_status_treated_as_zero() {
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
-        // %2 has active_tools set, but status unknown → treated as 0.
         let map = state_map_with_tools(&[
             ("%1", AgentState::Working, 1),
             ("%2", AgentState::Unknown, 9),
@@ -1450,38 +923,16 @@ mod tests {
         assert_eq!(refs[1].pane_id, "%2");
     }
 
-    // ── Stability ───────────────────────────────────────────────────────────────────
-
     #[test]
     fn sort_panes_stable_equal_keys_preserve_order() {
-        // All panes have the same session name — relative order must be preserved.
         let p1 = pane_with_id("claude", "dev", 0, 0, "%1");
         let p2 = pane_with_id("pi", "dev", 0, 1, "%2");
         let p3 = pane_with_id("claude", "dev", 0, 2, "%3");
         let mut refs: Vec<&PaneEntry> = vec![&p1, &p2, &p3];
         sort_panes(&mut refs, Field::Session, false, &empty_state_map());
-        // All "dev" — original order preserved
         assert_eq!(
             refs.iter().map(|p| p.pane_id.as_str()).collect::<Vec<_>>(),
             vec!["%1", "%2", "%3"]
-        );
-    }
-
-    // ── 5.6: invalid --sort-by value ───────────────────────────────────────────
-
-    #[test]
-    fn invalid_sort_by_rejected_by_clap() {
-        // Clap's ValueEnum parsing rejects unknown values at argument parse time.
-        // We verify this by using try_parse_from on the CLI root.
-        let result = <crate::Cli as clap::Parser>::try_parse_from([
-            "agentctl",
-            "list",
-            "--sort-by",
-            "foobar",
-        ]);
-        assert!(
-            result.is_err(),
-            "expected clap error for unknown sort-by value"
         );
     }
 }

@@ -6,20 +6,114 @@ version = 4
 name = "agentctl"
 version = "0.1.0"
 dependencies = [
+ "agentctl-core",
+ "agentctl-harness",
+ "agentctl-harness-claude",
+ "agentctl-harness-pi",
+ "agentctl-logging",
+ "agentctl-state",
+ "agentctl-state-fs",
  "anyhow",
- "chrono",
  "clap",
- "dirs",
- "owo-colors",
- "rust-fsm",
- "serde",
  "serde_json",
  "tempfile",
  "testcontainers",
  "tokio",
+]
+
+[[package]]
+name = "agentctl-core"
+version = "0.1.0"
+dependencies = [
+ "agentctl-harness",
+ "agentctl-logging",
+ "agentctl-state",
+ "agentctl-state-fs",
+ "agentctl-tmux",
+ "anyhow",
+ "chrono",
+ "owo-colors",
+ "tempfile",
+]
+
+[[package]]
+name = "agentctl-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+]
+
+[[package]]
+name = "agentctl-harness-claude"
+version = "0.1.0"
+dependencies = [
+ "agentctl-harness",
+ "anyhow",
+ "dirs",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agentctl-harness-pi"
+version = "0.1.0"
+dependencies = [
+ "agentctl-harness",
+ "anyhow",
+ "dirs",
+ "tempfile",
+]
+
+[[package]]
+name = "agentctl-logging"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "agentctl-state"
+version = "0.1.0"
+dependencies = [
+ "agentctl-logging",
+ "anyhow",
+ "chrono",
+ "rust-fsm",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agentctl-state-fs"
+version = "0.1.0"
+dependencies = [
+ "agentctl-logging",
+ "agentctl-state",
+ "anyhow",
+ "chrono",
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agentctl-tmux"
+version = "0.1.0"
+dependencies = [
+ "agentctl-logging",
+ "agentctl-state",
+ "agentctl-state-fs",
+ "anyhow",
+ "chrono",
+ "tempfile",
 ]
 
 [[package]]

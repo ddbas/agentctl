@@ -3,14 +3,14 @@ enter = "lefthook install"
 
 [tasks.build]
 description = "Build the cargo project"
-run = "rtk cargo build"
-sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
+run = "rtk cargo build --workspace"
+sources = ["Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml"]
 outputs = ["target/debug/agentctl"]
 
 [tasks."build:release"]
 description = "Build the cargo project in release mode"
-run = "rtk cargo build --release"
-sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
+run = "rtk cargo build --workspace --release"
+sources = ["Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml"]
 outputs = ["target/release/agentctl"]
 
 [tasks.dev]
@@ -33,14 +33,14 @@ run = "scripts/view-proposal.sh ${usage_change_id?}"
 
 [tasks."test:build-image"]
 description = "Build the Docker image used by TmuxEnv in integration tests"
-run = "docker build -t am-tmux-test:latest tests/ && mkdir -p target && docker inspect am-tmux-test:latest --format '{{.Id}}' > target/.test-image-id"
-sources = ["tests/Dockerfile"]
+run = "docker build -t am-tmux-test:latest crates/agentctl/tests/ && mkdir -p target && docker inspect am-tmux-test:latest --format '{{.Id}}' > target/.test-image-id"
+sources = ["crates/agentctl/tests/Dockerfile"]
 outputs = ["target/.test-image-id"]
 
 [tasks.test]
 description = "Run the cargo test suite"
-run = "rtk cargo test"
-sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs", "tests/**/*.rs"]
+run = "rtk cargo test --workspace"
+sources = ["Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml"]
 
 [tools]
 lefthook = "latest"

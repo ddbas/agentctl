@@ -1,0 +1,16 @@
+[package]
+name = "agentctl-state-fs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+agentctl-state.workspace = true
+agentctl-logging.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,34 +1,39 @@
+//! Shared logging interface for every `agentctl` workspace crate.
+//!
+//! Only the `agentctl` binary crate calls [`init`] to configure the actual
+//! log sink (a rolling daily file appender). Every other crate depends on
+//! this crate and uses [`ops`]'s structured logging helpers instead of
+//! calling the underlying `tracing` crate directly.
+
 use std::fs;
 use std::path::PathBuf;
 
-use clap::ValueEnum;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Log level for agentctl, exposed as a CLI enum.
-#[derive(Debug, Clone, Copy, ValueEnum)]
+/// Log level for agentctl.
+///
+/// Plain domain enum — CLI-facing crates define their own `clap`-derived
+/// mirror enum and convert `Into<LogLevel>`, since no library crate in this
+/// workspace depends on `clap`.
+#[derive(Debug, Clone, Copy)]
 pub enum LogLevel {
-    /// Trace level — most verbose, for detailed diagnostic information
-    #[value(name = "trace")]
+    /// Trace level — most verbose, for detailed diagnostic information.
     Trace,
-    /// Debug level — detailed information for debugging
-    #[value(name = "debug")]
+    /// Debug level — detailed information for debugging.
     Debug,
-    /// Info level — general informational messages (default)
-    #[value(name = "info")]
+    /// Info level — general informational messages (default).
     Info,
-    /// Warn level — warning messages for potentially harmful situations
-    #[value(name = "warn")]
+    /// Warn level — warning messages for potentially harmful situations.
     Warn,
-    /// Error level — error messages only
-    #[value(name = "error")]
+    /// Error level — error messages only.
     Error,
 }
 
 impl LogLevel {
-    /// Convert LogLevel to tracing_subscriber filter LevelFilter
+    /// Convert `LogLevel` to a `tracing_subscriber` filter `LevelFilter`.
     fn to_level_filter(self) -> tracing_subscriber::filter::LevelFilter {
         match self {
             LogLevel::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
@@ -40,37 +45,39 @@ impl LogLevel {
     }
 }
 
-/// Resolve the platform-appropriate log directory for agentctl.
+/// Resolve the platform-appropriate log directory for `app_name`.
 ///
-/// Tries `dirs::state_dir()` first (XDG_STATE_HOME or `~/.local/state` on Linux),
-/// falls back to `dirs::data_local_dir()` on other platforms, then appends `agentctl/logs`.
-/// Returns the resolved path, but does not create it. No I/O or side effects.
-pub fn log_dir() -> Option<PathBuf> {
+/// Tries `dirs::state_dir()` first (XDG_STATE_HOME or `~/.local/state` on
+/// Linux), falls back to `dirs::data_local_dir()` on other platforms, then
+/// appends `<app_name>/logs`. Returns the resolved path, but does not create
+/// it. No I/O or side effects.
+pub fn log_dir(app_name: &str) -> Option<PathBuf> {
     dirs::state_dir()
         .or_else(dirs::data_local_dir)
-        .map(|base| base.join("agentctl").join("logs"))
+        .map(|base| base.join(app_name).join("logs"))
 }
 
-/// Compute the expected log file path for a given day.
+/// Compute the expected log file path for `app_name` for a given day.
 ///
-/// Uses the same naming scheme as the rolling appender: `agentctl.log.YYYY-MM-DD`.
-/// The path is computed based on today's date; it is not verified to exist on disk.
-/// No I/O or side effects.
-pub fn current_log_file(dir: &std::path::Path) -> PathBuf {
+/// Uses the same naming scheme as the rolling appender: `<app_name>.log.YYYY-MM-DD`.
+/// The path is computed based on today's date; it is not verified to exist on
+/// disk. No I/O or side effects.
+pub fn current_log_file(dir: &std::path::Path, app_name: &str) -> PathBuf {
     let today = chrono::Local::now().format("%Y-%m-%d");
-    dir.join(format!("agentctl.log.{}", today))
+    dir.join(format!("{app_name}.log.{}", today))
 }
 
 /// Prune old log files, keeping only the most recent `retention_count`.
-/// Matches files with the prefix "agentctl.log.*" in the log directory.
-fn prune_logs(log_path: &PathBuf, retention_count: usize) {
+/// Matches files with the prefix `<app_name>.log.` in the log directory.
+fn prune_logs(log_path: &PathBuf, app_name: &str, retention_count: usize) {
+    let prefix = format!("{app_name}.log.");
     if let Ok(entries) = fs::read_dir(log_path) {
         let mut files: Vec<_> = entries
             .filter_map(|entry| {
                 entry.ok().and_then(|e| {
                     let path = e.path();
                     let file_name = path.file_name()?.to_string_lossy().to_string();
-                    if file_name.starts_with("agentctl.log.") {
+                    if file_name.starts_with(&prefix) {
                         e.metadata()
                             .ok()
                             .and_then(|m| m.modified().ok())
@@ -92,25 +99,26 @@ fn prune_logs(log_path: &PathBuf, retention_count: usize) {
     }
 }
 
-/// Initialize the logging subsystem.
+/// Initialize the logging subsystem for `app_name`.
 ///
-/// Sets up a `tracing_subscriber` with a rolling file appender, writing to the
-/// platform log directory at the specified level. Returns a `WorkerGuard` that
-/// must be held for the lifetime of the application to ensure logs are flushed.
+/// Sets up a `tracing_subscriber` with a rolling file appender, writing to
+/// the platform log directory at the specified level. Returns a
+/// `WorkerGuard` that must be held for the lifetime of the application to
+/// ensure logs are flushed.
 ///
-/// If directory creation or file opening fails, returns `None` and the CLI
-/// proceeds without file logging (best-effort behavior).
-pub fn init(level: LogLevel) -> Option<WorkerGuard> {
-    let log_path = log_dir()?;
+/// If directory creation or file opening fails, returns `None` and the
+/// caller proceeds without file logging (best-effort behavior).
+pub fn init(app_name: &str, level: LogLevel) -> Option<WorkerGuard> {
+    let log_path = log_dir(app_name)?;
 
     // Create log directory and parents if needed
     fs::create_dir_all(&log_path).ok()?;
 
     // Prune old log files (keep 7 most recent)
-    prune_logs(&log_path, 7);
+    prune_logs(&log_path, app_name, 7);
 
     // Create rolling file appender
-    let file_appender = tracing_appender::rolling::daily(&log_path, "agentctl.log");
+    let file_appender = tracing_appender::rolling::daily(&log_path, format!("{app_name}.log"));
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     // Set up the subscriber with proper layering
@@ -123,6 +131,31 @@ pub fn init(level: LogLevel) -> Option<WorkerGuard> {
     Some(guard)
 }
 
+/// Structured logging helper functions used by every other crate instead of
+/// calling raw `tracing` macros directly, so logging is a first-class
+/// interface dependency rather than an incidental one.
+pub mod ops {
+    /// Log a debug-level message.
+    pub fn debug(msg: &str) {
+        tracing::debug!("{msg}");
+    }
+
+    /// Log an info-level message.
+    pub fn info(msg: &str) {
+        tracing::info!("{msg}");
+    }
+
+    /// Log a warn-level message.
+    pub fn warn(msg: &str) {
+        tracing::warn!("{msg}");
+    }
+
+    /// Log an error-level message.
+    pub fn error(msg: &str) {
+        tracing::error!("{msg}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_log_dir_returns_some_path() {
-        let result = log_dir();
+        let result = log_dir("agentctl");
         assert!(result.is_some(), "log_dir() should return a path");
     }
 
@@ -159,7 +192,7 @@ mod tests {
         }
 
         // Prune to keep only 7 most recent
-        prune_logs(&log_dir_path, 7);
+        prune_logs(&log_dir_path, "agentctl", 7);
 
         // Count remaining files
         let remaining = fs::read_dir(&log_dir_path)
@@ -191,7 +224,7 @@ mod tests {
         fs::write(log_dir_path.join("other_file.txt"), "other").unwrap();
         fs::write(log_dir_path.join("readme.md"), "readme").unwrap();
 
-        prune_logs(&log_dir_path, 1);
+        prune_logs(&log_dir_path, "agentctl", 1);
 
         // Should keep 1 agentctl.log file and all non-matching files
         let remaining_files: Vec<_> = fs::read_dir(&log_dir_path)
@@ -222,7 +255,7 @@ mod tests {
         // We can't easily test actual permission errors in a cross-platform way,
         // but we can verify that init gracefully handles Option::None from log_dir
         // This is a basic smoke test that init doesn't panic
-        let _ = init(LogLevel::Info);
+        let _ = init("agentctl", LogLevel::Info);
         // If we get here, init returned without panicking
     }
 
@@ -230,7 +263,7 @@ mod tests {
     fn test_current_log_file_returns_path() {
         use std::path::PathBuf;
         let test_dir = PathBuf::from("/tmp/test/logs");
-        let result = current_log_file(&test_dir);
+        let result = current_log_file(&test_dir, "agentctl");
 
         // Should return a path ending with agentctl.log and today's date
         let file_name = result.file_name().unwrap().to_string_lossy();
@@ -245,7 +278,7 @@ mod tests {
         use std::path::PathBuf;
 
         let test_dir = PathBuf::from("/tmp/logs");
-        let result = current_log_file(&test_dir);
+        let result = current_log_file(&test_dir, "agentctl");
         let file_name = result.file_name().unwrap().to_string_lossy();
 
         // Verify the filename has the pattern agentctl.log.YYYY-MM-DD

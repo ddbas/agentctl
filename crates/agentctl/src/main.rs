@@ -1,12 +1,15 @@
-mod commands;
-#[allow(dead_code)]
-mod events_log;
-mod logging;
-#[allow(dead_code)]
-mod state;
-mod status_fsm;
+//! `agentctl` — the composition root. Contains only `clap` argument
+//! definitions, conversions from CLI-derived enums to `agentctl-core`/domain
+//! types, and the composition root itself (constructing
+//! `FileAgentRepository`, harness implementations, and the logging sink).
+//! No business logic beyond one `App` call per subcommand.
 
 use clap::{CommandFactory, Parser, Subcommand};
+
+use agentctl_core::{App, Field};
+use agentctl_harness_claude::ClaudeHarness;
+use agentctl_harness_pi::PiHarness;
+use agentctl_state_fs::FileAgentRepository;
 
 #[derive(Parser)]
 #[command(
@@ -22,7 +25,7 @@ struct Cli {
     /// Log level for the log file: trace, debug, info, warn, or error
     /// (default: info). Does not affect stdout/stderr output.
     #[arg(long, global = true, default_value = "info", value_name = "LEVEL")]
-    log_level: logging::LogLevel,
+    log_level: LogLevelArg,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -61,9 +64,9 @@ enum Commands {
         #[arg(
             long = "sort-by",
             value_name = "KEY",
-            default_value_t = commands::list::Field::UpdatedAt
+            default_value_t = FieldArg::UpdatedAt
         )]
-        sort_by: commands::list::Field,
+        sort_by: FieldArg,
 
         /// Reverse the sort order.
         /// For `updatedAt` (the default key) this means oldest-active first.
@@ -78,9 +81,9 @@ enum Commands {
             long = "columns",
             value_name = "COLUMNS",
             value_delimiter = ',',
-            default_value = commands::list::DEFAULT_COLUMNS_STR
+            default_value = agentctl_core::DEFAULT_COLUMNS_STR
         )]
-        columns: Vec<commands::list::Field>,
+        columns: Vec<FieldArg>,
     },
 
     /// Install agentctl on a harness.
@@ -91,7 +94,7 @@ enum Commands {
     Install {
         /// Harness to install agentctl on.
         #[arg(value_name = "HARNESS")]
-        harness: Harness,
+        harness: HarnessArg,
     },
 
     /// Uninstall agentctl from a harness.
@@ -107,7 +110,7 @@ enum Commands {
     Uninstall {
         /// Harness to uninstall agentctl from.
         #[arg(value_name = "HARNESS")]
-        harness: Harness,
+        harness: HarnessArg,
     },
 
     /// Manage agent state.
@@ -234,6 +237,8 @@ enum AgentEventSubcommand {
     },
 }
 
+// ── CLI-local mirror enums ────────────────────────────────────────────────────
+
 /// Accepted `--type` values for `TOOL_CALL_START` / `TOOL_CALL_RESULT`.
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 #[value(rename_all = "kebab-case")]
@@ -242,27 +247,98 @@ enum ToolCallTypeArg {
     Elicitation,
 }
 
-impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
+impl From<ToolCallTypeArg> for agentctl_state::ToolCallType {
     fn from(value: ToolCallTypeArg) -> Self {
         match value {
-            ToolCallTypeArg::Custom => status_fsm::ToolCallType::Custom,
-            ToolCallTypeArg::Elicitation => status_fsm::ToolCallType::Elicitation,
+            ToolCallTypeArg::Custom => agentctl_state::ToolCallType::Custom,
+            ToolCallTypeArg::Elicitation => agentctl_state::ToolCallType::Elicitation,
         }
     }
 }
 
 /// Harnesses supported by `agentctl install` and `agentctl uninstall`.
 ///
-/// Shared by both subcommands so they can never drift out of sync on which
-/// harnesses are supported: `match harness { ... }` in both `run_install`
-/// and `run_uninstall` must remain exhaustive (no wildcard `_` arm), so
-/// adding a new variant here forces both call sites to be updated.
+/// The bin never contains harness-specific logic beyond this mapping — it
+/// resolves to a harness *name* which `App::install`/`App::uninstall` match
+/// against `Harness::name()` at runtime, so adding a new harness only means
+/// adding a variant here and registering its `Harness` implementation in the
+/// composition root below.
 #[derive(clap::ValueEnum, Clone, Debug)]
-enum Harness {
+enum HarnessArg {
     /// Pi coding agent — writes `~/.pi/agent/extensions/agentctl.ts`.
     Pi,
     /// Claude Code — installs a plugin at `~/.claude/skills/agentctl/`.
     Claude,
+}
+
+impl HarnessArg {
+    fn as_str(&self) -> &'static str {
+        match self {
+            HarnessArg::Pi => "pi",
+            HarnessArg::Claude => "claude",
+        }
+    }
+}
+
+/// Mirrors [`agentctl_core::Field`] as a `clap`-derived enum; every library
+/// crate stays free of a `clap` dependency.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default)]
+enum FieldArg {
+    Agent,
+    Session,
+    Pane,
+    Status,
+    #[default]
+    #[value(name = "updatedAt")]
+    UpdatedAt,
+    #[value(name = "activeTools")]
+    ActiveTools,
+}
+
+impl From<FieldArg> for Field {
+    fn from(value: FieldArg) -> Self {
+        match value {
+            FieldArg::Agent => Field::Agent,
+            FieldArg::Session => Field::Session,
+            FieldArg::Pane => Field::Pane,
+            FieldArg::Status => Field::Status,
+            FieldArg::UpdatedAt => Field::UpdatedAt,
+            FieldArg::ActiveTools => Field::ActiveTools,
+        }
+    }
+}
+
+impl std::fmt::Display for FieldArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Field::from(*self))
+    }
+}
+
+/// Mirrors [`agentctl_logging::LogLevel`] as a `clap`-derived enum.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum LogLevelArg {
+    #[value(name = "trace")]
+    Trace,
+    #[value(name = "debug")]
+    Debug,
+    #[value(name = "info")]
+    Info,
+    #[value(name = "warn")]
+    Warn,
+    #[value(name = "error")]
+    Error,
+}
+
+impl From<LogLevelArg> for agentctl_logging::LogLevel {
+    fn from(value: LogLevelArg) -> Self {
+        match value {
+            LogLevelArg::Trace => agentctl_logging::LogLevel::Trace,
+            LogLevelArg::Debug => agentctl_logging::LogLevel::Debug,
+            LogLevelArg::Info => agentctl_logging::LogLevel::Info,
+            LogLevelArg::Warn => agentctl_logging::LogLevel::Warn,
+            LogLevelArg::Error => agentctl_logging::LogLevel::Error,
+        }
+    }
 }
 
 fn main() {
@@ -276,13 +352,18 @@ fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Initialize logging (best-effort; failures are non-fatal)
-    let _guard = logging::init(cli.log_level);
+    let _guard = agentctl_logging::init("agentctl", cli.log_level.into());
 
-    // Log the parsed CLI invocation
-    tracing::debug!(
+    agentctl_logging::ops::debug(&format!(
         "CLI invocation: agentctl {:?}",
         std::env::args().collect::<Vec<_>>()
-    );
+    ));
+
+    // Composition root: the only place concrete infrastructure is chosen.
+    let repo = FileAgentRepository::xdg();
+    let harnesses: Vec<Box<dyn agentctl_harness::Harness>> =
+        vec![Box::new(PiHarness), Box::new(ClaudeHarness)];
+    let app = App::new(&repo, harnesses);
 
     match cli.command {
         None | Some(Commands::Help) => {
@@ -294,13 +375,19 @@ fn run() -> anyhow::Result<()> {
             reverse,
             columns,
         }) => {
-            commands::list::run(server, sort_by, reverse, columns)?;
+            let output = app.list(
+                server,
+                sort_by.into(),
+                reverse,
+                columns.into_iter().map(Into::into).collect(),
+            )?;
+            print!("{output}");
         }
         Some(Commands::Install { harness }) => {
-            commands::hooks::run_install(harness)?;
+            println!("{}", app.install(harness.as_str())?);
         }
         Some(Commands::Uninstall { harness }) => {
-            commands::hooks::run_uninstall(harness)?;
+            println!("{}", app.uninstall(harness.as_str())?);
         }
         Some(Commands::Agent {
             subcommand:
@@ -312,38 +399,103 @@ fn run() -> anyhow::Result<()> {
         }) => {
             let (kind, id, tool_call_type) = match event {
                 AgentEventSubcommand::SessionStarted { id } => {
-                    (commands::agent_event::EventKind::SessionStarted, id, None)
+                    (agentctl_core::EventKind::SessionStarted, id, None)
                 }
                 AgentEventSubcommand::RunStarted { id } => {
-                    (commands::agent_event::EventKind::RunStarted, id, None)
+                    (agentctl_core::EventKind::RunStarted, id, None)
                 }
                 AgentEventSubcommand::RunFinished { id, active_tools } => (
-                    commands::agent_event::EventKind::RunFinished { active_tools },
+                    agentctl_core::EventKind::RunFinished { active_tools },
                     id,
                     None,
                 ),
                 AgentEventSubcommand::ToolCallStart { id, r#type } => (
-                    commands::agent_event::EventKind::ToolCallStart,
+                    agentctl_core::EventKind::ToolCallStart,
                     id,
                     r#type.map(Into::into),
                 ),
                 AgentEventSubcommand::ToolCallResult { id, r#type } => (
-                    commands::agent_event::EventKind::ToolCallResult,
+                    agentctl_core::EventKind::ToolCallResult,
                     id,
                     r#type.map(Into::into),
                 ),
             };
-            commands::agent_event::run(kind, id, tool_call_type, harness, pane)?;
+            app.dispatch_event(kind, id, tool_call_type, harness, pane)?;
         }
         Some(Commands::Agent {
             subcommand: AgentSubcommand::Clear { pane },
         }) => {
-            commands::agent_clear::run(pane)?;
+            app.clear(pane)?;
         }
         Some(Commands::Info) => {
-            commands::info::run(cli.log_level)?;
+            print!("{}", app.info(cli.log_level.into())?);
         }
     }
 
     Ok(())
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    // ── invalid-value clap rejection ─────────────────────────────────────────
+
+    #[test]
+    fn invalid_columns_value_rejected_by_clap() {
+        let result = <super::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--columns",
+            "bogus",
+        ]);
+        assert!(
+            result.is_err(),
+            "expected clap error for unknown --columns value"
+        );
+    }
+
+    #[test]
+    fn invalid_sort_by_rejected_by_clap() {
+        let result = <super::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--sort-by",
+            "foobar",
+        ]);
+        assert!(
+            result.is_err(),
+            "expected clap error for unknown sort-by value"
+        );
+    }
+
+    #[test]
+    fn columns_and_sort_by_share_identical_vocabulary() {
+        for value in [
+            "agent",
+            "session",
+            "pane",
+            "status",
+            "updatedAt",
+            "activeTools",
+        ] {
+            let sort_result = <super::Cli as clap::Parser>::try_parse_from([
+                "agentctl",
+                "list",
+                "--sort-by",
+                value,
+            ]);
+            let columns_result = <super::Cli as clap::Parser>::try_parse_from([
+                "agentctl",
+                "list",
+                "--columns",
+                value,
+            ]);
+            assert!(sort_result.is_ok(), "--sort-by {value} should be accepted");
+            assert!(
+                columns_result.is_ok(),
+                "--columns {value} should be accepted"
+            );
+        }
+    }
 }
