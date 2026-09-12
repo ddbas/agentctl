@@ -1,8 +1,8 @@
-//! Append-only event log — records every dispatched `rd agent event` as one
+//! Append-only event log — records every dispatched `agentctl agent event` as one
 //! JSON object per line at:
-//!   `$XDG_DATA_HOME/radr/agents/<pane-id>/events.jsonl`
+//!   `$XDG_DATA_HOME/agentctl/agents/<pane-id>/events.jsonl`
 //!
-//! Written for manual inspection/future replay only; nothing in `rd` reads
+//! Written for manual inspection/future replay only; nothing in `agentctl` reads
 //! this file back today.
 
 use std::io::Write;
@@ -35,13 +35,13 @@ pub struct EventRecord {
 
 /// Return the path of the events log file for the given pane under `base`.
 ///
-/// `<base>/radr/agents/<pane-id>/events.jsonl`
+/// `<base>/agentctl/agents/<pane-id>/events.jsonl`
 pub fn events_file_path_in(base: &Path, pane_id: &str) -> std::path::PathBuf {
     agent_dir_in(base, pane_id).join("events.jsonl")
 }
 
 /// Append one JSON line describing `record` to
-/// `<base>/radr/agents/<pane-id>/events.jsonl`, creating the file and its
+/// `<base>/agentctl/agents/<pane-id>/events.jsonl`, creating the file and its
 /// parent directory if absent.
 pub fn append_event_to(base: &Path, pane_id: &str, record: &EventRecord) -> Result<()> {
     let dir = agent_dir_in(base, pane_id);

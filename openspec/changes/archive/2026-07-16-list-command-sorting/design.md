@@ -1,9 +1,10 @@
 ## Context
 
-The `rd list` command discovers tmux panes running agent harnesses (`claude`,
-`pi`) and prints them in a fixed columnar format. Currently there is no user
-control over output order — rows appear in whatever order `tmux list-panes -a`
-returns them, which is effectively session/window/pane index order.
+The `agentctl list` command discovers tmux panes running agent harnesses
+(`claude`, `pi`) and prints them in a fixed columnar format. Currently there is
+no user control over output order — rows appear in whatever order
+`tmux list-panes -a` returns them, which is effectively session/window/pane
+index order.
 
 `AgentState` is a plain enum (`Idle`, `Working`, `Done`, `Blocked`, `Unknown`)
 with `Display` but no ordering trait. The list output pipeline is: query tmux →

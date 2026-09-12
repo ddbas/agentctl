@@ -13,18 +13,19 @@ whether the event drove a status transition.
 #### Scenario: Elicitation TOOL_CALL_START both blocks status and increments active_tools
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t1 --type elicitation` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t1 --type elicitation` is
+  dispatched
 - **THEN** the pane's `status` becomes `blocked` and `active_tools` becomes `1`
 
 #### Scenario: Custom TOOL_CALL_START increments active_tools without changing status
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t2 --type custom` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t2 --type custom` is dispatched
 - **THEN** the pane's `status` remains `working` and `active_tools` becomes `1`
 
 #### Scenario: TOOL_CALL_RESULT decrements active_tools even when it is a status no-op
 
 - **WHEN** a pane's `status` is `idle`, `active_tools` is `1`, and
-  `rd agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so no
-  matching FSM transition exists from `idle`)
+  `agentctl agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so
+  no matching FSM transition exists from `idle`)
 - **THEN** the pane's `status` remains `idle` and `active_tools` becomes `0`

@@ -5,7 +5,7 @@
 The Claude `PostToolUse` hook SHALL additionally be registered without a tool
 matcher (firing for every tool) to invoke a command that reads the hook's JSON
 payload from stdin, extracts `session_id`, and invokes
-`rd agent event TOOL_CALL_RESULT --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`
+`agentctl agent event TOOL_CALL_RESULT --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`
 (async), where `<nonce>` is a per-invocation unique value (e.g. a random number)
 distinguishing this invocation's `events.jsonl` entry from other
 permission-prompt events in the same session. This closes out a `blocked` status
@@ -47,18 +47,18 @@ requirement).
   and Claude fires the unmatched `PostToolUse` permission-close hook
 - **THEN** `active_tools` remains `1`
 
-### Requirement: Notification hook calls rd agent event TOOL_CALL_START on permission prompts
+### Requirement: Notification hook calls agentctl agent event TOOL_CALL_START on permission prompts
 
 The Claude `Notification` hook SHALL invoke a command that reads the hook's JSON
 payload from stdin, extracts `session_id`, and invokes
-`rd agent event TOOL_CALL_START --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`
+`agentctl agent event TOOL_CALL_START --id "perm-<session_id>-<nonce>" --type permission-prompt --harness claude`
 (async) when registered with `matcher: "permission_prompt"`, where `<nonce>` is
 a per-invocation unique value (e.g. a random number) distinguishing this
 invocation's `events.jsonl` entry from other permission-prompt events in the
 same session. Because Claude's hook system only fires the hook when the matcher
-matches, no notification-type branching logic is required inside `rd`. This
-increments the pane's `blocked_prompts` counter by one (see the `agent-events`
-spec) and does NOT mutate `active_tools`.
+matches, no notification-type branching logic is required inside `agentctl`.
+This increments the pane's `blocked_prompts` counter by one (see the
+`agent-events` spec) and does NOT mutate `active_tools`.
 
 #### Scenario: permission_prompt notification fires inside tmux
 
@@ -82,13 +82,13 @@ spec) and does NOT mutate `active_tools`.
 - **THEN** the agent's state file's `status` remains `"blocked"` and
   `blocked_prompts` becomes `2`
 
-### Requirement: Stop hook calls rd agent event RUN_FINISHED
+### Requirement: Stop hook calls agentctl agent event RUN_FINISHED
 
 The Claude `Stop` hook SHALL invoke a command that reads the hook's JSON payload
 from stdin, extracts `session_id`, and invokes
-`rd agent event RUN_FINISHED --id <session_id> --harness claude` (async). This
-is authoritative regardless of the pane's current status: it drives the pane to
-`done` from any status (`idle`, `working`, `blocked`, or `done` itself),
+`agentctl agent event RUN_FINISHED --id <session_id> --harness claude` (async).
+This is authoritative regardless of the pane's current status: it drives the
+pane to `done` from any status (`idle`, `working`, `blocked`, or `done` itself),
 provided the reconciled `active_tools` count is `0` (see the `agent-events`
 spec's `RUN_FINISHED` transition).
 
@@ -113,15 +113,15 @@ spec's `RUN_FINISHED` transition).
 - **THEN** the agent's state file's `status` is left unchanged (not forced to
   `done`)
 
-### Requirement: StopFailure hook calls rd agent event RUN_FINISHED
+### Requirement: StopFailure hook calls agentctl agent event RUN_FINISHED
 
 The Claude `StopFailure` hook SHALL invoke a command that reads the hook's JSON
 payload from stdin, extracts `session_id`, and invokes
-`rd agent event RUN_FINISHED --id <session_id> --harness claude` (async) so that
-API errors (rate-limit, server overload, authentication failure, etc.) do not
-leave status permanently stuck at "working". This is authoritative regardless of
-the pane's current status, gated on the reconciled `active_tools` count being
-`0`, identically to the `Stop` hook.
+`agentctl agent event RUN_FINISHED --id <session_id> --harness claude` (async)
+so that API errors (rate-limit, server overload, authentication failure, etc.)
+do not leave status permanently stuck at "working". This is authoritative
+regardless of the pane's current status, gated on the reconciled `active_tools`
+count being `0`, identically to the `Stop` hook.
 
 #### Scenario: StopFailure fires inside tmux
 

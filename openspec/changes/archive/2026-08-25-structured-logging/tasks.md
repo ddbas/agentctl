@@ -14,18 +14,18 @@
 ## 3. Logging module
 
 - [x] 3.1 Create `src/logging.rs` ported from `bonsai::logging`, renaming the
-      log file prefix from `bonsai.log` to `radr.log` and the log directory
-      suffix from `bonsai/logs` to `radr/logs`.
+      log file prefix from `bonsai.log` to `agentctl.log` and the log directory
+      suffix from `bonsai/logs` to `agentctl/logs`.
 - [x] 3.2 Implement `LogLevel` enum (`ValueEnum`: trace/debug/info/warn/error,
       default `info`) with `to_level_filter()`.
 - [x] 3.3 Implement `log_dir()` — pure resolution via
-      `dirs::state_dir().or_else(dirs::data_local_dir)` joined with `radr/logs`,
-      no I/O.
+      `dirs::state_dir().or_else(dirs::data_local_dir)` joined with
+      `agentctl/logs`, no I/O.
 - [x] 3.4 Implement `current_log_file(dir: &Path)` — computes
-      `<dir>/radr.log.YYYY-MM-DD` using local date, no I/O.
+      `<dir>/agentctl.log.YYYY-MM-DD` using local date, no I/O.
 - [x] 3.5 Implement `prune_logs(log_path, retention_count)` — deletes all but
-      the `retention_count` most-recently-modified `radr.log.*` files, ignoring
-      non-matching files.
+      the `retention_count` most-recently-modified `agentctl.log.*` files,
+      ignoring non-matching files.
 - [x] 3.6 Implement `init(level: LogLevel) -> Option<WorkerGuard>` — creates the
       log directory, prunes old logs (keep 7), sets up a daily rolling
       `tracing-appender::rolling::daily` non-blocking writer, builds a
@@ -59,22 +59,22 @@
 ## 6. Tests
 
 - [x] 6.1 Port bonsai's `logging` unit tests to `src/logging.rs`, adapted for
-      `radr`/`radr.log.*` naming: log dir resolution returns `Some`,
+      `agentctl`/`agentctl.log.*` naming: log dir resolution returns `Some`,
       level-to-filter string mapping for all five levels, `prune_logs` keeps
       exactly the retention count, `prune_logs` ignores non-matching files,
-      `current_log_file` returns a `radr.log.`-prefixed path with a `YYYY-MM-DD`
-      suffix.
+      `current_log_file` returns a `agentctl.log.`-prefixed path with a
+      `YYYY-MM-DD` suffix.
 - [x] 6.2 Add a smoke test (or manual verification step) confirming `init()`
       does not panic when called in a test environment.
-- [x] 6.3 Add/verify a test or manual check for `rd info` output format: exactly
-      four `key: value` lines in the specified order, log level line reflecting
-      `--log-level`, and no files created as a side effect.
+- [x] 6.3 Add/verify a test or manual check for `agentctl info` output format:
+      exactly four `key: value` lines in the specified order, log level line
+      reflecting `--log-level`, and no files created as a side effect.
 
 ## 7. Verification
 
 - [x] 7.1 Run `mise run` build/test/lint tasks (per project convention, not
       `cargo` directly) and confirm the full suite passes.
-- [x] 7.2 Manually run `rd --log-level debug info` and confirm a `radr/logs`
-      directory is created under the resolved state directory with a
-      `radr.log.YYYY-MM-DD` file, and that `rd info`'s output matches the
-      resolved paths.
+- [x] 7.2 Manually run `agentctl --log-level debug info` and confirm a
+      `agentctl/logs` directory is created under the resolved state directory
+      with a `agentctl.log.YYYY-MM-DD` file, and that `agentctl info`'s output
+      matches the resolved paths.

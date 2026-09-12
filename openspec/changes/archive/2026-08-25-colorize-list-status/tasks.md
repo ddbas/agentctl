@@ -42,9 +42,9 @@
 
 - [x] 4.1 Run `mise run test` (or equivalent Cargo test task) and confirm all
       `list` tests pass
-- [x] 4.2 Manually run `rd list` attached to a real terminal against a tmux
-      session with panes in each of the four known states and visually confirm
-      the color mapping matches idle=grey, working=yellow, blocked=red,
+- [x] 4.2 Manually run `agentctl list` attached to a real terminal against a
+      tmux session with panes in each of the four known states and visually
+      confirm the color mapping matches idle=grey, working=yellow, blocked=red,
       done=green
-- [x] 4.3 Manually run `rd list | cat` (or redirect to a file) and confirm no
-      ANSI escape codes appear in the output
+- [x] 4.3 Manually run `agentctl list | cat` (or redirect to a file) and confirm
+      no ANSI escape codes appear in the output

@@ -1,7 +1,7 @@
 //! Agent state tracking — shared types and file-based state store.
 //!
 //! State files are stored at:
-//!   `$XDG_DATA_HOME/radr/agents/<pane-id>/state.json`
+//!   `$XDG_DATA_HOME/agentctl/agents/<pane-id>/state.json`
 //! where `XDG_DATA_HOME` defaults to `~/.local/share`.
 
 use std::fmt;
@@ -98,14 +98,14 @@ pub fn xdg_data_home() -> PathBuf {
 
 /// Return the directory for the given pane's state files under `base`.
 ///
-/// `<base>/radr/agents/<pane-id>/`
+/// `<base>/agentctl/agents/<pane-id>/`
 pub fn agent_dir_in(base: &Path, pane_id: &str) -> PathBuf {
-    base.join("radr").join("agents").join(pane_id)
+    base.join("agentctl").join("agents").join(pane_id)
 }
 
 /// Return the path of the state file for the given pane under `base`.
 ///
-/// `<base>/radr/agents/<pane-id>/state.json`
+/// `<base>/agentctl/agents/<pane-id>/state.json`
 pub fn state_file_path_in(base: &Path, pane_id: &str) -> PathBuf {
     agent_dir_in(base, pane_id).join("state.json")
 }
@@ -202,12 +202,12 @@ pub fn delete_state_in(base: &Path, pane_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Glob all `state.json` files under `<base>/radr/agents/` and return parsed
+/// Glob all `state.json` files under `<base>/agentctl/agents/` and return parsed
 /// [`AgentInfo`] values. Files that cannot be read or parsed are skipped.
 pub fn list_agent_infos_in(base: &Path) -> Vec<AgentInfo> {
-    let agents_dir = base.join("radr").join("agents");
+    let agents_dir = base.join("agentctl").join("agents");
     let read_dir = match std::fs::read_dir(&agents_dir) {
-        Ok(rd) => rd,
+        Ok(agentctl) => agentctl,
         Err(_) => return Vec::new(),
     };
 
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn read_state_corrupt_file_returns_unknown() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("radr").join("agents").join("%bad");
+        let dir = tmp.path().join("agentctl").join("agents").join("%bad");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("state.json"), b"not-json").unwrap();
         assert_eq!(read_state_from(tmp.path(), "%bad"), AgentState::Unknown);
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn legacy_state_file_without_active_tools_deserializes_as_zero() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("radr").join("agents").join("%legacy");
+        let dir = tmp.path().join("agentctl").join("agents").join("%legacy");
         std::fs::create_dir_all(&dir).unwrap();
         let legacy_json = r#"{
             "pane_id": "%legacy",
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn legacy_state_file_with_leftover_blocked_prompts_key_still_deserializes() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("radr").join("agents").join("%legacy2");
+        let dir = tmp.path().join("agentctl").join("agents").join("%legacy2");
         std::fs::create_dir_all(&dir).unwrap();
         let legacy_json = r#"{
             "pane_id": "%legacy2",

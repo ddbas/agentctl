@@ -1,7 +1,7 @@
 ## Context
 
-`rd`'s status FSM (`src/status_fsm.rs`) derives a pane's `status` from a small
-set of lifecycle events (`SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
+`agentctl`'s status FSM (`src/status_fsm.rs`) derives a pane's `status` from a
+small set of lifecycle events (`SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
 `TOOL_CALL_START`/`TOOL_CALL_RESULT`). It is intentionally lenient: an event
 that doesn't match a defined `(state, input)` transition is a no-op for `status`
 (still logged to `events.jsonl`). Today `RUN_FINISHED` only matches from
@@ -54,15 +54,16 @@ call is genuinely still in flight, because of the double-decrement above).
   `Blocked`/`Working` for a single interactive tool call and already
   intentionally mutates `active_tools` (existing spec behavior); this change
   does not touch it.
-- No attempt to give `rd` real id-based correlation between a specific
+- No attempt to give `agentctl` real id-based correlation between a specific
   `Notification` permission prompt and the tool call that resolves it — Claude
   Code's `Notification` hook payload for `permission_prompt` carries no
-  `tool_use_id` or other field that would let `rd` (or Claude itself) tie a
-  specific prompt to a specific later `PostToolUse` invocation (tracked upstream
-  as anthropics/claude-code#11128). Any fix must work without that correlation.
-- No change to `rd install`/`rd uninstall` cleanup/migration mechanics beyond
-  what's needed to update the two affected hook command strings (already handled
-  generically by the existing superseded/stale-matcher passes).
+  `tool_use_id` or other field that would let `agentctl` (or Claude itself) tie
+  a specific prompt to a specific later `PostToolUse` invocation (tracked
+  upstream as anthropics/claude-code#11128). Any fix must work without that
+  correlation.
+- No change to `agentctl install`/`agentctl uninstall` cleanup/migration
+  mechanics beyond what's needed to update the two affected hook command strings
+  (already handled generically by the existing superseded/stale-matcher passes).
 
 ## Decisions
 
@@ -163,11 +164,11 @@ decremented below `0` (`saturating_sub`).
 
 ## Risks / Trade-offs
 
-- [Existing installs need to re-run `rd install claude` to pick up the `--type
-  permission-prompt` command-string change] → The existing stale-command cleanup
-  pass in `install_claude_to` already removes superseded `(event, command)`
-  pairs and adds the new ones; no new migration logic needed, same precedent as
-  prior hook-set changes.
+- [Existing installs need to re-run `agentctl install claude` to pick up the
+  `--type permission-prompt` command-string change] → The existing stale-command
+  cleanup pass in `install_claude_to` already removes superseded
+  `(event, command)` pairs and adds the new ones; no new migration logic needed,
+  same precedent as prior hook-set changes.
 - [A pane whose `active_tools`/`blocked_prompts` counters are themselves wrong
   (e.g. an untracked background task never reconciled via `--active-tools`) will
   now get stuck at its current status instead of forcibly reaching `Done`] →
@@ -190,12 +191,12 @@ decremented below `0` (`saturating_sub`).
    `--type permission-prompt` and never rely on the
    `RunFinished`-from-non-`Working` wildcard today, so this is backward
    compatible).
-2. Update `RADR_CLAUDE_HOOKS` in `src/commands/hooks.rs` (new command strings
-   for `Notification`/unmatched `PostToolUse` perm-close entries) and update
-   `README.md`'s hook table to match.
-3. Users re-run `rd install claude` to pick up the updated entries (existing
-   cleanup/add-or-skip pass handles this with no new code).
+2. Update `AGENTCTL_CLAUDE_HOOKS` in `src/commands/hooks.rs` (new command
+   strings for `Notification`/unmatched `PostToolUse` perm-close entries) and
+   update `README.md`'s hook table to match.
+3. Users re-run `agentctl install claude` to pick up the updated entries
+   (existing cleanup/add-or-skip pass handles this with no new code).
 
 No rollback beyond reverting the change is needed — no persisted data format
-becomes unreadable by older `rd` binaries (`blocked_prompts` is
+becomes unreadable by older `agentctl` binaries (`blocked_prompts` is
 `#[serde(default)]`).

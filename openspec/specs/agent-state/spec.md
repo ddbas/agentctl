@@ -2,7 +2,7 @@
 
 Define the canonical `AgentState` enum and the state file schema used to persist
 agent state across tmux panes, along with read/write/delete helpers and
-last-resort stale-state validation performed by `rd list`.
+last-resort stale-state validation performed by `agentctl list`.
 
 ## Requirements
 
@@ -21,7 +21,7 @@ the canonical representation of agent state throughout the codebase.
 ### Requirement: State file schema
 
 The system SHALL persist agent state as a JSON file at
-`$XDG_DATA_HOME/radr/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
+`$XDG_DATA_HOME/agentctl/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
 defaults to `~/.local/share` and `<pane-id>` is the value of `$TMUX_PANE`, e.g.
 `%12`). The file SHALL contain the fields `pane_id` (string), `harness`
 (string), `status` (string matching an `AgentState` variant in snake_case),
@@ -45,7 +45,7 @@ other, independently tracked per-pane state such as `active_tools`.
 
 #### Scenario: state.json no longer contains a state field
 
-- **WHEN** a state file is written by any current `rd` command
+- **WHEN** a state file is written by any current `agentctl` command
 - **THEN** the JSON object contains a `status` key and does NOT contain a
   `state` key
 
@@ -57,13 +57,13 @@ other, independently tracked per-pane state such as `active_tools`.
 
 #### Scenario: Old state files without active_tools deserialize with zero
 
-- **WHEN** a `state.json` written by a version of `rd` that predates the
+- **WHEN** a `state.json` written by a version of `agentctl` that predates the
   `active_tools` field is read
 - **THEN** it deserializes successfully with `active_tools` treated as `0`
 
 #### Scenario: Old state files with a leftover blocked_prompts key still deserialize
 
-- **WHEN** a `state.json` written by a version of `rd` that included a
+- **WHEN** a `state.json` written by a version of `agentctl` that included a
   `blocked_prompts` field is read
 - **THEN** it deserializes successfully, ignoring the unknown `blocked_prompts`
   key, and any freshly written state file omits it
@@ -96,15 +96,15 @@ return `Unknown`.
 
 The system SHALL track, per pane, a non-negative count of tool calls currently
 in flight as the `active_tools` field of `state.json`. This count SHALL be
-incremented by one whenever `rd agent event TOOL_CALL_START` is dispatched for
-that pane, and decremented by one (never below `0`) whenever
-`rd agent event TOOL_CALL_RESULT` is dispatched for that pane, regardless of the
-event's `--type` value (`custom`, `elicitation`, or omitted).
+incremented by one whenever `agentctl agent event TOOL_CALL_START` is dispatched
+for that pane, and decremented by one (never below `0`) whenever
+`agentctl agent event TOOL_CALL_RESULT` is dispatched for that pane, regardless
+of the event's `--type` value (`custom`, `elicitation`, or omitted).
 
 #### Scenario: TOOL_CALL_START increments active_tools
 
 - **WHEN** a pane's `active_tools` is `0` and
-  `rd agent event TOOL_CALL_START --id t1` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t1` is dispatched
 - **THEN** the pane's `active_tools` becomes `1`
 
 #### Scenario: Multiple concurrent TOOL_CALL_START calls accumulate
@@ -116,31 +116,32 @@ event's `--type` value (`custom`, `elicitation`, or omitted).
 #### Scenario: TOOL_CALL_RESULT decrements active_tools
 
 - **WHEN** a pane's `active_tools` is `2` and
-  `rd agent event TOOL_CALL_RESULT --id t1` is dispatched
+  `agentctl agent event TOOL_CALL_RESULT --id t1` is dispatched
 - **THEN** the pane's `active_tools` becomes `1`
 
 #### Scenario: TOOL_CALL_RESULT never decrements below zero
 
 - **WHEN** a pane's `active_tools` is `0` and
-  `rd agent event TOOL_CALL_RESULT --id t1` is dispatched (no matching prior
-  `TOOL_CALL_START`)
+  `agentctl agent event TOOL_CALL_RESULT --id t1` is dispatched (no matching
+  prior `TOOL_CALL_START`)
 - **THEN** the pane's `active_tools` remains `0`
 
 #### Scenario: Custom-typed tool calls still affect active_tools
 
-- **WHEN** `rd agent event TOOL_CALL_START --id t2 --type custom` is dispatched
+- **WHEN** `agentctl agent event TOOL_CALL_START --id t2 --type custom` is
+  dispatched
 - **THEN** `active_tools` is incremented, exactly as for `--type elicitation` or
   no `--type`
 
 ### Requirement: SESSION_STARTED resets active_tools to zero
 
-`rd agent event SESSION_STARTED` SHALL reset the pane's `active_tools` to `0`,
-in addition to resetting `status` to `idle`.
+`agentctl agent event SESSION_STARTED` SHALL reset the pane's `active_tools` to
+`0`, in addition to resetting `status` to `idle`.
 
 #### Scenario: SESSION_STARTED clears a nonzero active_tools count
 
 - **WHEN** a pane's `active_tools` is `2` and
-  `rd agent event SESSION_STARTED --id s1` is dispatched
+  `agentctl agent event SESSION_STARTED --id s1` is dispatched
 - **THEN** the pane's `active_tools` becomes `0`
 
 ### Requirement: State file deleted on session end
@@ -160,9 +161,9 @@ handler so that state is cleaned up when a session exits normally.
 - **WHEN** `delete_state` is called for a pane that has no state file
 - **THEN** the call succeeds without error
 
-### Requirement: Last-resort stale state validation by rd list
+### Requirement: Last-resort stale state validation by agentctl list
 
-The system SHALL validate each state file when `rd list` runs and tmux is
+The system SHALL validate each state file when `agentctl list` runs and tmux is
 reachable. A state file SHALL be deleted if either of the following is true:
 
 - Its `pane_id` does not correspond to any currently live tmux pane.
@@ -176,26 +177,26 @@ valid state due to a transient error.
 
 #### Scenario: State file deleted when pane no longer exists
 
-- **WHEN** `rd list` runs and a state file's `pane_id` is not in the live tmux
-  pane set
+- **WHEN** `agentctl list` runs and a state file's `pane_id` is not in the live
+  tmux pane set
 - **THEN** that state file is deleted before the output is printed
 
 #### Scenario: State file deleted when harness no longer matches
 
-- **WHEN** `rd list` runs and a state file's `pane_id` exists but the pane's
-  current command does not match the `harness` field
+- **WHEN** `agentctl list` runs and a state file's `pane_id` exists but the
+  pane's current command does not match the `harness` field
 - **THEN** that state file is deleted before the output is printed
 
 #### Scenario: State file preserved when pane and harness both match
 
-- **WHEN** `rd list` runs and a state file's `pane_id` exists and its
+- **WHEN** `agentctl list` runs and a state file's `pane_id` exists and its
   `pane_current_command` matches `harness`
 - **THEN** the state file is not deleted
 
 #### Scenario: State file preserved when harness is unknown
 
-- **WHEN** `rd list` runs and a state file's `harness` field is `"unknown"`
-  (regardless of what the pane's current command is)
+- **WHEN** `agentctl list` runs and a state file's `harness` field is
+  `"unknown"` (regardless of what the pane's current command is)
 - **THEN** the state file is not deleted on account of the harness check (only
   the pane-existence check still applies)
 

@@ -1,19 +1,20 @@
 ## Why
 
-`rd list` currently renders columns as space-padded, visually-aligned text (each
-column padded to its widest cell plus two spaces). This is convenient to read at
-a glance but hostile to scripting: splitting on whitespace breaks whenever a
-value itself contains spaces (session names commonly do, e.g. `work session`),
-and there is no unambiguous, single-character field separator a caller can rely
-on. The requirement for this change is to delimit `rd list`'s columns with tab
-characters instead, so the output is reliably machine-parseable (e.g. with
-`cut -f`, `awk -F'\t'`) while remaining readable as plain text.
+`agentctl list` currently renders columns as space-padded, visually-aligned text
+(each column padded to its widest cell plus two spaces). This is convenient to
+read at a glance but hostile to scripting: splitting on whitespace breaks
+whenever a value itself contains spaces (session names commonly do, e.g.
+`work session`), and there is no unambiguous, single-character field separator a
+caller can rely on. The requirement for this change is to delimit
+`agentctl list`'s columns with tab characters instead, so the output is reliably
+machine-parseable (e.g. with `cut -f`, `awk -F'\t'`) while remaining readable as
+plain text.
 
 ## What Changes
 
-- **BREAKING**: `rd list` output no longer pads columns to a shared width for
-  visual alignment. Columns are separated by a single tab character (`\t`) with
-  no padding.
+- **BREAKING**: `agentctl list` output no longer pads columns to a shared width
+  for visual alignment. Columns are separated by a single tab character (`\t`)
+  with no padding.
 - Every rendered row has exactly `columns.len() - 1` tab separators (i.e. a
   fixed field count equal to the number of selected columns), even when a
   trailing column's value is empty (e.g. an idle `activeTools` cell or a missing

@@ -1,7 +1,7 @@
 use crate::commands::hooks::tilde_collapse;
 use crate::logging;
 
-/// Run the `rd info` subcommand: print version, effective log level, log
+/// Run the `agentctl info` subcommand: print version, effective log level, log
 /// directory, and current log file as `key: value` lines. Performs no
 /// filesystem writes.
 pub fn run(log_level: logging::LogLevel) -> anyhow::Result<()> {

@@ -19,7 +19,7 @@
       Never remove the parent `extensions/` directory.
 - [x] 2.3 Print a summary line indicating removal (`-`) or nothing-to-do (`=`),
       following the style of `print_pi_summary`.
-- [x] 2.4 Unit test: uninstall removes an existing `radr.ts` file.
+- [x] 2.4 Unit test: uninstall removes an existing `agentctl.ts` file.
 - [x] 2.5 Unit test: uninstall is a no-op (exit 0, no error) when the file does
       not exist.
 - [x] 2.6 Unit test: uninstall removes the file even when its content differs
@@ -35,31 +35,31 @@
 - [x] 3.2 `uninstall_claude_to`: read and parse `~/.claude/settings.json` (if
       absent, treat as nothing to remove and exit 0 without writing).
 - [x] 3.3 For each event array under `hooks`, remove any entry whose single hook
-      command matches `is_radr_command` (reuse existing predicate, covering both
-      current and pre-rename command forms); leave multi-command entries
+      command matches `is_agentctl_command` (reuse existing predicate, covering
+      both current and pre-rename command forms); leave multi-command entries
       untouched.
 - [x] 3.4 Prune event keys whose array becomes empty; prune the `hooks` key if
       it becomes an empty object. Never delete the settings file itself.
-- [x] 3.5 Skip the file write entirely (preserve mtime) when no radr entries
+- [x] 3.5 Skip the file write entirely (preserve mtime) when no agentctl entries
       were found, mirroring `install_claude_to`'s idempotency approach.
 - [x] 3.6 Print a summary listing each removed `(event, command)` pair (prefixed
       `-`), or a nothing-to-remove message (prefixed `=`) when the set is empty.
-- [x] 3.7 Unit test: uninstall removes all eight radr-managed entries from a
+- [x] 3.7 Unit test: uninstall removes all eight agentctl-managed entries from a
       freshly-installed settings file.
-- [x] 3.8 Unit test: uninstall preserves a non-radr hook entry under the same
-      event as a radr entry.
+- [x] 3.8 Unit test: uninstall preserves a non-agentctl hook entry under the
+      same event as a agentctl entry.
 - [x] 3.9 Unit test: uninstall recognizes and removes pre-rename
-      `rd set-state ...` / `rd clear-state` legacy entries.
+      `agentctl set-state ...` / `agentctl clear-state` legacy entries.
 - [x] 3.10 Unit test: uninstall prunes an event key that becomes empty and
       prunes the `hooks` key entirely when no events remain.
 - [x] 3.11 Unit test: uninstall is a no-op (no write, mtime unchanged) when
-      `~/.claude/settings.json` has no radr entries.
+      `~/.claude/settings.json` has no agentctl entries.
 - [x] 3.12 Unit test: uninstall is a no-op when `~/.claude/settings.json` does
       not exist at all.
 - [x] 3.13 Unit test: running uninstall twice in a row produces no further
       change on the second run (idempotency).
 - [x] 3.14 Unit test: uninstall does not modify a hook entry whose `hooks` array
-      mixes a radr command with a non-radr command.
+      mixes a agentctl command with a non-agentctl command.
 
 ## 4. Docs and polish
 
@@ -67,5 +67,6 @@
       dedicated module doc) to describe `uninstall` alongside `install`.
 - [x] 4.2 Run `mise run` equivalent lint/test/format tasks (e.g.
       `mise run test`, `mise run lint`) and fix any issues.
-- [x] 4.3 Manually verify `rd uninstall pi` and `rd uninstall claude --help`
-      output reads clearly via `rd uninstall --help`.
+- [x] 4.3 Manually verify `agentctl uninstall pi` and
+      `agentctl uninstall claude --help` output reads clearly via
+      `agentctl uninstall --help`.

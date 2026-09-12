@@ -3,7 +3,7 @@
 ### Requirement: State file schema
 
 The system SHALL persist agent state as a JSON file at
-`$XDG_DATA_HOME/radr/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
+`$XDG_DATA_HOME/agentctl/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
 defaults to `~/.local/share` and `<pane-id>` is the value of `$TMUX_PANE`, e.g.
 `%12`). The file SHALL contain the fields `pane_id` (string), `harness`
 (string), `status` (string matching an `AgentState` variant in snake_case),
@@ -28,7 +28,7 @@ disambiguate it from other, independently tracked per-pane state such as
 
 #### Scenario: state.json no longer contains a state field
 
-- **WHEN** a state file is written by any current `rd` command
+- **WHEN** a state file is written by any current `agentctl` command
 - **THEN** the JSON object contains a `status` key and does NOT contain a
   `state` key
 
@@ -46,13 +46,13 @@ disambiguate it from other, independently tracked per-pane state such as
 
 #### Scenario: Old state files without active_tools deserialize with zero
 
-- **WHEN** a `state.json` written by a version of `rd` that predates the
+- **WHEN** a `state.json` written by a version of `agentctl` that predates the
   `active_tools` field is read
 - **THEN** it deserializes successfully with `active_tools` treated as `0`
 
 #### Scenario: Old state files without blocked_prompts deserialize with zero
 
-- **WHEN** a `state.json` written by a version of `rd` that predates the
+- **WHEN** a `state.json` written by a version of `agentctl` that predates the
   `blocked_prompts` field is read
 - **THEN** it deserializes successfully with `blocked_prompts` treated as `0`
 
@@ -93,46 +93,46 @@ unrecognised value, `read_state` SHALL return `Unknown`.
 The system SHALL track, per pane, a non-negative count of permission-prompt
 blocks currently open as the `blocked_prompts` field of `state.json`,
 independently of `active_tools`. This count SHALL be incremented by one whenever
-`rd agent event TOOL_CALL_START --type permission-prompt` is dispatched for that
-pane, and decremented by one (never below `0`) whenever
-`rd agent event TOOL_CALL_RESULT --type permission-prompt` is dispatched for
-that pane. No other event type mutates `blocked_prompts`.
+`agentctl agent event TOOL_CALL_START --type permission-prompt` is dispatched
+for that pane, and decremented by one (never below `0`) whenever
+`agentctl agent event TOOL_CALL_RESULT --type permission-prompt` is dispatched
+for that pane. No other event type mutates `blocked_prompts`.
 
 #### Scenario: permission-prompt TOOL_CALL_START increments blocked_prompts
 
 - **WHEN** a pane's `blocked_prompts` is `0` and
-  `rd agent event TOOL_CALL_START --id p1 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_START --id p1 --type permission-prompt` is
   dispatched
 - **THEN** the pane's `blocked_prompts` becomes `1`
 
 #### Scenario: permission-prompt TOOL_CALL_RESULT decrements blocked_prompts
 
 - **WHEN** a pane's `blocked_prompts` is `1` and
-  `rd agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
   dispatched
 - **THEN** the pane's `blocked_prompts` becomes `0`
 
 #### Scenario: blocked_prompts never decrements below zero
 
 - **WHEN** a pane's `blocked_prompts` is `0` and
-  `rd agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
   dispatched (no matching prior open)
 - **THEN** the pane's `blocked_prompts` remains `0`
 
 #### Scenario: Other tool-call types do not mutate blocked_prompts
 
 - **WHEN** a pane's `blocked_prompts` is `0` and
-  `rd agent event TOOL_CALL_START --id t1 --type elicitation` (or
+  `agentctl agent event TOOL_CALL_START --id t1 --type elicitation` (or
   `--type custom`, or no `--type`) is dispatched
 - **THEN** the pane's `blocked_prompts` remains `0`
 
 ### Requirement: SESSION_STARTED resets blocked_prompts to zero
 
-`rd agent event SESSION_STARTED` SHALL reset the pane's `blocked_prompts` to
-`0`, in addition to resetting `status` to `idle` and `active_tools` to `0`.
+`agentctl agent event SESSION_STARTED` SHALL reset the pane's `blocked_prompts`
+to `0`, in addition to resetting `status` to `idle` and `active_tools` to `0`.
 
 #### Scenario: SESSION_STARTED clears a nonzero blocked_prompts count
 
 - **WHEN** a pane's `blocked_prompts` is `2` and
-  `rd agent event SESSION_STARTED --id s1` is dispatched
+  `agentctl agent event SESSION_STARTED --id s1` is dispatched
 - **THEN** the pane's `blocked_prompts` becomes `0`

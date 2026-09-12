@@ -1,7 +1,7 @@
 ## Context
 
-`rd list` (`src/commands/list.rs`) renders one line per tmux pane with four
-left-aligned, padded columns: agent, session, `window.pane`, and state. The
+`agentctl list` (`src/commands/list.rs`) renders one line per tmux pane with
+four left-aligned, padded columns: agent, session, `window.pane`, and state. The
 state column currently prints the plain `AgentState` string (`idle`, `working`,
 `blocked`, `done`, or `unknown`). Column widths are computed from
 `unicode-width`'s display width of each cell's plain text, then padded.
@@ -101,10 +101,10 @@ support for a legible grey.
   output) would miscompute width → Mitigation: width computations always operate
   on the plain state string; coloring is applied only at the final formatting
   step, never before a width calculation.
-- [Risk] Piped output (e.g. `rd list | grep working`) unexpectedly containing
-  ANSI codes would break naive text matching → Mitigation: `IsTerminal`-based
-  auto-detection disables color whenever stdout isn't a TTY, matching common CLI
-  conventions (git, ripgrep, etc.).
+- [Risk] Piped output (e.g. `agentctl list | grep working`) unexpectedly
+  containing ANSI codes would break naive text matching → Mitigation:
+  `IsTerminal`-based auto-detection disables color whenever stdout isn't a TTY,
+  matching common CLI conventions (git, ripgrep, etc.).
 - [Trade-off] No explicit `--color` flag means users who redirect to a file but
   still want color (or pipe to a pager that supports color) have no way to force
   it in this change; acceptable since it's not a stated requirement, and can be

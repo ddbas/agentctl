@@ -1,6 +1,6 @@
 ## Context
 
-`rd list` shows an active-tool-count column derived from `active_tools` in
+`agentctl list` shows an active-tool-count column derived from `active_tools` in
 `state.json`, incremented on `TOOL_CALL_START` and decremented on
 `TOOL_CALL_RESULT` (see `agent-events` / `agent-state` specs, from the
 `track-tool-calls` change). The pi extension implements this with two general
@@ -8,7 +8,7 @@ handlers that fire on every tool call:
 
 ```ts
 pi.on("tool_call", async (event) => {
-  rd(
+  agentctl(
     "agent",
     "event",
     "TOOL_CALL_START",
@@ -19,7 +19,7 @@ pi.on("tool_call", async (event) => {
   );
 });
 pi.on("tool_result", async (event) => {
-  rd(
+  agentctl(
     "agent",
     "event",
     "TOOL_CALL_RESULT",
@@ -31,7 +31,7 @@ pi.on("tool_result", async (event) => {
 });
 ```
 
-`RADR_CLAUDE_HOOKS` in `src/commands/hooks.rs` has no equivalent. Its only
+`AGENTCTL_CLAUDE_HOOKS` in `src/commands/hooks.rs` has no equivalent. Its only
 `TOOL_CALL_START`/`TOOL_CALL_RESULT` entries are scoped to
 `matcher: "AskUserQuestion|ExitPlanMode"` (used to drive the `blocked` status,
 not tool-count tracking) plus a `"perm-$id"` pseudo-id pair used solely to close
@@ -50,12 +50,13 @@ reflects the pre-`track-tool-calls` design and was never extended.
 - Keep the existing `blocked`-status machinery (elicitation-typed
   `PreToolUse`/`PostToolUse`, `Notification`, unmatched `PostToolUse` "perm-$id"
   pair) completely unchanged.
-- Preserve `rd install claude` idempotency and its migration path for
-  settings.json files written by older `rd` binaries.
+- Preserve `agentctl install claude` idempotency and its migration path for
+  settings.json files written by older `agentctl` binaries.
 
 **Non-Goals:**
 
-- No change to the status FSM, event names, or `rd agent event` CLI surface.
+- No change to the status FSM, event names, or `agentctl agent event` CLI
+  surface.
 - No change to pi's hooks (already correct).
 - Not attempting to unify the "perm-$id" permission-block bookkeeping with the
   new general tool-count hooks — they track different things (blocked status vs.
@@ -75,7 +76,7 @@ reflects the pre-`track-tool-calls` design and was never extended.
     (currently `TOOL_CALL_RESULT --id "perm-$id" --type elicitation`) by adding
     a second command to the same hook array entry. Rejected: Claude Code hook
     entries support multiple commands per event/matcher pair, but
-    `get_single_radr_command`'s migration/cleanup logic in `hooks.rs`
+    `get_single_agentctl_command`'s migration/cleanup logic in `hooks.rs`
     specifically only recognizes and manages _single_-command entries;
     conflating the two would require rewriting that recognition logic for
     marginal benefit. Two separate entries keep each hook's purpose and
@@ -86,23 +87,24 @@ reflects the pre-`track-tool-calls` design and was never extended.
   (which already extract `tool_use_id` from the same hook payload), so each
   concurrent tool call gets a distinct id and `TOOL_CALL_START`/
   `TOOL_CALL_RESULT` pairs correctly for parallel tool calls.
-- **`RADR_CLAUDE_HOOKS` grows from nine to eleven entries.** No existing entry's
-  command string, matcher, or async flag changes, so the existing cleanup pass
-  (superseded-entry removal, stale-matcher update) needs no new logic beyond the
-  add-or-skip pass already picking up newly-defined hooks that aren't yet
-  present in a given settings.json — this is the same mechanism that already
-  lets `rd install claude` add new hooks to files written by older binaries (no
-  code change needed there beyond the two new `ClaudeHookDef` entries).
+- **`AGENTCTL_CLAUDE_HOOKS` grows from nine to eleven entries.** No existing
+  entry's command string, matcher, or async flag changes, so the existing
+  cleanup pass (superseded-entry removal, stale-matcher update) needs no new
+  logic beyond the add-or-skip pass already picking up newly-defined hooks that
+  aren't yet present in a given settings.json — this is the same mechanism that
+  already lets `agentctl install claude` add new hooks to files written by older
+  binaries (no code change needed there beyond the two new `ClaudeHookDef`
+  entries).
 
 ## Risks / Trade-offs
 
-- [Every tool call now shells out to `jq` and `rd` twice more per turn
+- [Every tool call now shells out to `jq` and `agentctl` twice more per turn
   (PreToolUse + PostToolUse), adding process-spawn overhead per tool call] →
   Mitigated by `async: true` (already used for all other per-tool hooks); this
   matches the overhead profile Claude sessions already accept for the
   elicitation-typed entries and pi already accepts for every tool call.
-- [Existing installs need to re-run `rd install claude` to pick up the two new
-  entries; until then, `active_tools` stays at 0 for Claude sessions] → No
+- [Existing installs need to re-run `agentctl install claude` to pick up the two
+  new entries; until then, `active_tools` stays at 0 for Claude sessions] → No
   auto-upgrade mechanism exists for either harness today (pi extensions have the
   same limitation), so this matches existing precedent; call out in the summary
   output that new entries were added.
@@ -118,21 +120,22 @@ reflects the pre-`track-tool-calls` design and was never extended.
 
 ## Migration Plan
 
-1. Add the two `ClaudeHookDef` entries to `RADR_CLAUDE_HOOKS`.
+1. Add the two `ClaudeHookDef` entries to `AGENTCTL_CLAUDE_HOOKS`.
 2. Update `format_claude_summary`'s expected-entry-count references (nine →
    eleven) and any hard-coded "(N entries)" strings.
 3. Update `README.md`'s Claude install example output and hook table.
 4. Update `openspec/specs/claude-state-hooks/spec.md` per the delta spec in this
    change.
-5. Re-run `rd install claude` on developer machines (including CI fixtures in
-   `tests/hooks.rs`) to confirm the add-or-skip pass appends the two new entries
-   to an existing nine-entry settings.json without touching the other nine.
+5. Re-run `agentctl install claude` on developer machines (including CI fixtures
+   in `tests/hooks.rs`) to confirm the add-or-skip pass appends the two new
+   entries to an existing nine-entry settings.json without touching the other
+   nine.
 
-No rollback concerns beyond reverting the commit; `rd uninstall claude` already
-removes any entry whose single command matches
-`rd agent event TOOL_CALL_START `/`rd agent event TOOL_CALL_RESULT ` regardless
-of `--type`, so the two new entries are cleaned up by the existing
-`is_radr_command` matching with no changes needed there.
+No rollback concerns beyond reverting the commit; `agentctl uninstall claude`
+already removes any entry whose single command matches
+`agentctl agent event TOOL_CALL_START `/`agentctl agent event TOOL_CALL_RESULT `
+regardless of `--type`, so the two new entries are cleaned up by the existing
+`is_agentctl_command` matching with no changes needed there.
 
 ## Open Questions
 

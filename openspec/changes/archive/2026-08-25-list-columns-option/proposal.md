@@ -1,6 +1,6 @@
 ## Why
 
-`rd list` currently always prints a fixed set of five columns (`agent`,
+`agentctl list` currently always prints a fixed set of five columns (`agent`,
 `session`, `pane`, `state`, and an active-tool-count column) in a fixed order,
 with the `state` column additionally colorized by ANSI escape codes when stdout
 is a terminal. Users who only care about a subset of fields (e.g. just `agent`
@@ -10,8 +10,8 @@ Additionally, the already-tracked `updated_at` timestamp is never shown, even
 though it's useful for spotting stale or recently-active agents.
 
 > **Note:** this proposal was originally written against a fixed four-column
-> `rd list` (no active-tool-count column, no colorized output). Two other
-> changes (`track-tool-calls`, `colorize rd list state column`) have since
+> `agentctl list` (no active-tool-count column, no colorized output). Two other
+> changes (`track-tool-calls`, `colorize agentctl list state column`) have since
 > merged to `main` and shipped a fifth `active_tools` column and TTY-only status
 > coloring. This revision updates the proposal, design, tasks, and specs to
 > account for both, so `--columns` generalizes the **current** five-column,
@@ -20,7 +20,7 @@ though it's useful for spotting stale or recently-active agents.
 
 ## What Changes
 
-- Add a `--columns` (short: `-c`) flag to `rd list` that accepts a
+- Add a `--columns` (short: `-c`) flag to `agentctl list` that accepts a
   comma-delimited, ordered list of column names to display (e.g.
   `--columns agent,status,session`), replacing the fixed five-column output.
 - Default columns (when `--columns` is omitted) remain

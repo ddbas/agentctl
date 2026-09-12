@@ -50,9 +50,9 @@ rows are visually aligned in a fixed-width terminal.
 
 #### Scenario: Agent panes exist across multiple sessions
 
-- **WHEN** the user runs `rd list` and tmux has a pane in session `dev` running
-  `claude` at window 0 pane 0, and a pane in session `work` running `pi` at
-  window 1 pane 0, and other panes running `zsh` or `nvim`
+- **WHEN** the user runs `agentctl list` and tmux has a pane in session `dev`
+  running `claude` at window 0 pane 0, and a pane in session `work` running `pi`
+  at window 1 pane 0, and other panes running `zsh` or `nvim`
 - **THEN** the output contains exactly two lines — one for `claude` and one for
   `pi` — and panes running unrelated processes are omitted
 
@@ -75,13 +75,13 @@ rows are visually aligned in a fixed-width terminal.
 
 #### Scenario: No matching panes
 
-- **WHEN** the user runs `rd list` and no pane's `pane_current_command` matches
-  `claude` or `pi`
+- **WHEN** the user runs `agentctl list` and no pane's `pane_current_command`
+  matches `claude` or `pi`
 - **THEN** the command exits with code 0 and produces no output
 
 #### Scenario: No tmux server running
 
-- **WHEN** the user runs `rd list` and no tmux server is active
+- **WHEN** the user runs `agentctl list` and no tmux server is active
 - **THEN** the command exits with code 0 and produces no output
 
 #### Scenario: Fifth column shows the singular form for exactly one active tool

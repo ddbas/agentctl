@@ -1,16 +1,17 @@
 ## ADDED Requirements
 
-### Requirement: PostToolUseFailure hook calls rd agent event TOOL_CALL_RESULT for every failed tool call
+### Requirement: PostToolUseFailure hook calls agentctl agent event TOOL_CALL_RESULT for every failed tool call
 
 The Claude `PostToolUseFailure` hook SHALL be registered without a tool matcher
 (firing for every tool whose call fails) to invoke a command that reads the
 hook's JSON payload from stdin, extracts `tool_use_id`, and invokes
-`rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude` (async, no
-`--type`), decrementing the pane's `active_tools` count for every failed tool
-call, exactly mirroring the untyped `PostToolUse` registration. This closes out
-the `TOOL_CALL_START` opened by the unmatched `PreToolUse` registration for tool
-calls that fail rather than succeed, since Claude Code fires exactly one of
-`PostToolUse`/`PostToolUseFailure` per tool call, never both.
+`agentctl agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude`
+(async, no `--type`), decrementing the pane's `active_tools` count for every
+failed tool call, exactly mirroring the untyped `PostToolUse` registration. This
+closes out the `TOOL_CALL_START` opened by the unmatched `PreToolUse`
+registration for tool calls that fail rather than succeed, since Claude Code
+fires exactly one of `PostToolUse`/`PostToolUseFailure` per tool call, never
+both.
 
 #### Scenario: A failed tool call still decrements active_tools
 
@@ -28,11 +29,11 @@ calls that fail rather than succeed, since Claude Code fires exactly one of
   `active_tools` is decremented exactly once per completed tool call regardless
   of outcome
 
-### Requirement: PostToolUseFailure hook calls rd agent event TOOL_CALL_RESULT for failed interactive tools
+### Requirement: PostToolUseFailure hook calls agentctl agent event TOOL_CALL_RESULT for failed interactive tools
 
 The Claude `PostToolUseFailure` hook SHALL invoke a command that reads the
 hook's JSON payload from stdin, extracts `tool_use_id`, and invokes
-`rd agent event TOOL_CALL_RESULT --id <tool_use_id> --type elicitation --harness claude`
+`agentctl agent event TOOL_CALL_RESULT --id <tool_use_id> --type elicitation --harness claude`
 (async) when registered with `matcher: "AskUserQuestion|ExitPlanMode"`, closing
 out the `blocked` status opened by the matching `PreToolUse` registration for
 the same tool call, for the (rare) case where an interactive tool call itself
@@ -46,17 +47,17 @@ fails rather than completing normally.
 
 ## MODIFIED Requirements
 
-### Requirement: PostToolUse hook calls rd agent event TOOL_CALL_RESULT for every tool call
+### Requirement: PostToolUse hook calls agentctl agent event TOOL_CALL_RESULT for every tool call
 
 The Claude `PostToolUse` hook SHALL additionally be registered without a tool
 matcher (firing for every tool) to invoke a command that reads the hook's JSON
 payload from stdin, extracts `tool_use_id`, and invokes
-`rd agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude` (async, no
-`--type`), decrementing the pane's `active_tools` count for every completed tool
-call, mirroring the pi extension's `tool_result` handler. This entry only fires
-for tool calls that succeed; failed tool calls are covered by the matching
-unmatched `PostToolUseFailure` registration instead, since Claude Code fires
-exactly one of the two per tool call.
+`agentctl agent event TOOL_CALL_RESULT --id <tool_use_id> --harness claude`
+(async, no `--type`), decrementing the pane's `active_tools` count for every
+completed tool call, mirroring the pi extension's `tool_result` handler. This
+entry only fires for tool calls that succeed; failed tool calls are covered by
+the matching unmatched `PostToolUseFailure` registration instead, since Claude
+Code fires exactly one of the two per tool call.
 
 #### Scenario: Any successful tool call completion decrements active_tools
 
@@ -73,17 +74,18 @@ exactly one of the two per tool call.
   general untyped entries (driving `active_tools`) fire for that same tool call,
   each independently
 
-### Requirement: rd install claude registers handlers via a Claude Code plugin
+### Requirement: agentctl install claude registers handlers via a Claude Code plugin
 
-The `rd install claude` subcommand SHALL install radr's eleven hook entries as a
-Claude Code plugin under `~/.claude/skills/radr/`, consisting of a plugin
-manifest at `~/.claude/skills/radr/.claude-plugin/plugin.json` and a hooks
-configuration at `~/.claude/skills/radr/hooks/hooks.json`. The command SHALL:
+The `agentctl install claude` subcommand SHALL install agentctl's eleven hook
+entries as a Claude Code plugin under `~/.claude/skills/agentctl/`, consisting
+of a plugin manifest at `~/.claude/skills/agentctl/.claude-plugin/plugin.json`
+and a hooks configuration at `~/.claude/skills/agentctl/hooks/hooks.json`. The
+command SHALL:
 
 1. Create `~/.claude/skills/` if it does not already exist.
-2. Delete `~/.claude/skills/radr/` and its full contents if it already exists
-   (`fs::remove_dir_all` or equivalent) — no diffing or in-place patching of an
-   existing plugin installation.
+2. Delete `~/.claude/skills/agentctl/` and its full contents if it already
+   exists (`fs::remove_dir_all` or equivalent) — no diffing or in-place patching
+   of an existing plugin installation.
 3. Write `.claude-plugin/plugin.json` and `hooks/hooks.json` fresh, containing
    the same eleven hook entries the prior `~/.claude/settings.json`-based
    implementation registered.
@@ -101,41 +103,41 @@ entries, both `PostToolUseFailure` entries, `Stop`, and `StopFailure` with
 
 This command SHALL NOT read from, write to, or otherwise inspect
 `~/.claude/settings.json`. It SHALL NOT attempt to detect, migrate, or clean up
-any radr hook entries a previous `rd` version may have registered in
+any agentctl hook entries a previous `agentctl` version may have registered in
 `~/.claude/settings.json`.
 
 #### Scenario: First-time install with no prior plugin present
 
-- **WHEN** the user runs `rd install claude` and neither `~/.claude/skills/` nor
-  `~/.claude/skills/radr/` exists
-- **THEN** `~/.claude/skills/` is created, `~/.claude/skills/radr/` is created
-  containing `.claude-plugin/plugin.json` and `hooks/hooks.json`, and
-  `hooks/hooks.json` registers all eleven radr hook entries, including both
+- **WHEN** the user runs `agentctl install claude` and neither
+  `~/.claude/skills/` nor `~/.claude/skills/agentctl/` exists
+- **THEN** `~/.claude/skills/` is created, `~/.claude/skills/agentctl/` is
+  created containing `.claude-plugin/plugin.json` and `hooks/hooks.json`, and
+  `hooks/hooks.json` registers all eleven agentctl hook entries, including both
   `PostToolUseFailure` entries and no `Notification` entry
 
 #### Scenario: Re-install replaces the existing plugin directory
 
-- **WHEN** the user runs `rd install claude` and `~/.claude/skills/radr/`
-  already exists (from a prior install, with any contents, including files not
-  written by `rd`)
-- **THEN** the existing `~/.claude/skills/radr/` directory and all its contents
-  are deleted, and a fresh `~/.claude/skills/radr/` is written containing
-  exactly `.claude-plugin/plugin.json` and `hooks/hooks.json` with the current
-  eleven hook entries
+- **WHEN** the user runs `agentctl install claude` and
+  `~/.claude/skills/agentctl/` already exists (from a prior install, with any
+  contents, including files not written by `agentctl`)
+- **THEN** the existing `~/.claude/skills/agentctl/` directory and all its
+  contents are deleted, and a fresh `~/.claude/skills/agentctl/` is written
+  containing exactly `.claude-plugin/plugin.json` and `hooks/hooks.json` with
+  the current eleven hook entries
 
 #### Scenario: Install does not touch settings.json
 
-- **WHEN** the user runs `rd install claude` and `~/.claude/settings.json`
-  exists with unrelated user configuration or with radr hook entries from a
-  previous `rd` version
+- **WHEN** the user runs `agentctl install claude` and `~/.claude/settings.json`
+  exists with unrelated user configuration or with agentctl hook entries from a
+  previous `agentctl` version
 - **THEN** `~/.claude/settings.json` is not read or modified in any way
 
 #### Scenario: Install creates the skills directory when absent
 
-- **WHEN** the user runs `rd install claude` and `~/.claude/skills/` does not
-  exist
-- **THEN** `~/.claude/skills/` is created before the `radr` plugin directory is
-  written
+- **WHEN** the user runs `agentctl install claude` and `~/.claude/skills/` does
+  not exist
+- **THEN** `~/.claude/skills/` is created before the `agentctl` plugin directory
+  is written
 
 ## REMOVED Requirements
 
@@ -149,12 +151,12 @@ closes every `TOOL_CALL_START` that `PostToolUse` doesn't (i.e. on tool call
 failure), which was the actual gap in coverage; the permission-prompt mechanism
 itself is removed rather than repaired.
 
-**Migration**: None required for users; `rd install claude` regenerates
+**Migration**: None required for users; `agentctl install claude` regenerates
 `hooks/hooks.json` without this entry on next run. No consumer of `events.jsonl`
 should have depended on `permission-prompt`-typed events, since they were never
 correctly correlated.
 
-### Requirement: Notification hook calls rd agent event TOOL_CALL_START on permission prompts
+### Requirement: Notification hook calls agentctl agent event TOOL_CALL_START on permission prompts
 
 **Reason**: Same root cause as above — the id this hook generated
 (`"perm-<session_id>-<nonce>"`) could never be matched by the corresponding
@@ -163,7 +165,7 @@ in a separate shell subprocess. Removing the hook removes a source of
 permanently-unresolved `blocked` state and orphaned `events.jsonl` entries
 rather than attempting to fix the id correlation.
 
-**Migration**: None required for users; `rd install claude` regenerates
+**Migration**: None required for users; `agentctl install claude` regenerates
 `hooks/hooks.json` without this entry on next run. Any pane currently stuck in
 `blocked` status due to an orphaned permission-prompt open should be cleared by
 its next `SessionStart`, `Stop`, or `StopFailure` event as usual.

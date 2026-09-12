@@ -3,7 +3,7 @@
 ### Requirement: State file schema
 
 The system SHALL persist agent state as a JSON file at
-`$XDG_DATA_HOME/radr/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
+`$XDG_DATA_HOME/agentctl/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
 defaults to `~/.local/share` and `<pane-id>` is the value of `$TMUX_PANE`, e.g.
 `%12`). The file SHALL contain the fields `pane_id` (string), `harness`
 (string), `status` (string matching an `AgentState` variant in snake_case), and
@@ -27,6 +27,6 @@ active tool calls).
 
 #### Scenario: state.json no longer contains a state field
 
-- **WHEN** a state file is written by any current `rd` command
+- **WHEN** a state file is written by any current `agentctl` command
 - **THEN** the JSON object contains a `status` key and does NOT contain a
   `state` key

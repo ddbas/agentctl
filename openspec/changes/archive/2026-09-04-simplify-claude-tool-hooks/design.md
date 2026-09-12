@@ -1,8 +1,8 @@
 ## Context
 
-`rd install claude` currently registers eleven hook entries. Two of them exist
-to track "permission prompt" blocks as a `blocked` status distinct from the
-`elicitation` blocks already driven by `PreToolUse`/`PostToolUse` on
+`agentctl install claude` currently registers eleven hook entries. Two of them
+exist to track "permission prompt" blocks as a `blocked` status distinct from
+the `elicitation` blocks already driven by `PreToolUse`/`PostToolUse` on
 `AskUserQuestion`/`ExitPlanMode`:
 
 - `Notification` (matcher `permission_prompt`) opens the block:
@@ -14,12 +14,12 @@ to track "permission prompt" blocks as a `blocked` status distinct from the
 
 Both commands generate their own `$RANDOM` in their own shell subprocess, so the
 id used to open the block and the id used to (attempt to) close it are never the
-same value. `rd agent event` correlates start/stop purely by `id` for the FSM's
-bookkeeping (`events.jsonl` entries), and the `blocked_prompts` counter was
-added specifically to keep a single premature "close" from clearing `blocked`
-status while a second, concurrent permission prompt was still open — a concern
-that only exists because the ids can't be trusted to pair up. Given they never
-pair up at all, `blocked_prompts` doesn't actually protect anything: every
+same value. `agentctl agent event` correlates start/stop purely by `id` for the
+FSM's bookkeeping (`events.jsonl` entries), and the `blocked_prompts` counter
+was added specifically to keep a single premature "close" from clearing
+`blocked` status while a second, concurrent permission prompt was still open — a
+concern that only exists because the ids can't be trusted to pair up. Given they
+never pair up at all, `blocked_prompts` doesn't actually protect anything: every
 `permission_prompt` open is essentially orphaned, and every unmatched
 `PostToolUse` "close" is a same-shaped guess fired after every single successful
 tool call, matched or not.
@@ -72,8 +72,8 @@ tool call (nonzero Bash exit, MCP tool error, aborted `Edit`, etc.) never fires
   `tool_use_id` on `Notification`, which it does not do today.
 - **Drop `permission-prompt` as an accepted `--type` value** on
   `TOOL_CALL_START`/`TOOL_CALL_RESULT` rather than leaving it defined-but-
-  unused, so `rd agent event --type bogus`-style validation errors reflect only
-  the types that are actually dispatched (`custom`, `elicitation`).
+  unused, so `agentctl agent event --type bogus`-style validation errors reflect
+  only the types that are actually dispatched (`custom`, `elicitation`).
 - **Remove `blocked_prompts` entirely** rather than keeping it as a vestigial
   always-zero field. It was purpose-built for the permission-prompt concurrency
   problem; with that mechanism gone there's no remaining writer or reader for
@@ -94,29 +94,32 @@ tool call (nonzero Bash exit, MCP tool error, aborted `Edit`, etc.) never fires
   is waiting on a permission dialog"] → Accepted: that signal never worked
   correctly, so removing it changes nothing observable for users; it only
   removes broken, noisy `events.jsonl` entries.
-- [This is a breaking change to `rd agent event`'s public `--type` argument and
-  to `state.json`'s schema] → Both are `rd`-internal/hook-generated surfaces
-  (not a stable public API), and `rd install claude` regenerates
-  `hooks/hooks.json` on every run, so a re-run of `rd install claude` after
-  upgrading `rd` is the only migration step needed for the hook side.
+- [This is a breaking change to `agentctl agent event`'s public `--type`
+  argument and to `state.json`'s schema] → Both are
+  `agentctl`-internal/hook-generated surfaces (not a stable public API), and
+  `agentctl install claude` regenerates `hooks/hooks.json` on every run, so a
+  re-run of `agentctl install claude` after upgrading `agentctl` is the only
+  migration step needed for the hook side.
 
 ## Migration Plan
 
-1. Update `RADR_CLAUDE_HOOKS` in `src/commands/hooks.rs`: remove the
+1. Update `AGENTCTL_CLAUDE_HOOKS` in `src/commands/hooks.rs`: remove the
    `Notification` entry and the extra unmatched `PostToolUse` entry, add the two
    `PostToolUseFailure` entries.
-2. Update `rd agent event`'s type validation (wherever `EventKind`/`--type`
-   parsing lives, `src/commands/agent_event.rs`) to drop `permission-prompt`.
+2. Update `agentctl agent event`'s type validation (wherever
+   `EventKind`/`--type` parsing lives, `src/commands/agent_event.rs`) to drop
+   `permission-prompt`.
 3. Update `src/status_fsm.rs` to drop the `PermissionPrompt`-typed transition
    and the `blocked_prompts` field from its event/result types.
 4. Update `src/state.rs` to drop the `blocked_prompts` field from `AgentInfo`/
    `StateFile` (keeping backward-compatible deserialization of old files that
    still contain the key).
-5. Update any `rd list`/`rd info` code path that surfaces `blocked_prompts`
-   (`src/commands/list.rs`) to stop populating/threading it through.
+5. Update any `agentctl list`/`agentctl info` code path that surfaces
+   `blocked_prompts` (`src/commands/list.rs`) to stop populating/threading it
+   through.
 6. Update tests across all touched files; run the full suite via `mise run test`
    (or equivalent).
-7. Users re-run `rd install claude` to regenerate `hooks/hooks.json`.
+7. Users re-run `agentctl install claude` to regenerate `hooks/hooks.json`.
 
 ## Open Questions
 

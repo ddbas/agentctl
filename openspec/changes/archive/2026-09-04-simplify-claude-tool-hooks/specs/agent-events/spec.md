@@ -9,39 +9,42 @@ with accepted values `custom` and `elicitation`. `SESSION_STARTED`,
 
 #### Scenario: TOOL_CALL_START accepts type elicitation
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type elicitation` is
-  invoked
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id> --type elicitation`
+  is invoked
 - **THEN** the command succeeds and the event is recorded with
   `type: "elicitation"`
 
 #### Scenario: TOOL_CALL_START omits type
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id>` is invoked without
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id>` is invoked without
   `--type`
 - **THEN** the command succeeds and the event is recorded with no `type` field
 
 #### Scenario: type on RUN_STARTED is rejected
 
-- **WHEN** `rd agent event RUN_STARTED --id <id> --type custom` is invoked
+- **WHEN** `agentctl agent event RUN_STARTED --id <id> --type custom` is invoked
 - **THEN** the command exits non-zero with a usage error, since `RUN_STARTED`
   does not accept `--type`
 
 #### Scenario: type on SESSION_STARTED is rejected
 
-- **WHEN** `rd agent event SESSION_STARTED --id <id> --type custom` is invoked
+- **WHEN** `agentctl agent event SESSION_STARTED --id <id> --type custom` is
+  invoked
 - **THEN** the command exits non-zero with a usage error, since
   `SESSION_STARTED` does not accept `--type`
 
 #### Scenario: Invalid type value is rejected
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type bogus` is invoked
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id> --type bogus` is
+  invoked
 - **THEN** the command exits non-zero with an error identifying the accepted
   values (`custom`, `elicitation`)
 
 #### Scenario: permission-prompt is no longer an accepted type value
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type permission-prompt`
-  is invoked
+- **WHEN**
+  `agentctl agent event TOOL_CALL_START --id <id> --type permission-prompt` is
+  invoked
 - **THEN** the command exits non-zero with an error identifying the accepted
   values (`custom`, `elicitation`)
 
@@ -175,20 +178,21 @@ for every accepted `--type` value (`custom`, `elicitation`, or omitted).
 #### Scenario: Elicitation TOOL_CALL_START both blocks status and increments active_tools
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t1 --type elicitation` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t1 --type elicitation` is
+  dispatched
 - **THEN** the pane's `status` becomes `blocked` and `active_tools` becomes `1`
 
 #### Scenario: Custom TOOL_CALL_START increments active_tools without changing status
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t2 --type custom` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t2 --type custom` is dispatched
 - **THEN** the pane's `status` remains `working` and `active_tools` becomes `1`
 
 #### Scenario: TOOL_CALL_RESULT decrements active_tools even when it is a status no-op
 
 - **WHEN** a pane's `status` is `idle`, `active_tools` is `1`, and
-  `rd agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so no
-  matching FSM transition exists from `idle`)
+  `agentctl agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so
+  no matching FSM transition exists from `idle`)
 - **THEN** the pane's `status` remains `idle` and `active_tools` becomes `0`
 
 ## REMOVED Requirements

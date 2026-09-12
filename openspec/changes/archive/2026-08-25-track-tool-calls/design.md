@@ -5,19 +5,19 @@
 counter of active tool calls as an anticipated extension of this same file, so
 this is additive rather than a schema redesign.
 
-`rd agent event TOOL_CALL_START` / `TOOL_CALL_RESULT` already exist and feed the
-`status_fsm` (`Working` ↔ `Blocked` transitions gated on `--type elicitation`).
-Today they have **no other side effect** — the pi extension
-(`src/commands/hooks.rs::PI_EXTENSION_CONTENT`) doesn't even call them; only
-`session_start`, `before_agent_start`, `agent_settled`, and `session_shutdown`
-are wired up. This change adds a second, independent side effect to the same two
-events (mutating a counter) and wires the pi extension to call them on every
-tool call, regardless of `--type`.
+`agentctl agent event TOOL_CALL_START` / `TOOL_CALL_RESULT` already exist and
+feed the `status_fsm` (`Working` ↔ `Blocked` transitions gated on
+`--type elicitation`). Today they have **no other side effect** — the pi
+extension (`src/commands/hooks.rs::PI_EXTENSION_CONTENT`) doesn't even call
+them; only `session_start`, `before_agent_start`, `agent_settled`, and
+`session_shutdown` are wired up. This change adds a second, independent side
+effect to the same two events (mutating a counter) and wires the pi extension to
+call them on every tool call, regardless of `--type`.
 
-`rd list` (`src/commands/list.rs::format_panes`) renders four columns — `agent`,
-`session`, `window.pane`, `state` — each separated by the max column width plus
-two spaces. It needs a fifth column for the tool count, using the same two-space
-delimiter convention as the existing four.
+`agentctl list` (`src/commands/list.rs::format_panes`) renders four columns —
+`agent`, `session`, `window.pane`, `state` — each separated by the max column
+width plus two spaces. It needs a fifth column for the tool count, using the
+same two-space delimiter convention as the existing four.
 
 ## Goals / Non-Goals
 
@@ -35,8 +35,8 @@ delimiter convention as the existing four.
 - Wire the pi extension to call `TOOL_CALL_START` / `TOOL_CALL_RESULT` on pi's
   `tool_call` / `tool_result` lifecycle events, using `event.toolCallId` as the
   `--id`.
-- Add a fifth `rd list` column, separated from the `state` column by the same
-  two-space delimiter used between all other columns, showing `N tool` /
+- Add a fifth `agentctl list` column, separated from the `state` column by the
+  same two-space delimiter used between all other columns, showing `N tool` /
   `N tools` when `active_tools > 0` and empty (no trailing delimiter) when it is
   `0`.
 - Deserialize old `state.json` files (written before this change) without
@@ -54,7 +54,7 @@ delimiter convention as the existing four.
   correctly increment/decrement since calls are trusted to pair up 1:1.
 - Not addressing already-in-flight tool calls started by an older pi extension
   version that never emitted `TOOL_CALL_START` — those simply won't be counted
-  until the extension is reinstalled (`rd install pi`).
+  until the extension is reinstalled (`agentctl install pi`).
 
 ## Decisions
 
@@ -86,8 +86,8 @@ delimiter convention as the existing four.
    incremented/decremented value on `TOOL_CALL_START`/`TOOL_CALL_RESULT`, and
    the current value unchanged on `RUN_STARTED`/`RUN_FINISHED`.
 
-5. **A fifth column, not a suffix on the state word.** `rd list` already uses a
-   consistent "pad to max width + two spaces" delimiter between its four
+5. **A fifth column, not a suffix on the state word.** `agentctl list` already
+   uses a consistent "pad to max width + two spaces" delimiter between its four
    columns; the tool count is added as a fifth column following that exact same
    convention (`1 tool` / `N tools`) rather than concatenated onto the state
    word with a single space. This keeps the delimiter uniform across every
@@ -107,35 +107,35 @@ delimiter convention as the existing four.
 
 - **[Risk]** An older pi extension (pre-this-change) never emits
   `TOOL_CALL_START`/`TOOL_CALL_RESULT`, so `active_tools` stays `0` and the new
-  display never appears until the user reruns `rd install pi`. → **Mitigation**:
-  purely additive/backward-compatible; nothing breaks, the feature is simply
-  inert until reinstalled. Document in the PR description that `rd install pi`
-  must be rerun.
+  display never appears until the user reruns `agentctl install pi`. →
+  **Mitigation**: purely additive/backward-compatible; nothing breaks, the
+  feature is simply inert until reinstalled. Document in the PR description that
+  `agentctl install pi` must be rerun.
 - **[Risk]** Crash mid-tool-call (agent process killed) leaves `active_tools`
   permanently incremented with no matching `TOOL_CALL_RESULT` ever arriving. →
   **Mitigation**: `SESSION_STARTED` unconditionally resets the counter to `0`,
-  and `rd list`'s existing stale-state cleanup deletes the whole state file for
-  dead panes, so the stuck count cannot outlive the pane or the next session in
-  that pane.
+  and `agentctl list`'s existing stale-state cleanup deletes the whole state
+  file for dead panes, so the stuck count cannot outlive the pane or the next
+  session in that pane.
 - **[Risk]** Parallel tool execution (pi's default mode) can interleave
   `tool_call`/`tool_result` events across multiple concurrent calls; each call
-  to `rd agent event` is a separate process invocation, so the read-modify-write
-  on `state.json` is not atomic across calls. → **Mitigation**: accept this as a
-  best-effort display counter (matching the existing best-effort nature of
-  `status`, which has the same read-modify-write pattern today); a rare lost
-  update only skews the displayed count by one and self-heals on the next
-  `SESSION_STARTED`.
+  to `agentctl agent event` is a separate process invocation, so the
+  read-modify-write on `state.json` is not atomic across calls. →
+  **Mitigation**: accept this as a best-effort display counter (matching the
+  existing best-effort nature of `status`, which has the same read-modify-write
+  pattern today); a rare lost update only skews the displayed count by one and
+  self-heals on the next `SESSION_STARTED`.
 
 ## Migration Plan
 
 - No migration needed for `state.json`: `active_tools` deserializes via
-  `#[serde(default)]`, so files written by older `rd` binaries continue to
+  `#[serde(default)]`, so files written by older `agentctl` binaries continue to
   parse.
-- Users must rerun `rd install pi` to pick up the updated extension content
-  (same as any other extension-template change); `rd install pi` is already
-  idempotent and safe to rerun.
-- No CLI flags change; `rd agent event TOOL_CALL_START`/`TOOL_CALL_RESULT` keep
-  their existing signatures.
+- Users must rerun `agentctl install pi` to pick up the updated extension
+  content (same as any other extension-template change); `agentctl install pi`
+  is already idempotent and safe to rerun.
+- No CLI flags change; `agentctl agent event TOOL_CALL_START`/`TOOL_CALL_RESULT`
+  keep their existing signatures.
 
 ## Open Questions
 

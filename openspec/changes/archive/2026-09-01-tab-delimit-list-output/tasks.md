@@ -35,7 +35,7 @@
       tab-delimited output and the fixed-field-count guarantee
 - [x] 3.2 Update the `list` subcommand's doc comment in `src/main.rs` (`--help`
       text) to describe tab-delimited columns
-- [x] 3.3 Update `README.md`'s `rd list` section to describe tab-delimited
+- [x] 3.3 Update `README.md`'s `agentctl list` section to describe tab-delimited
       output and the fixed-field-count guarantee
 
 ## 4. Spec sync

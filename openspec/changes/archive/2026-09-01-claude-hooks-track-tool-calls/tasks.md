@@ -1,15 +1,16 @@
 ## 1. Add general tool-call-tracking hook entries
 
 - [x] 1.1 Add a `ClaudeHookDef` for `PreToolUse` (no matcher) →
-      `rd agent     event TOOL_CALL_START --id <tool_use_id> --harness claude`
-      (async, no `--type`) to `RADR_CLAUDE_HOOKS` in `src/commands/hooks.rs`.
+      `agentctl agent     event TOOL_CALL_START --id <tool_use_id> --harness claude`
+      (async, no `--type`) to `AGENTCTL_CLAUDE_HOOKS` in
+      `src/commands/hooks.rs`.
 - [x] 1.2 Add a `ClaudeHookDef` for `PostToolUse` (no matcher) →
-      `rd agent     event TOOL_CALL_RESULT --id <tool_use_id> --harness claude`
-      (async, no `--type`) to `RADR_CLAUDE_HOOKS`.
-- [x] 1.3 Update the doc comment above `RADR_CLAUDE_HOOKS` ("The nine radr hook
-      entries...") to say eleven, and list the two new entries.
+      `agentctl agent     event TOOL_CALL_RESULT --id <tool_use_id> --harness claude`
+      (async, no `--type`) to `AGENTCTL_CLAUDE_HOOKS`.
+- [x] 1.3 Update the doc comment above `AGENTCTL_CLAUDE_HOOKS` ("The nine
+      agentctl hook entries...") to say eleven, and list the two new entries.
 - [x] 1.4 Update the hard-coded
-      `"Installed radr hooks for claude (9     entries):"` string in
+      `"Installed agentctl hooks for claude (9     entries):"` string in
       `format_claude_summary` to say `(11 entries)`.
 
 ## 2. Update tests
@@ -29,11 +30,11 @@
 - [x] 2.4 Update `tests/hooks.rs`'s doc comments and event-count assertions
       (`nine` → `eleven`, `PreToolUse`/`PostToolUse` entry counts) to match.
 - [x] 2.5 Add an integration test in `tests/hooks.rs` verifying
-      `rd install     claude` followed by simulated `PreToolUse`/`PostToolUse`
-      hook invocations (piping a JSON payload with a `tool_use_id` into the
-      generated command) increments and decrements `active_tools` in the
-      resulting state file, mirroring existing pi tool-call-tracking test
-      coverage if present.
+      `agentctl install     claude` followed by simulated
+      `PreToolUse`/`PostToolUse` hook invocations (piping a JSON payload with a
+      `tool_use_id` into the generated command) increments and decrements
+      `active_tools` in the resulting state file, mirroring existing pi
+      tool-call-tracking test coverage if present.
 
 ## 3. Update documentation
 
@@ -47,12 +48,12 @@
 
 - [x] 4.1 Run `mise run build` and `mise run test` (or equivalent
       `cargo build`/`cargo test` via `mise exec`), confirming no regressions.
-- [x] 4.2 Manually run `rd install claude` against a fresh
+- [x] 4.2 Manually run `agentctl install claude` against a fresh
       `~/.claude/settings.json` and confirm eleven entries are written with the
       expected commands/matchers/async flags.
-- [x] 4.3 Manually run `rd install claude` against a settings.json seeded with
-      only the pre-change nine entries and confirm exactly the two new entries
-      are appended, with the nine existing entries unchanged.
+- [x] 4.3 Manually run `agentctl install claude` against a settings.json seeded
+      with only the pre-change nine entries and confirm exactly the two new
+      entries are appended, with the nine existing entries unchanged.
 - [x] 4.4 Manually simulate a `PreToolUse`/`PostToolUse` pair for a
       non-interactive tool (e.g. `Bash`) via the generated shell command and
       confirm `active_tools` increments then decrements in the pane's

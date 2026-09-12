@@ -1,6 +1,6 @@
 ## Context
 
-`rd list` renders one line per tmux pane, with columns selected via
+`agentctl list` renders one line per tmux pane, with columns selected via
 `--columns`/`-c` (defaulting to `agent,session,pane,status,activeTools`). The
 formatting logic lives in `format_panes` in `src/commands/list.rs`.
 
@@ -28,7 +28,7 @@ of `"claude\t\n"`).
 
 **Goals:**
 
-- `rd list` output uses a single tab character (`\t`) as the sole column
+- `agentctl list` output uses a single tab character (`\t`) as the sole column
   delimiter, with no padding.
 - Every output row has exactly `columns.len()` tab-separated fields — including
   when a trailing column's rendered value is empty — so tools like `cut -f`,
@@ -42,7 +42,7 @@ of `"claude\t\n"`).
 **Non-Goals:**
 
 - Adding a header row, a `--format json` mode, or any other structural change to
-  `rd list` output beyond the delimiter itself.
+  `agentctl list` output beyond the delimiter itself.
 - Changing which columns are selectable, their names, or their per-column
   rendering rules (`activeTools`'s `N tool`/`N tools`/empty format,
   `updatedAt`'s RFC 3339 format, etc.) — only the delimiter and the join/trim
@@ -90,9 +90,9 @@ to align, so the dependency and the logic computing it are dead weight.
 
 - **Breaking change for existing consumers**: any script or human relying on the
   previous space-padded, human-aligned columns must switch to splitting on `\t`.
-  → Documented as a breaking change in the proposal and README; `rd list` has no
-  stability guarantee predating this project's early stage, and the fix restores
-  intended, well-defined behavior rather than introducing a new one.
+  → Documented as a breaking change in the proposal and README; `agentctl list`
+  has no stability guarantee predating this project's early stage, and the fix
+  restores intended, well-defined behavior rather than introducing a new one.
 - **Terminal readability regresses slightly** for interactive use without
   padding. → Users who want aligned output can pipe through `column -t -s $'\t'`
   or similar; this is standard practice for tab-delimited CLI output (cf.

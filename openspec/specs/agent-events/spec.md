@@ -2,24 +2,24 @@
 
 ## Purpose
 
-Define the `rd agent event` command that dispatches typed lifecycle events for a
-tmux pane, derives the pane's `status` from those events via a finite state
-machine, and appends every dispatched event to an append-only `events.jsonl` log
-per pane.
+Define the `agentctl agent event` command that dispatches typed lifecycle events
+for a tmux pane, derives the pane's `status` from those events via a finite
+state machine, and appends every dispatched event to an append-only
+`events.jsonl` log per pane.
 
 ## Requirements
 
-### Requirement: rd agent event dispatches typed events
+### Requirement: agentctl agent event dispatches typed events
 
 The system SHALL provide
-`rd agent event <EVENT_NAME> [--id <ID>] [--type <TYPE>] [--harness <HARNESS>] [--pane <PANE_ID>]`
+`agentctl agent event <EVENT_NAME> [--id <ID>] [--type <TYPE>] [--harness <HARNESS>] [--pane <PANE_ID>]`
 as nested clap subcommands, one per supported event name. Supported event names
 are `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and
 `TOOL_CALL_RESULT`.
 
 #### Scenario: Unknown event name is rejected
 
-- **WHEN** `rd agent event` is invoked with a name that is not one of
+- **WHEN** `agentctl agent event` is invoked with a name that is not one of
   `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
   `TOOL_CALL_RESULT`
 - **THEN** the command exits non-zero with an error identifying the accepted
@@ -28,42 +28,46 @@ are `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and
 ### Requirement: --harness and --pane are global args shared by every event subcommand
 
 `--harness` and `--pane` SHALL be declared once, as global arguments on the
-`rd agent event` subcommand, rather than being redefined separately on each of
-the five event subcommands. Every current and future event subcommand SHALL
-accept `--harness` and `--pane` with identical behavior as a result, without
-needing to redeclare them.
+`agentctl agent event` subcommand, rather than being redefined separately on
+each of the five event subcommands. Every current and future event subcommand
+SHALL accept `--harness` and `--pane` with identical behavior as a result,
+without needing to redeclare them.
 
 #### Scenario: --harness is accepted by every event subcommand
 
-- **WHEN** `--harness <H>` is passed to any of `rd agent event SESSION_STARTED`,
-  `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, or `TOOL_CALL_RESULT`
+- **WHEN** `--harness <H>` is passed to any of
+  `agentctl agent event SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
+  `TOOL_CALL_START`, or `TOOL_CALL_RESULT`
 - **THEN** the command accepts the flag and records `<H>` as the event's
   `harness`
 
 #### Scenario: --pane is accepted by every event subcommand
 
-- **WHEN** `--pane <ID>` is passed to any of `rd agent event SESSION_STARTED`,
-  `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, or `TOOL_CALL_RESULT`
+- **WHEN** `--pane <ID>` is passed to any of
+  `agentctl agent event SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`,
+  `TOOL_CALL_START`, or `TOOL_CALL_RESULT`
 - **THEN** the command resolves the pane using `<ID>` instead of `$TMUX_PANE`,
-  exactly as `--pane` already behaves for `rd agent clear`
+  exactly as `--pane` already behaves for `agentctl agent clear`
 
 #### Scenario: --harness and --pane may be placed before or after the event name
 
-- **WHEN** `rd agent event --harness claude --pane %12 RUN_STARTED --id r1` or
-  `rd agent event RUN_STARTED --id r1 --harness claude --pane %12` is invoked
+- **WHEN**
+  `agentctl agent event --harness claude --pane %12 RUN_STARTED --id r1` or
+  `agentctl agent event RUN_STARTED --id r1 --harness claude --pane %12` is
+  invoked
 - **THEN** both invocations are accepted and behave identically
 
 ### Requirement: id is required on all five events
 
-Every event dispatched via `rd agent event` SHALL require a non-empty `--id`
-value. `id` uniquely identifies the event's subject (a session ID for
+Every event dispatched via `agentctl agent event` SHALL require a non-empty
+`--id` value. `id` uniquely identifies the event's subject (a session ID for
 `SESSION_STARTED`, a run ID for `RUN_*` events, a tool-call ID for `TOOL_CALL_*`
 events) so that a terminating event can later be reconciled with its
 corresponding starting event where one exists.
 
 #### Scenario: Missing id is rejected
 
-- **WHEN** any of the five `rd agent event` subcommands is invoked without
+- **WHEN** any of the five `agentctl agent event` subcommands is invoked without
   `--id`
 - **THEN** the command exits non-zero with a usage error, and no state or log
   changes are made
@@ -77,39 +81,42 @@ with accepted values `custom` and `elicitation`. `SESSION_STARTED`,
 
 #### Scenario: TOOL_CALL_START accepts type elicitation
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type elicitation` is
-  invoked
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id> --type elicitation`
+  is invoked
 - **THEN** the command succeeds and the event is recorded with
   `type: "elicitation"`
 
 #### Scenario: TOOL_CALL_START omits type
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id>` is invoked without
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id>` is invoked without
   `--type`
 - **THEN** the command succeeds and the event is recorded with no `type` field
 
 #### Scenario: type on RUN_STARTED is rejected
 
-- **WHEN** `rd agent event RUN_STARTED --id <id> --type custom` is invoked
+- **WHEN** `agentctl agent event RUN_STARTED --id <id> --type custom` is invoked
 - **THEN** the command exits non-zero with a usage error, since `RUN_STARTED`
   does not accept `--type`
 
 #### Scenario: type on SESSION_STARTED is rejected
 
-- **WHEN** `rd agent event SESSION_STARTED --id <id> --type custom` is invoked
+- **WHEN** `agentctl agent event SESSION_STARTED --id <id> --type custom` is
+  invoked
 - **THEN** the command exits non-zero with a usage error, since
   `SESSION_STARTED` does not accept `--type`
 
 #### Scenario: Invalid type value is rejected
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type bogus` is invoked
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id> --type bogus` is
+  invoked
 - **THEN** the command exits non-zero with an error identifying the accepted
   values (`custom`, `elicitation`)
 
 #### Scenario: permission-prompt is no longer an accepted type value
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type permission-prompt`
-  is invoked
+- **WHEN**
+  `agentctl agent event TOOL_CALL_START --id <id> --type permission-prompt` is
+  invoked
 - **THEN** the command exits non-zero with an error identifying the accepted
   values (`custom`, `elicitation`)
 
@@ -232,19 +239,20 @@ is no `permission-prompt` type or transition.
 
 ### Requirement: Every dispatched event is appended to events.jsonl
 
-The system SHALL append every event dispatched via `rd agent event`, including
-`SESSION_STARTED`, as one JSON object per line to
-`$XDG_DATA_HOME/radr/agents/<pane-id>/events.jsonl`, creating the file and its
-parent directory if absent. Each logged line SHALL include at least the event
-name, `id`, `harness`, `pane_id`, and a timestamp; `TOOL_CALL_*` events SHALL
-include `type` when supplied.
+The system SHALL append every event dispatched via `agentctl agent event`,
+including `SESSION_STARTED`, as one JSON object per line to
+`$XDG_DATA_HOME/agentctl/agents/<pane-id>/events.jsonl`, creating the file and
+its parent directory if absent. Each logged line SHALL include at least the
+event name, `id`, `harness`, `pane_id`, and a timestamp; `TOOL_CALL_*` events
+SHALL include `type` when supplied.
 
 #### Scenario: First event creates the log file
 
-- **WHEN** `rd agent event SESSION_STARTED --id s1 --harness claude --pane %12`
-  is dispatched and no `events.jsonl` exists yet for `%12`
-- **THEN** `$XDG_DATA_HOME/radr/agents/%12/events.jsonl` is created containing
-  exactly one line describing the `SESSION_STARTED` event
+- **WHEN**
+  `agentctl agent event SESSION_STARTED --id s1 --harness claude --pane %12` is
+  dispatched and no `events.jsonl` exists yet for `%12`
+- **THEN** `$XDG_DATA_HOME/agentctl/agents/%12/events.jsonl` is created
+  containing exactly one line describing the `SESSION_STARTED` event
 
 #### Scenario: Subsequent events are appended, not overwritten
 
@@ -272,34 +280,36 @@ for every accepted `--type` value (`custom`, `elicitation`, or omitted).
 #### Scenario: Elicitation TOOL_CALL_START both blocks status and increments active_tools
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t1 --type elicitation` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t1 --type elicitation` is
+  dispatched
 - **THEN** the pane's `status` becomes `blocked` and `active_tools` becomes `1`
 
 #### Scenario: Custom TOOL_CALL_START increments active_tools without changing status
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t2 --type custom` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t2 --type custom` is dispatched
 - **THEN** the pane's `status` remains `working` and `active_tools` becomes `1`
 
 #### Scenario: TOOL_CALL_RESULT decrements active_tools even when it is a status no-op
 
 - **WHEN** a pane's `status` is `idle`, `active_tools` is `1`, and
-  `rd agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so no
-  matching FSM transition exists from `idle`)
+  `agentctl agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so
+  no matching FSM transition exists from `idle`)
 - **THEN** the pane's `status` remains `idle` and `active_tools` becomes `0`
 
-### Requirement: rd agent status is removed
+### Requirement: agentctl agent status is removed
 
-The system SHALL NOT provide an `rd agent status` subcommand, and SHALL NOT
-provide a separate non-event `rd agent init` command; session bootstrap to
-`idle` SHALL be performed exclusively via `rd agent event SESSION_STARTED`.
+The system SHALL NOT provide an `agentctl agent status` subcommand, and SHALL
+NOT provide a separate non-event `agentctl agent init` command; session
+bootstrap to `idle` SHALL be performed exclusively via
+`agentctl agent event SESSION_STARTED`.
 
-#### Scenario: rd agent status no longer exists
+#### Scenario: agentctl agent status no longer exists
 
-- **WHEN** `rd agent status idle` (or any other value) is invoked
+- **WHEN** `agentctl agent status idle` (or any other value) is invoked
 - **THEN** the command exits non-zero as an unrecognized subcommand
 
-#### Scenario: rd agent init no longer exists
+#### Scenario: agentctl agent init no longer exists
 
-- **WHEN** `rd agent init` is invoked
+- **WHEN** `agentctl agent init` is invoked
 - **THEN** the command exits non-zero as an unrecognized subcommand

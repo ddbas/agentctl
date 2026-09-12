@@ -11,8 +11,8 @@
 //! The container uses the `am-tmux-test:latest` local image (Alpine + tmux
 //! pre-installed; build with `mise run test:build-image`). A tmux server is
 //! started inside the container on a Unix socket at `/workspace/tmux.sock`,
-//! which lives on a bind-mounted host `TempDir`. The host `rd` binary is
-//! directed at the container's socket via the `RD_TMUX_SOCKET` env var.
+//! which lives on a bind-mounted host `TempDir`. The host `agentctl` binary is
+//! directed at the container's socket via the `AGENTCTL_TMUX_SOCKET` env var.
 //!
 //! # Usage
 //!
@@ -23,8 +23,8 @@
 //! async fn my_test() {
 //!     let env = common::TmuxEnv::new().await;
 //!
-//!     // Run rd on the host; it is directed at the container's tmux server.
-//!     let output = env.rd().arg("help").output().expect("spawn rd");
+//!     // Run agentctl on the host; it is directed at the container's tmux server.
+//!     let output = env.agentctl().arg("help").output().expect("spawn agentctl");
 //!     assert!(output.status.success());
 //! } // container + TempDir cleaned up on drop
 //! ```
@@ -83,11 +83,11 @@ const TMUX_TAG: &str = "latest";
 /// - The tmux server runs on a Unix socket at `/workspace/tmux.sock`.
 ///   `/workspace` is bind-mounted from a host `TempDir`, making the socket
 ///   accessible on the host at `workspace_path/tmux.sock`.
-/// - The host `rd` binary is directed at this socket via `RD_TMUX_SOCKET`.
-///   `TMUX` and `TMUX_PANE` are cleared so `rd` does not think it is
+/// - The host `agentctl` binary is directed at this socket via `AGENTCTL_TMUX_SOCKET`.
+///   `TMUX` and `TMUX_PANE` are cleared so `agentctl` does not think it is
 ///   running inside an existing tmux session.
 /// - A per-test XDG data directory at `workspace_path/xdg` is used for all
-///   state files.  `XDG_DATA_HOME` is set on every `rd()` invocation so state
+///   state files.  `XDG_DATA_HOME` is set on every `agentctl()` invocation so state
 ///   operations are fully isolated from the developer's host environment.
 pub struct TmuxEnv {
     /// Keeps the container alive until the test ends.
@@ -100,7 +100,7 @@ pub struct TmuxEnv {
     /// Host path of the tmux server socket (`workspace_path/tmux.sock`).
     pub socket_path: PathBuf,
     /// Isolated XDG data home for this test (`workspace_path/xdg`).
-    /// All `rd` state files are written here; never touches the real user dir.
+    /// All `agentctl` state files are written here; never touches the real user dir.
     pub xdg_path: PathBuf,
 }
 
@@ -161,14 +161,14 @@ impl TmuxEnv {
         }
     }
 
-    /// Returns a `Command` builder for the `rd` binary with:
-    /// - `RD_TMUX_SOCKET` = path to the container's tmux socket
+    /// Returns a `Command` builder for the `agentctl` binary with:
+    /// - `AGENTCTL_TMUX_SOCKET` = path to the container's tmux socket
     /// - `XDG_DATA_HOME` = isolated per-test state directory
     /// - `TMUX` and `TMUX_PANE` removed (prevent session contamination)
-    pub fn rd(&self) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_rd"));
+    pub fn agentctl(&self) -> Command {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_agentctl"));
         cmd.env(
-            "RD_TMUX_SOCKET",
+            "AGENTCTL_TMUX_SOCKET",
             self.socket_path
                 .to_str()
                 .expect("socket path is valid utf-8"),
@@ -295,9 +295,9 @@ impl TmuxEnv {
     ///
     /// The state is a minimal JSON file: `{"pane_id": ..., "harness": ...,
     /// "status": ..., "updated_at": ...}`.  The file is written on the HOST at
-    /// `xdg_path/radr/agents/<pane_id>/state.json`.
+    /// `xdg_path/agentctl/agents/<pane_id>/state.json`.
     pub fn write_state_file(&self, pane_id: &str, harness: &str, status: &str) {
-        let dir = self.xdg_path.join("radr").join("agents").join(pane_id);
+        let dir = self.xdg_path.join("agentctl").join("agents").join(pane_id);
         std::fs::create_dir_all(&dir).expect("create agent dir");
         let json = format!(
             r#"{{"pane_id":"{pane_id}","harness":"{harness}","status":"{status}","updated_at":"2026-01-01T00:00:00Z"}}"#
@@ -309,7 +309,7 @@ impl TmuxEnv {
     /// XDG directory.
     pub fn state_file_path(&self, pane_id: &str) -> PathBuf {
         self.xdg_path
-            .join("radr")
+            .join("agentctl")
             .join("agents")
             .join(pane_id)
             .join("state.json")
@@ -319,7 +319,7 @@ impl TmuxEnv {
     /// env's XDG directory.
     pub fn events_file_path(&self, pane_id: &str) -> PathBuf {
         self.xdg_path
-            .join("radr")
+            .join("agentctl")
             .join("agents")
             .join(pane_id)
             .join("events.jsonl")

@@ -14,21 +14,22 @@ every other row's.
 
 #### Scenario: Columns separated by tabs for the default column set
 
-- **WHEN** the user runs `rd list` without `--columns` and a pane's status is
-  `working` with `active_tools: 1`
+- **WHEN** the user runs `agentctl list` without `--columns` and a pane's status
+  is `working` with `active_tools: 1`
 - **THEN** that row reads `<agent>\t<session>\t<pane>\t<status>\t<activeTools>`
   with exactly four tab characters and no padding
 
 #### Scenario: Trailing empty column still emits its delimiting tab
 
-- **WHEN** the user runs `rd list --columns agent,updatedAt` and a pane has no
-  state file (so `updatedAt`, the last selected column, is empty for that row)
+- **WHEN** the user runs `agentctl list --columns agent,updatedAt` and a pane
+  has no state file (so `updatedAt`, the last selected column, is empty for that
+  row)
 - **THEN** that row's line is `<agent>\t` — the agent name, a tab, and an empty
   final field — not `<agent>` alone
 
 #### Scenario: Field count is consistent across rows regardless of content
 
-- **WHEN** the user runs `rd list` (default columns) and one row's pane is
+- **WHEN** the user runs `agentctl list` (default columns) and one row's pane is
   `working` with one active tool while another row's pane is `idle` with zero
   active tools
 - **THEN** splitting each row on `\t` yields exactly five fields for both rows,
@@ -42,14 +43,14 @@ used, and regardless of column order or repeated column names.
 
 #### Scenario: Tab-delimiting holds for a custom column subset
 
-- **WHEN** the user runs `rd list --columns session,updatedAt` and session names
-  vary in display width (including wide Unicode characters)
+- **WHEN** the user runs `agentctl list --columns session,updatedAt` and session
+  names vary in display width (including wide Unicode characters)
 - **THEN** each row is exactly `<session>\t<updatedAt-or-empty>` with a single
   tab separator and no padding, regardless of the session name's display width
 
 #### Scenario: Repeated columns each get their own delimiting tab
 
-- **WHEN** the user runs `rd list --columns agent,agent`
+- **WHEN** the user runs `agentctl list --columns agent,agent`
 - **THEN** each row reads `<agent>\t<agent>` with exactly one tab between the
   two identical fields
 
@@ -81,4 +82,4 @@ or Unicode-display-width dependency in the new implementation.
 
 **Migration**: Callers or users who relied on visually aligned columns in a
 terminal can restore alignment locally by piping through a formatter, e.g.
-`rd list | column -t -s $'\t'`.
+`agentctl list | column -t -s $'\t'`.

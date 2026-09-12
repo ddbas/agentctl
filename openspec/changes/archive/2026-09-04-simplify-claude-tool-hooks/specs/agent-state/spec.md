@@ -3,7 +3,7 @@
 ### Requirement: State file schema
 
 The system SHALL persist agent state as a JSON file at
-`$XDG_DATA_HOME/radr/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
+`$XDG_DATA_HOME/agentctl/agents/<pane-id>/state.json` (where `XDG_DATA_HOME`
 defaults to `~/.local/share` and `<pane-id>` is the value of `$TMUX_PANE`, e.g.
 `%12`). The file SHALL contain the fields `pane_id` (string), `harness`
 (string), `status` (string matching an `AgentState` variant in snake_case),
@@ -27,7 +27,7 @@ other, independently tracked per-pane state such as `active_tools`.
 
 #### Scenario: state.json no longer contains a state field
 
-- **WHEN** a state file is written by any current `rd` command
+- **WHEN** a state file is written by any current `agentctl` command
 - **THEN** the JSON object contains a `status` key and does NOT contain a
   `state` key
 
@@ -39,13 +39,13 @@ other, independently tracked per-pane state such as `active_tools`.
 
 #### Scenario: Old state files without active_tools deserialize with zero
 
-- **WHEN** a `state.json` written by a version of `rd` that predates the
+- **WHEN** a `state.json` written by a version of `agentctl` that predates the
   `active_tools` field is read
 - **THEN** it deserializes successfully with `active_tools` treated as `0`
 
 #### Scenario: Old state files with a leftover blocked_prompts key still deserialize
 
-- **WHEN** a `state.json` written by a version of `rd` that included a
+- **WHEN** a `state.json` written by a version of `agentctl` that included a
   `blocked_prompts` field is read
 - **THEN** it deserializes successfully, ignoring the unknown `blocked_prompts`
   key, and any freshly written state file omits it

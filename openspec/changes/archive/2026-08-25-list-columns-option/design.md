@@ -1,6 +1,6 @@
 ## Context
 
-`rd list` (`src/commands/list.rs`) currently hardcodes both the sort keys
+`agentctl list` (`src/commands/list.rs`) currently hardcodes both the sort keys
 (`SortKey` enum: `Agent`, `Session`, `Pane`, `State`, `UpdatedAt`, with kebab
 `Display`/`ValueEnum` strings) and the rendered output columns. Since this
 proposal was first drafted, two other changes have merged to `main` and changed
@@ -11,7 +11,7 @@ what `format_panes` actually renders:
   `active_tools` is `0`, absent, or the pane's status is `unknown` — with a
   hardcoded rule that no trailing delimiter/whitespace is printed after `state`
   when that fifth column is empty.
-- **`colorize rd list state column`** made `format_panes` take a
+- **`colorize agentctl list state column`** made `format_panes` take a
   `use_color: bool` and wrap the `state` column's plain text in an ANSI
   foreground color escape sequence (via `colorize_state`) keyed to the agent's
   `AgentState`, only when stdout is a terminal; column widths are always

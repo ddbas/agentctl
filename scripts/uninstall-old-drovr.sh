@@ -4,7 +4,7 @@
 # TEMPORARY migration script — delete this file once you've run it.
 #
 # Removes traces of the old `drovr` / `dv` install left behind before the
-# rename to `radr` / `rd`:
+# rename to `agentctl` / `agentctl`:
 #   - `dv` binary in ~/.local/bin
 #   - `dv` binary installed via `cargo install` (package name `drovr`)
 #   - old pi extension at ~/.pi/agent/extensions/drovr.ts
@@ -15,8 +15,8 @@
 #
 # After running this, re-install the new tool and hooks:
 #   mise run install
-#   rd hooks install pi
-#   rd hooks install claude
+#   agentctl hooks install pi
+#   agentctl hooks install claude
 #
 # Usage:
 #   ./scripts/uninstall-old-drovr.sh          # perform the cleanup
@@ -124,8 +124,8 @@ fi
 echo
 echo "== done =="
 echo "Next steps:"
-echo "  mise run install        # build & install the new 'rd' binary"
-echo "  rd hooks install pi     # (re)install the pi extension"
-echo "  rd hooks install claude # (re)install claude hooks"
+echo "  mise run install        # build & install the new 'agentctl' binary"
+echo "  agentctl hooks install pi     # (re)install the pi extension"
+echo "  agentctl hooks install claude # (re)install claude hooks"
 echo
 echo "You can delete this script now: rm scripts/uninstall-old-drovr.sh"

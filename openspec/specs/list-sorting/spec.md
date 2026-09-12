@@ -1,8 +1,8 @@
 ## Purpose
 
-Define the sorting behaviour of the `rd list` command: available sort keys, the
-`--sort-by` and `--reverse` CLI flags, and the canonical `AgentState` priority
-ordering used when sorting by state.
+Define the sorting behaviour of the `agentctl list` command: available sort
+keys, the `--sort-by` and `--reverse` CLI flags, and the canonical `AgentState`
+priority ordering used when sorting by state.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ This ordering is independent of enum variant declaration order.
 - **WHEN** all five variants are sorted in ascending order
 - **THEN** the result is `[Blocked, Done, Working, Idle, Unknown]`
 
-### Requirement: rd list accepts --sort-by flag
+### Requirement: agentctl list accepts --sort-by flag
 
 The `list` subcommand SHALL accept a `--sort-by` flag that controls which
 property is used to sort the output rows. Accepted values are: `agent`,
@@ -38,43 +38,43 @@ be identical (same names, same casing) to the vocabulary accepted by the
 
 #### Scenario: Default sort is by updatedAt descending
 
-- **WHEN** the user runs `rd list` without any sort flags
+- **WHEN** the user runs `agentctl list` without any sort flags
 - **THEN** the output rows are ordered by the `updated_at` timestamp descending
   (most recently active agent first; panes with no state file appear last)
 
 #### Scenario: Sort by agent name
 
-- **WHEN** the user runs `rd list --sort-by agent`
+- **WHEN** the user runs `agentctl list --sort-by agent`
 - **THEN** the output rows are ordered alphabetically by agent name (e.g.
   `claude` before `pi`)
 
 #### Scenario: Sort by session name
 
-- **WHEN** the user runs `rd list --sort-by session`
+- **WHEN** the user runs `agentctl list --sort-by session`
 - **THEN** the output rows are ordered lexicographically by tmux session name
 
 #### Scenario: Sort by pane position
 
-- **WHEN** the user runs `rd list --sort-by pane`
+- **WHEN** the user runs `agentctl list --sort-by pane`
 - **THEN** the output rows are ordered numerically: by window index first, then
   pane index within the window
 
 #### Scenario: Sort by status
 
-- **WHEN** the user runs `rd list --sort-by status`
+- **WHEN** the user runs `agentctl list --sort-by status`
 - **THEN** the output rows are ordered by `AgentState` priority as defined by
   the canonical `AgentState` ordering
 
 #### Scenario: Sort by updatedAt timestamp
 
-- **WHEN** the user runs `rd list --sort-by updatedAt`
+- **WHEN** the user runs `agentctl list --sort-by updatedAt`
 - **THEN** the output rows are ordered chronologically by the `updated_at` field
   in the state file; panes with no state file are treated as having the oldest
   possible timestamp (sort last in the default newest-first direction)
 
 #### Scenario: Sort by activeTools count
 
-- **WHEN** the user runs `rd list --sort-by activeTools`
+- **WHEN** the user runs `agentctl list --sort-by activeTools`
 - **THEN** the output rows are ordered numerically by `active_tools` count,
   descending (busiest agents first); panes with no state file or whose status is
   `unknown` are treated as having `active_tools == 0` and sort with the other
@@ -82,15 +82,15 @@ be identical (same names, same casing) to the vocabulary accepted by the
 
 #### Scenario: Old kebab-case/state-named values are rejected
 
-- **WHEN** the user runs `rd list --sort-by state` or
-  `rd list --sort-by updated-at`
+- **WHEN** the user runs `agentctl list --sort-by state` or
+  `agentctl list --sort-by updated-at`
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing the valid values (`agent`, `session`, `pane`, `status`,
   `updatedAt`, `activeTools`)
 
 #### Scenario: Invalid sort-by value is rejected
 
-- **WHEN** the user runs `rd list --sort-by foobar`
+- **WHEN** the user runs `agentctl list --sort-by foobar`
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing valid values
 
@@ -103,16 +103,17 @@ is ascending), matching `updatedAt`'s existing newest-first convention. Passing
 
 #### Scenario: Default activeTools direction is busiest first
 
-- **WHEN** the user runs `rd list --sort-by activeTools` without `--reverse`
+- **WHEN** the user runs `agentctl list --sort-by activeTools` without
+  `--reverse`
 - **THEN** the agent with the highest `active_tools` count appears first
 
 #### Scenario: --reverse flips activeTools to quietest first
 
-- **WHEN** the user runs `rd list --sort-by activeTools --reverse`
+- **WHEN** the user runs `agentctl list --sort-by activeTools --reverse`
 - **THEN** the agent with the lowest `active_tools` count (including `0` for
   panes with no state file or `unknown` status) appears first
 
-### Requirement: rd list accepts --reverse flag
+### Requirement: agentctl list accepts --reverse flag
 
 The `list` subcommand SHALL accept a `--reverse` flag (short: `-r`) that
 reverses the sort order. It is a boolean flag: absent means the natural
@@ -123,12 +124,12 @@ ascending; `--reverse` gives descending.
 
 #### Scenario: Ascending order (default for non-time keys)
 
-- **WHEN** the user runs `rd list --sort-by status` without `--reverse`
+- **WHEN** the user runs `agentctl list --sort-by status` without `--reverse`
 - **THEN** rows are sorted in ascending order (Blocked first)
 
 #### Scenario: Descending order when --reverse is present
 
-- **WHEN** the user runs `rd list --reverse`
+- **WHEN** the user runs `agentctl list --reverse`
 - **THEN** rows are sorted in the opposite of the natural direction for the
   active sort key
 

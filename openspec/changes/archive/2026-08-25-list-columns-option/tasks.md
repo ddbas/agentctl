@@ -107,9 +107,9 @@
 - [x] 7.6 Update `tests/list_sessions.rs` integration tests for the renamed
       `status` column, the renamed `activeTools` column, and default column
       output
-- [x] 7.7 Add an integration test exercising `rd list --columns ...` end to end
-      (custom subset/order, including `activeTools` and `updatedAt`) and
-      `rd     list --sort-by status`/`updatedAt`/`activeTools`
+- [x] 7.7 Add an integration test exercising `agentctl list --columns ...` end
+      to end (custom subset/order, including `activeTools` and `updatedAt`) and
+      `agentctl     list --sort-by status`/`updatedAt`/`activeTools`
 - [x] 7.8 Add unit tests for `--sort-by activeTools`: numeric ordering,
       descending-by-default (busiest first), `--reverse` giving ascending
       (quietest/idle first), and panes with no state file / `unknown` status

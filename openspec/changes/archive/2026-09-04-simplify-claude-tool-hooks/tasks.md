@@ -1,12 +1,13 @@
 ## 1. Claude hook registrations (`src/commands/hooks.rs`)
 
-- [x] 1.1 Add `PostToolUseFailure` entries to `RADR_CLAUDE_HOOKS` mirroring both
-      `PostToolUse` entries (unmatched untyped + `AskUserQuestion|ExitPlanMode`
-      typed `elicitation`), each emitting `TOOL_CALL_RESULT --id <tool_use_id>`
+- [x] 1.1 Add `PostToolUseFailure` entries to `AGENTCTL_CLAUDE_HOOKS` mirroring
+      both `PostToolUse` entries (unmatched untyped +
+      `AskUserQuestion|ExitPlanMode` typed `elicitation`), each emitting
+      `TOOL_CALL_RESULT --id <tool_use_id>`
 - [x] 1.2 Remove the `Notification` (`permission_prompt`) hook entry
 - [x] 1.3 Remove the extra unmatched `PostToolUse` entry keyed on
       `perm-<session_id>-$RANDOM`
-- [x] 1.4 Update the doc comment above `RADR_CLAUDE_HOOKS` and
+- [x] 1.4 Update the doc comment above `AGENTCTL_CLAUDE_HOOKS` and
       `print_pi_summary`/install-summary text to describe the new eleven-entry
       composition (drop mentions of permission-prompt/Notification)
 - [x] 1.5 Update unit tests in `src/commands/hooks.rs`: replace
@@ -20,7 +21,7 @@
 - [x] 1.6 Update/add a test asserting `PostToolUseFailure`'s `async` flag is
       `true` for both entries, matching `PostToolUse`
 
-## 2. `rd agent event` type validation (`src/commands/agent_event.rs`)
+## 2. `agentctl agent event` type validation (`src/commands/agent_event.rs`)
 
 - [x] 2.1 Remove `permission-prompt` as an accepted `--type` value; only
       `custom` and `elicitation` remain
@@ -59,7 +60,7 @@
       equivalent "legacy field is ignored" test if none remains after removing
       the others
 
-## 5. `rd list`/`rd info` output (`src/commands/list.rs`)
+## 5. `agentctl list`/`agentctl info` output (`src/commands/list.rs`)
 
 - [x] 5.1 Remove `blocked_prompts: 0` from any `AgentInfo`/state construction
       call sites
@@ -72,8 +73,8 @@
 - [x] 6.2 `rg -n "blocked_prompts|permission-prompt|permission_prompt" src`
       returns no results (outside of comments explicitly describing removed
       history, if any are intentionally kept)
-- [x] 6.3 Manually inspect `rd install claude`'s generated `hooks/hooks.json`
-      (e.g. via a temp `HOME`) to confirm eleven entries: `SessionStart`,
-      `UserPromptSubmit`, `PreToolUse`×2, `PostToolUse`×2,
+- [x] 6.3 Manually inspect `agentctl install claude`'s generated
+      `hooks/hooks.json` (e.g. via a temp `HOME`) to confirm eleven entries:
+      `SessionStart`, `UserPromptSubmit`, `PreToolUse`×2, `PostToolUse`×2,
       `PostToolUseFailure`×2, `Stop`, `StopFailure`, `SessionEnd` — and no
       `Notification` key

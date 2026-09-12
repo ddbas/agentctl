@@ -1,6 +1,6 @@
 ## ADDED Requirements
 
-### Requirement: rd list accepts --columns flag
+### Requirement: agentctl list accepts --columns flag
 
 The `list` subcommand SHALL accept a `--columns` flag (short: `-c`) whose value
 is a comma-delimited, ordered list of column names. Accepted column names SHALL
@@ -13,24 +13,24 @@ user repeats a name.
 
 #### Scenario: Custom column subset and order
 
-- **WHEN** the user runs `rd list --columns status,agent`
+- **WHEN** the user runs `agentctl list --columns status,agent`
 - **THEN** each output row contains exactly two columns, in order: the agent's
   status, then the agent name
 
 #### Scenario: Single column
 
-- **WHEN** the user runs `rd list --columns agent`
+- **WHEN** the user runs `agentctl list --columns agent`
 - **THEN** each output row contains exactly one column: the agent name
 
 #### Scenario: Repeated column name is rendered twice
 
-- **WHEN** the user runs `rd list --columns agent,agent`
+- **WHEN** the user runs `agentctl list --columns agent,agent`
 - **THEN** each output row contains the agent name twice, once per occurrence,
   with no deduplication
 
 #### Scenario: Invalid column name is rejected
 
-- **WHEN** the user runs `rd list --columns bogus`
+- **WHEN** the user runs `agentctl list --columns bogus`
 - **THEN** the command exits with a non-zero exit code and prints an error
   message listing the valid column names
 
@@ -42,9 +42,9 @@ user repeats a name.
 
 #### Scenario: activeTools is valid for both --columns and --sort-by
 
-- **WHEN** the user runs `rd list --columns activeTools`
+- **WHEN** the user runs `agentctl list --columns activeTools`
 - **THEN** the command succeeds and each row's `activeTools` column is rendered
-- **WHEN** the user instead runs `rd list --sort-by activeTools`
+- **WHEN** the user instead runs `agentctl list --sort-by activeTools`
 - **THEN** the command succeeds and output rows are ordered by `active_tools`
   count (see the `list-sorting` capability)
 
@@ -58,13 +58,13 @@ column's name (previously an unnamed, unconditional fifth column).
 
 #### Scenario: Default output unchanged in content and order
 
-- **WHEN** the user runs `rd list` without `--columns`
+- **WHEN** the user runs `agentctl list` without `--columns`
 - **THEN** each output row contains five columns, in order: agent name, session
   name, `window.pane`, status, and active-tool count
 
 #### Scenario: Help text shows the default column list
 
-- **WHEN** the user runs `rd list --help`
+- **WHEN** the user runs `agentctl list --help`
 - **THEN** the `--columns` flag's help text displays its default value as the
   literal, comma-delimited string a user would type:
   `agent,session,pane,status,activeTools`
@@ -78,15 +78,15 @@ render as an empty string for that row.
 
 #### Scenario: updatedAt shows RFC 3339 timestamp when state file exists
 
-- **WHEN** the user runs `rd list --columns agent,updatedAt` and a matching pane
-  has a state file with `updated_at` set to a known instant
+- **WHEN** the user runs `agentctl list --columns agent,updatedAt` and a
+  matching pane has a state file with `updated_at` set to a known instant
 - **THEN** the `updatedAt` column for that row shows the RFC 3339 representation
   (UTC) of that instant
 
 #### Scenario: updatedAt is empty when no state file exists
 
-- **WHEN** the user runs `rd list --columns agent,updatedAt` and a matching pane
-  has no state file
+- **WHEN** the user runs `agentctl list --columns agent,updatedAt` and a
+  matching pane has no state file
 - **THEN** the `updatedAt` column for that row is an empty string
 
 ### Requirement: activeTools column renders the in-flight tool-call count
@@ -101,14 +101,14 @@ column.
 
 #### Scenario: Singular active tool count
 
-- **WHEN** the user runs `rd list` (or with `activeTools` in `--columns`) and a
-  pane's status is `working` with `active_tools: 1`
+- **WHEN** the user runs `agentctl list` (or with `activeTools` in `--columns`)
+  and a pane's status is `working` with `active_tools: 1`
 - **THEN** that row's `activeTools` column reads `1 tool`
 
 #### Scenario: Plural active tool count
 
-- **WHEN** the user runs `rd list` (or with `activeTools` in `--columns`) and a
-  pane's status is `working` with `active_tools: 3`
+- **WHEN** the user runs `agentctl list` (or with `activeTools` in `--columns`)
+  and a pane's status is `working` with `active_tools: 3`
 - **THEN** that row's `activeTools` column reads `3 tools`
 
 #### Scenario: Zero, absent, or unknown-status active tool count is empty
@@ -131,22 +131,22 @@ from each cell's plain (uncolored) text, so coloring never affects alignment.
 
 #### Scenario: Status colorized regardless of column position
 
-- **WHEN** the user runs `rd list --columns status,agent` with stdout attached
-  to a terminal and a matching pane's status is `working`
+- **WHEN** the user runs `agentctl list --columns status,agent` with stdout
+  attached to a terminal and a matching pane's status is `working`
 - **THEN** the first column's `working` text is wrapped in the yellow ANSI color
   escape sequence, and the second column (`agent`) is never colorized
 
 #### Scenario: Repeated status columns are each colorized
 
-- **WHEN** the user runs `rd list --columns status,agent,status` with stdout
-  attached to a terminal
+- **WHEN** the user runs `agentctl list --columns status,agent,status` with
+  stdout attached to a terminal
 - **THEN** both `status` columns for a given row are wrapped in the same color
   escape sequence for that row's state
 
 #### Scenario: No coloring when stdout is not a terminal
 
-- **WHEN** the user runs `rd list` with stdout redirected to a file or piped to
-  another process, regardless of `--columns`
+- **WHEN** the user runs `agentctl list` with stdout redirected to a file or
+  piped to another process, regardless of `--columns`
 - **THEN** no column, including `status`, contains ANSI escape sequences
 
 ### Requirement: Trailing whitespace is trimmed from each rendered row
@@ -161,16 +161,17 @@ selection.
 
 #### Scenario: Trailing whitespace trimmed for the default column set
 
-- **WHEN** the user runs `rd list` without `--columns` and a pane's status is
-  `working` with `active_tools: 0` (so the last column, `activeTools`, is empty
-  for that row)
+- **WHEN** the user runs `agentctl list` without `--columns` and a pane's status
+  is `working` with `active_tools: 0` (so the last column, `activeTools`, is
+  empty for that row)
 - **THEN** that row's line ends immediately after `working` with no trailing
   delimiter or whitespace
 
 #### Scenario: Trailing whitespace trimmed for a custom last column
 
-- **WHEN** the user runs `rd list --columns agent,updatedAt` and a pane has no
-  state file (so `updatedAt`, the last selected column, is empty for that row)
+- **WHEN** the user runs `agentctl list --columns agent,updatedAt` and a pane
+  has no state file (so `updatedAt`, the last selected column, is empty for that
+  row)
 - **THEN** that row's line ends immediately after the agent name with no
   trailing delimiter or whitespace
 
@@ -196,30 +197,30 @@ columns or a custom `--columns` selection is used:
 
 #### Scenario: Alignment holds for a custom column subset
 
-- **WHEN** the user runs `rd list --columns session,updatedAt` and session names
-  vary in display width (including wide Unicode characters)
+- **WHEN** the user runs `agentctl list --columns session,updatedAt` and session
+  names vary in display width (including wide Unicode characters)
 - **THEN** the `updatedAt` column starts at the same terminal column position on
   every row
 
 #### Scenario: Columns are always separated by two spaces
 
-- **WHEN** the user runs `rd list` (default columns) or with any `--columns`
-  selection, and two or more rows are printed
+- **WHEN** the user runs `agentctl list` (default columns) or with any
+  `--columns` selection, and two or more rows are printed
 - **THEN** every column boundary within a row is separated from the next
   column's first character by exactly two spaces of padding, after accounting
   for the padding needed to reach the column's fixed width
 
 #### Scenario: Column width matches its widest cell exactly
 
-- **WHEN** the user runs `rd list` and the `agent` column's values across all
-  rows are `pi` and `claude`
+- **WHEN** the user runs `agentctl list` and the `agent` column's values across
+  all rows are `pi` and `claude`
 - **THEN** the `agent` column's rendered width (excluding the two-space
   separator) equals the display width of `claude`, and the `pi` row is padded
   with trailing spaces to that same width
 
 #### Scenario: Every row's column starts at the same position
 
-- **WHEN** the user runs `rd list` (or with any `--columns` selection) and
+- **WHEN** the user runs `agentctl list` (or with any `--columns` selection) and
   multiple rows are printed, some with shorter and some with longer values in
   earlier columns
 - **THEN** for every column position, the first character of that column's value

@@ -1,4 +1,4 @@
-//! `rd list` — enumerate tmux panes running known agent harness processes.
+//! `agentctl list` — enumerate tmux panes running known agent harness processes.
 //!
 //! Shells out to `tmux list-panes -a` and prints one line per pane whose
 //! `pane_current_command` exactly matches a known agent name (`claude` or
@@ -497,11 +497,11 @@ pub fn sort_panes(
 
 // ── Subcommand entry point ────────────────────────────────────────────────────
 
-/// Entry point for the `rd list` subcommand.
+/// Entry point for the `agentctl list` subcommand.
 ///
 /// Resolves the tmux server socket in priority order:
 /// 1. `--server` / `-s` CLI flag
-/// 2. `RD_TMUX_SOCKET` environment variable (used by the test harness)
+/// 2. `AGENTCTL_TMUX_SOCKET` environment variable (used by the test harness)
 /// 3. Default tmux server (no `-S` flag)
 pub fn run(
     server: Option<String>,
@@ -509,7 +509,7 @@ pub fn run(
     reverse: bool,
     columns: Vec<Field>,
 ) -> Result<()> {
-    let server = server.or_else(|| std::env::var("RD_TMUX_SOCKET").ok());
+    let server = server.or_else(|| std::env::var("AGENTCTL_TMUX_SOCKET").ok());
 
     let panes = tmux_panes(server.as_deref())?;
     let mut agent_panes = filter_agent_panes(&panes);
@@ -611,8 +611,8 @@ mod tests {
         // since tabs provide the delimiter, not padding.
         let data = vec![
             pane_with_id("pi", "dotfiles", 0, 0, "%1"),
-            pane_with_id("pi", "🌳 radr (claude-hooks)", 0, 0, "%2"),
-            pane_with_id("pi", "🌳 radr (list-sort)", 0, 0, "%3"),
+            pane_with_id("pi", "🌳 agentctl (claude-hooks)", 0, 0, "%2"),
+            pane_with_id("pi", "🌳 agentctl (list-sort)", 0, 0, "%3"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(&refs, &empty_state_map(), false, DEFAULT_COLUMNS);
@@ -623,8 +623,8 @@ mod tests {
         // All lines should have tab-separated columns (5 columns with 4 tabs,
         // including the trailing tab before the empty activeTools cell).
         assert_eq!(lines[0], "pi\tdotfiles\t0.0\tunknown\t");
-        assert_eq!(lines[1], "pi\t🌳 radr (claude-hooks)\t0.0\tunknown\t");
-        assert_eq!(lines[2], "pi\t🌳 radr (list-sort)\t0.0\tunknown\t");
+        assert_eq!(lines[1], "pi\t🌳 agentctl (claude-hooks)\t0.0\tunknown\t");
+        assert_eq!(lines[2], "pi\t🌳 agentctl (list-sort)\t0.0\tunknown\t");
     }
 
     #[test]
@@ -799,8 +799,12 @@ mod tests {
 
     #[test]
     fn invalid_columns_value_rejected_by_clap() {
-        let result =
-            <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--columns", "bogus"]);
+        let result = <crate::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--columns",
+            "bogus",
+        ]);
         assert!(
             result.is_err(),
             "expected clap error for unknown --columns value"
@@ -817,10 +821,18 @@ mod tests {
             "updatedAt",
             "activeTools",
         ] {
-            let sort_result =
-                <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--sort-by", value]);
-            let columns_result =
-                <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--columns", value]);
+            let sort_result = <crate::Cli as clap::Parser>::try_parse_from([
+                "agentctl",
+                "list",
+                "--sort-by",
+                value,
+            ]);
+            let columns_result = <crate::Cli as clap::Parser>::try_parse_from([
+                "agentctl",
+                "list",
+                "--columns",
+                value,
+            ]);
             assert!(sort_result.is_ok(), "--sort-by {value} should be accepted");
             assert!(
                 columns_result.is_ok(),
@@ -937,7 +949,7 @@ mod tests {
     fn format_panes_alignment_holds_for_custom_columns_selection() {
         let data = vec![
             pane_with_id("claude", "dotfiles", 0, 0, "%1"),
-            pane_with_id("pi", "🌳 radr (claude-hooks)", 0, 0, "%2"),
+            pane_with_id("pi", "🌳 agentctl (claude-hooks)", 0, 0, "%2"),
         ];
         let refs: Vec<&PaneEntry> = data.iter().collect();
         let output = format_panes(
@@ -951,7 +963,7 @@ mod tests {
 
         // Tab-delimited format should have session and agent separated by tabs
         assert_eq!(lines[0], "dotfiles\tclaude");
-        assert_eq!(lines[1], "🌳 radr (claude-hooks)\tpi");
+        assert_eq!(lines[1], "🌳 agentctl (claude-hooks)\tpi");
     }
 
     // ── colorize_state ───────────────────────────────────────────────────────────────────
@@ -1461,8 +1473,12 @@ mod tests {
     fn invalid_sort_by_rejected_by_clap() {
         // Clap's ValueEnum parsing rejects unknown values at argument parse time.
         // We verify this by using try_parse_from on the CLI root.
-        let result =
-            <crate::Cli as clap::Parser>::try_parse_from(["rd", "list", "--sort-by", "foobar"]);
+        let result = <crate::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--sort-by",
+            "foobar",
+        ]);
         assert!(
             result.is_err(),
             "expected clap error for unknown sort-by value"

@@ -14,8 +14,8 @@
 - [x] 2.1 Add `src/events_log.rs` with an `EventRecord` type (event name, `id`,
       optional `type`, `harness`, `pane_id`, timestamp) and an
       `append_event_to(base, pane_id, record)` function that appends one JSON
-      line to `<base>/radr/agents/<pane-id>/events.jsonl`, creating the file/dir
-      if absent
+      line to `<base>/agentctl/agents/<pane-id>/events.jsonl`, creating the
+      file/dir if absent
 - [x] 2.2 Unit tests: first event creates the file with one line; second event
       appends without truncating; file/dir created when absent
 
@@ -34,7 +34,7 @@
       working→blocked via elicitation start, blocked→working via elicitation
       result, custom-type/no-type events are no-ops, unmatched-state no-op)
 
-## 4. rd agent event command
+## 4. agentctl agent event command
 
 - [x] 4.1 Add an `AgentEventSubcommand` enum (one variant per event name:
       `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`,
@@ -51,30 +51,32 @@
       which is logged like every other event)
 - [x] 4.3 Remove `src/commands/agent_status.rs` and its
       `AgentSubcommand::Status` wiring in `src/main.rs`; do not add a separate
-      non-event `rd agent init` command — session bootstrap goes exclusively
-      through `rd agent event SESSION_STARTED`
+      non-event `agentctl agent init` command — session bootstrap goes
+      exclusively through `agentctl agent event SESSION_STARTED`
 - [x] 4.4 Wire the `Event` subcommand into `src/commands/mod.rs` and
       `src/main.rs`'s `run()` match arms
-- [x] 4.5 Unit tests for `rd agent event` per `specs/agent-events/spec.md`:
-      required `--id` on all five events, rejected `--type` on `RUN_*`/
-      `SESSION_STARTED`, accepted/invalid `--type` values on `TOOL_CALL_*`,
-      unknown event name rejected, outside-tmux no-op, pane resolution order
-      (`--pane` overrides `$TMUX_PANE`), `rd agent init` no longer exists as a
-      subcommand, and that `--harness`/`--pane` are accepted by every event
-      subcommand both before and after the event name on the command line
+- [x] 4.5 Unit tests for `agentctl agent event` per
+      `specs/agent-events/spec.md`: required `--id` on all five events, rejected
+      `--type` on `RUN_*`/ `SESSION_STARTED`, accepted/invalid `--type` values
+      on `TOOL_CALL_*`, unknown event name rejected, outside-tmux no-op, pane
+      resolution order (`--pane` overrides `$TMUX_PANE`), `agentctl agent init`
+      no longer exists as a subcommand, and that `--harness`/`--pane` are
+      accepted by every event subcommand both before and after the event name on
+      the command line
 
 ## 5. pi integration
 
-- [x] 5.1 Update the generated `radr.ts` template in `src/commands/hooks.rs` to
-      call `rd agent event SESSION_STARTED --id <sessionId> --harness pi` on
+- [x] 5.1 Update the generated `agentctl.ts` template in `src/commands/hooks.rs`
+      to call
+      `agentctl agent event SESSION_STARTED --id <sessionId> --harness pi` on
       `session_start`, generate a run ID via `crypto.randomUUID()` and call
-      `rd agent event RUN_STARTED --id <runId> --harness pi` on
+      `agentctl agent event RUN_STARTED --id <runId> --harness pi` on
       `before_agent_start`, reuse that run ID for
-      `rd agent event RUN_FINISHED --id <runId> --harness pi` on
-      `agent_settled`, and keep `rd agent clear` on `session_shutdown`
-- [x] 5.2 Update `rd install pi`'s idempotent-content check and stale-file
+      `agentctl agent event RUN_FINISHED --id <runId> --harness pi` on
+      `agent_settled`, and keep `agentctl agent clear` on `session_shutdown`
+- [x] 5.2 Update `agentctl install pi`'s idempotent-content check and stale-file
       detection to recognize/replace the old
-      `rd agent status`/`rd agent     clear` generated content
+      `agentctl agent status`/`agentctl agent     clear` generated content
 - [x] 5.3 Update `tests/agent_commands.rs` / `src/commands/hooks.rs` unit tests
       asserting on the pi extension's generated content and install/upgrade
       summaries
@@ -84,20 +86,21 @@
 - [x] 6.1 Update the nine generated hook entries in `src/commands/hooks.rs` per
       the table in `specs/claude-state-hooks/spec.md`: `SessionStart` → shell
       snippet extracting `session_id` via `jq` then
-      `rd agent event     SESSION_STARTED`; `UserPromptSubmit`, `Stop`,
+      `agentctl agent event     SESSION_STARTED`; `UserPromptSubmit`, `Stop`,
       `StopFailure` → shell snippets extracting `session_id` then
-      `rd agent event     RUN_STARTED`/`RUN_FINISHED`;
+      `agentctl agent event     RUN_STARTED`/`RUN_FINISHED`;
       `PreToolUse`/`PostToolUse` matched to `AskUserQuestion|ExitPlanMode` →
       shell snippets extracting `tool_use_id` then
       `TOOL_CALL_START`/`TOOL_CALL_RESULT --type     elicitation`; unmatched
       `PostToolUse` and `Notification` matched to `permission_prompt` → shell
       snippets extracting `session_id` and using the synthetic
       `perm-<session_id>` id for `TOOL_CALL_RESULT`/
-      `TOOL_CALL_START --type elicitation`; `SessionEnd` → `rd agent clear`
-- [x] 6.2 Extend `rd install claude`/`rd uninstall claude`'s radr-managed
-      hook-entry recognition/migration logic to add the new `rd agent status` →
-      `rd agent event` migration path alongside the existing
-      `set-state`/`state set` migration chain
+      `TOOL_CALL_START --type elicitation`; `SessionEnd` →
+      `agentctl agent clear`
+- [x] 6.2 Extend `agentctl install claude`/`agentctl uninstall claude`'s
+      agentctl-managed hook-entry recognition/migration logic to add the new
+      `agentctl agent status` → `agentctl agent event` migration path alongside
+      the existing `set-state`/`state set` migration chain
 - [x] 6.3 Update `tests/agent_commands.rs` / `src/commands/hooks.rs` unit tests
       asserting on generated Claude settings content, install/upgrade/ uninstall
       summaries, and each migration scenario (pre-rename, intermediate, and
@@ -106,12 +109,12 @@
 ## 7. Cross-cutting verification
 
 - [x] 7.1 Run the full test suite (`mise run test` or equivalent) and fix any
-      remaining references to `rd agent status`, `rd agent init`, or the `state`
-      field across `tests/common/mod.rs` and elsewhere
+      remaining references to `agentctl agent status`, `agentctl agent init`, or
+      the `state` field across `tests/common/mod.rs` and elsewhere
 - [ ] 7.2 Manually install both harnesses in a scratch tmux pane, drive a full
       run (including a permission prompt / `AskUserQuestion`), and confirm
       `state.json` shows the expected `status` transitions and `events.jsonl`
       records every dispatched event, including `SESSION_STARTED`
-- [x] 7.3 Update `README`/help text (`rd agent --help`, `Cli` doc comments) to
-      describe `rd agent event` (including `SESSION_STARTED`) in place of
-      `rd agent status`
+- [x] 7.3 Update `README`/help text (`agentctl agent --help`, `Cli` doc
+      comments) to describe `agentctl agent event` (including `SESSION_STARTED`)
+      in place of `agentctl agent status`

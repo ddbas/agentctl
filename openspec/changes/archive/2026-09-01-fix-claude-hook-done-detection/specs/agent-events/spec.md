@@ -9,39 +9,42 @@ flag.
 
 #### Scenario: TOOL_CALL_START accepts type elicitation
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type elicitation` is
-  invoked
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id> --type elicitation`
+  is invoked
 - **THEN** the command succeeds and the event is recorded with
   `type: "elicitation"`
 
 #### Scenario: TOOL_CALL_START accepts type permission-prompt
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type permission-prompt`
-  is invoked
+- **WHEN**
+  `agentctl agent event TOOL_CALL_START --id <id> --type permission-prompt` is
+  invoked
 - **THEN** the command succeeds and the event is recorded with
   `type: "permission-prompt"`
 
 #### Scenario: TOOL_CALL_START omits type
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id>` is invoked without
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id>` is invoked without
   `--type`
 - **THEN** the command succeeds and the event is recorded with no `type` field
 
 #### Scenario: type on RUN_STARTED is rejected
 
-- **WHEN** `rd agent event RUN_STARTED --id <id> --type custom` is invoked
+- **WHEN** `agentctl agent event RUN_STARTED --id <id> --type custom` is invoked
 - **THEN** the command exits non-zero with a usage error, since `RUN_STARTED`
   does not accept `--type`
 
 #### Scenario: type on SESSION_STARTED is rejected
 
-- **WHEN** `rd agent event SESSION_STARTED --id <id> --type custom` is invoked
+- **WHEN** `agentctl agent event SESSION_STARTED --id <id> --type custom` is
+  invoked
 - **THEN** the command exits non-zero with a usage error, since
   `SESSION_STARTED` does not accept `--type`
 
 #### Scenario: Invalid type value is rejected
 
-- **WHEN** `rd agent event TOOL_CALL_START --id <id> --type bogus` is invoked
+- **WHEN** `agentctl agent event TOOL_CALL_START --id <id> --type bogus` is
+  invoked
 - **THEN** the command exits non-zero with an error identifying the accepted
   values (`custom`, `elicitation`, `permission-prompt`)
 
@@ -210,33 +213,35 @@ requirement below) and SHALL NOT mutate `active_tools`.
 #### Scenario: Elicitation TOOL_CALL_START both blocks status and increments active_tools
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t1 --type elicitation` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t1 --type elicitation` is
+  dispatched
 - **THEN** the pane's `status` becomes `blocked` and `active_tools` becomes `1`
 
 #### Scenario: Custom TOOL_CALL_START increments active_tools without changing status
 
 - **WHEN** a pane's `status` is `working` and `active_tools` is `0`, and
-  `rd agent event TOOL_CALL_START --id t2 --type custom` is dispatched
+  `agentctl agent event TOOL_CALL_START --id t2 --type custom` is dispatched
 - **THEN** the pane's `status` remains `working` and `active_tools` becomes `1`
 
 #### Scenario: TOOL_CALL_RESULT decrements active_tools even when it is a status no-op
 
 - **WHEN** a pane's `status` is `idle`, `active_tools` is `1`, and
-  `rd agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so no
-  matching FSM transition exists from `idle`)
+  `agentctl agent event TOOL_CALL_RESULT --id t3` is dispatched (no `--type`, so
+  no matching FSM transition exists from `idle`)
 - **THEN** the pane's `status` remains `idle` and `active_tools` becomes `0`
 
 #### Scenario: permission-prompt TOOL_CALL_START does not mutate active_tools
 
 - **WHEN** a pane's `active_tools` is `1` (one real tool call genuinely in
-  flight) and `rd agent event TOOL_CALL_START --id t4 --type permission-prompt`
-  is dispatched
+  flight) and
+  `agentctl agent event TOOL_CALL_START --id t4 --type permission-prompt` is
+  dispatched
 - **THEN** `active_tools` remains `1` and `blocked_prompts` becomes `1`
 
 #### Scenario: permission-prompt TOOL_CALL_RESULT does not mutate active_tools
 
 - **WHEN** a pane's `active_tools` is `1` and `blocked_prompts` is `1`, and
-  `rd agent event TOOL_CALL_RESULT --id t4 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_RESULT --id t4 --type permission-prompt` is
   dispatched
 - **THEN** `active_tools` remains `1` and `blocked_prompts` becomes `0`
 
@@ -247,18 +252,18 @@ requirement below) and SHALL NOT mutate `active_tools`.
 The system SHALL track, per pane, a non-negative count of permission-prompt
 blocks currently open as the `blocked_prompts` field of `state.json`. This count
 SHALL be incremented by one whenever
-`rd agent event TOOL_CALL_START --type permission-prompt` is dispatched for that
-pane, and decremented by one (never below `0`) whenever
-`rd agent event TOOL_CALL_RESULT --type permission-prompt` is dispatched for
-that pane. This counter is independent of `active_tools` and exists so that two
-concurrent permission prompts in the same session cannot have the first one
+`agentctl agent event TOOL_CALL_START --type permission-prompt` is dispatched
+for that pane, and decremented by one (never below `0`) whenever
+`agentctl agent event TOOL_CALL_RESULT --type permission-prompt` is dispatched
+for that pane. This counter is independent of `active_tools` and exists so that
+two concurrent permission prompts in the same session cannot have the first one
 resolved prematurely clear the `blocked` status opened for a second,
 still-pending prompt.
 
 #### Scenario: permission-prompt TOOL_CALL_START increments blocked_prompts
 
 - **WHEN** a pane's `blocked_prompts` is `0` and
-  `rd agent event TOOL_CALL_START --id p1 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_START --id p1 --type permission-prompt` is
   dispatched
 - **THEN** the pane's `blocked_prompts` becomes `1`
 
@@ -272,24 +277,24 @@ still-pending prompt.
 #### Scenario: permission-prompt TOOL_CALL_RESULT decrements blocked_prompts
 
 - **WHEN** a pane's `blocked_prompts` is `2` and
-  `rd agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
   dispatched
 - **THEN** the pane's `blocked_prompts` becomes `1`
 
 #### Scenario: permission-prompt TOOL_CALL_RESULT never decrements below zero
 
 - **WHEN** a pane's `blocked_prompts` is `0` and
-  `rd agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
+  `agentctl agent event TOOL_CALL_RESULT --id p1 --type permission-prompt` is
   dispatched (no matching prior open)
 - **THEN** the pane's `blocked_prompts` remains `0`
 
 ### Requirement: SESSION_STARTED resets blocked_prompts to zero
 
-`rd agent event SESSION_STARTED` SHALL reset the pane's `blocked_prompts` to
-`0`, in addition to resetting `status` to `idle` and `active_tools` to `0`.
+`agentctl agent event SESSION_STARTED` SHALL reset the pane's `blocked_prompts`
+to `0`, in addition to resetting `status` to `idle` and `active_tools` to `0`.
 
 #### Scenario: SESSION_STARTED clears a nonzero blocked_prompts count
 
 - **WHEN** a pane's `blocked_prompts` is `1` and
-  `rd agent event SESSION_STARTED --id s1` is dispatched
+  `agentctl agent event SESSION_STARTED --id s1` is dispatched
 - **THEN** the pane's `blocked_prompts` becomes `0`

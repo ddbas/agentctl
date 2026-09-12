@@ -28,8 +28,8 @@ reliable, simple tool-call tracking based only on
   `PostToolUse` entry that paired with `Notification` — it never correctly
   matched its opening event.
 - **BREAKING**: Remove the `permission-prompt` `--type` value from
-  `rd agent event TOOL_CALL_START`/`TOOL_CALL_RESULT`. `elicitation` remains the
-  only non-`custom` type, driving `blocked` status for
+  `agentctl agent event TOOL_CALL_START`/`TOOL_CALL_RESULT`. `elicitation`
+  remains the only non-`custom` type, driving `blocked` status for
   `AskUserQuestion`/`ExitPlanMode` via ordinary `PreToolUse`/`PostToolUse`
   pairing on `tool_use_id`.
 - **BREAKING**: Remove the `blocked_prompts` counter and field from `state.json`
@@ -48,7 +48,7 @@ reliable, simple tool-call tracking based only on
 
 - `claude-state-hooks`: replace the `Notification`/permission-prompt
   `PostToolUse` pairing with `PostToolUseFailure` hook registrations; update the
-  hook count/composition and the `rd install claude` requirement.
+  hook count/composition and the `agentctl install claude` requirement.
 - `agent-events`: drop the `permission-prompt` `--type` value and its FSM
   transitions/scenarios; `TOOL_CALL_START`/`TOOL_CALL_RESULT` now only accept
   `custom` and `elicitation`.
@@ -57,11 +57,12 @@ reliable, simple tool-call tracking based only on
 
 ## Impact
 
-- `src/commands/hooks.rs`: `RADR_CLAUDE_HOOKS` table and its tests.
-- `src/commands/agent*.rs` (or wherever `rd agent event`/state-machine
+- `src/commands/hooks.rs`: `AGENTCTL_CLAUDE_HOOKS` table and its tests.
+- `src/commands/agent*.rs` (or wherever `agentctl agent event`/state-machine
   transitions and `AgentInfo`/`state.json` (de)serialization live): drop
   `permission-prompt` type handling and `blocked_prompts`.
-- Any `rd list`/`rd info` output that surfaces `blocked_prompts`.
-- Users who already ran `rd install claude` need to re-run it to pick up the new
-  `hooks/hooks.json`; existing `state.json` files with a `blocked_prompts` field
-  must continue to deserialize (ignore/drop the field rather than erroring).
+- Any `agentctl list`/`agentctl info` output that surfaces `blocked_prompts`.
+- Users who already ran `agentctl install claude` need to re-run it to pick up
+  the new `hooks/hooks.json`; existing `state.json` files with a
+  `blocked_prompts` field must continue to deserialize (ignore/drop the field
+  rather than erroring).

@@ -10,9 +10,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "rd",
-    about = "📡 rd — tmux based agent multiplexer",
-    long_about = "📡 rd — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
+    name = "agentctl",
+    about = "📡 agentctl — tmux based agent multiplexer",
+    long_about = "📡 agentctl — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
     version,
     propagate_version = true,
     // Disable built-in `help` subcommand so we can define our own.
@@ -52,7 +52,7 @@ enum Commands {
     List {
         /// Target a specific tmux server socket file.
         /// Forwarded as `tmux -S <path>`.  Falls back to the
-        /// `RD_TMUX_SOCKET` environment variable when not set.
+        /// `AGENTCTL_TMUX_SOCKET` environment variable when not set.
         #[arg(short, long, value_name = "PATH")]
         server: Option<String>,
 
@@ -83,29 +83,29 @@ enum Commands {
         columns: Vec<commands::list::Field>,
     },
 
-    /// Install radr on a harness.
+    /// Install agentctl on a harness.
     ///
     /// Writes the necessary integration files for the chosen harness so that
-    /// `rd list` shows real-time agent state without polling. Today this means
+    /// `agentctl list` shows real-time agent state without polling. Today this means
     /// installing hook integrations, but may include more in the future.
     Install {
-        /// Harness to install radr on.
+        /// Harness to install agentctl on.
         #[arg(value_name = "HARNESS")]
         harness: Harness,
     },
 
-    /// Uninstall radr from a harness.
+    /// Uninstall agentctl from a harness.
     ///
-    /// Removes the integration files written by `rd install <harness>`,
+    /// Removes the integration files written by `agentctl install <harness>`,
     /// leaving all other user configuration untouched. Idempotent: running
     /// this on a harness that was never installed (or already uninstalled)
     /// is a no-op that exits 0.
     ///
-    /// - `pi`: deletes `~/.pi/agent/extensions/radr.ts` if present.
-    /// - `claude`: removes the `~/.claude/skills/radr/` plugin directory (and
+    /// - `pi`: deletes `~/.pi/agent/extensions/agentctl.ts` if present.
+    /// - `claude`: removes the `~/.claude/skills/agentctl/` plugin directory (and
     ///   all its contents) if present; never touches `~/.claude/settings.json`.
     Uninstall {
-        /// Harness to uninstall radr from.
+        /// Harness to uninstall agentctl from.
         #[arg(value_name = "HARNESS")]
         harness: Harness,
     },
@@ -116,7 +116,7 @@ enum Commands {
         subcommand: AgentSubcommand,
     },
 
-    /// Print radr's runtime paths and metadata.
+    /// Print agentctl's runtime paths and metadata.
     ///
     /// Prints resolved paths (log directory, current log file) and metadata
     /// (version, effective log level) as `key: value` lines. Performs no
@@ -163,7 +163,7 @@ enum AgentSubcommand {
     },
 }
 
-/// The five events accepted by `rd agent event <NAME>`.
+/// The five events accepted by `agentctl agent event <NAME>`.
 ///
 /// `--id` is required on all five; `--type` is only accepted on the two
 /// `TOOL_CALL_*` variants.
@@ -197,7 +197,7 @@ enum AgentEventSubcommand {
         /// untouched. Intended for reconciling against a harness's
         /// authoritative in-flight background-task count (e.g. Claude
         /// Code's `background_tasks` array delivered to `Stop`/
-        /// `StopFailure` hooks), which can diverge from radr's own
+        /// `StopFailure` hooks), which can diverge from agentctl's own
         /// increment/decrement counter for tools that launch async
         /// background work (the `Monitor` tool, backgrounded shells,
         /// async subagents) — such tools fire `PostToolUse` as soon as the
@@ -251,7 +251,7 @@ impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
     }
 }
 
-/// Harnesses supported by `rd install` and `rd uninstall`.
+/// Harnesses supported by `agentctl install` and `agentctl uninstall`.
 ///
 /// Shared by both subcommands so they can never drift out of sync on which
 /// harnesses are supported: `match harness { ... }` in both `run_install`
@@ -259,9 +259,9 @@ impl From<ToolCallTypeArg> for status_fsm::ToolCallType {
 /// adding a new variant here forces both call sites to be updated.
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Harness {
-    /// Pi coding agent — writes `~/.pi/agent/extensions/radr.ts`.
+    /// Pi coding agent — writes `~/.pi/agent/extensions/agentctl.ts`.
     Pi,
-    /// Claude Code — installs a plugin at `~/.claude/skills/radr/`.
+    /// Claude Code — installs a plugin at `~/.claude/skills/agentctl/`.
     Claude,
 }
 
@@ -280,7 +280,7 @@ fn run() -> anyhow::Result<()> {
 
     // Log the parsed CLI invocation
     tracing::debug!(
-        "CLI invocation: rd {:?}",
+        "CLI invocation: agentctl {:?}",
         std::env::args().collect::<Vec<_>>()
     );
 

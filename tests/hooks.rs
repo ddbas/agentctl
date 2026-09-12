@@ -1,25 +1,25 @@
-//! Integration tests for `rd install`.
+//! Integration tests for `agentctl install`.
 
 mod common;
 
 use std::fs;
 
-/// `rd install <unknown-harness>` exits 2 (Clap usage error).
+/// `agentctl install <unknown-harness>` exits 2 (Clap usage error).
 /// Note: `claude` is now a valid harness; this test uses unrecognised names.
 #[tokio::test]
 async fn hooks_install_unknown_harness_exits_two() {
     let env = common::TmuxEnv::new().await;
 
     let output = env
-        .rd()
+        .agentctl()
         .args(["install", "not-a-real-harness"])
         .output()
-        .expect("failed to spawn rd install");
+        .expect("failed to spawn agentctl install");
 
     assert_eq!(
         output.status.code(),
         Some(2),
-        "`rd install not-a-real-harness` should exit with Clap error code 2; got: {:?}",
+        "`agentctl install not-a-real-harness` should exit with Clap error code 2; got: {:?}",
         output.status,
     );
 
@@ -30,22 +30,22 @@ async fn hooks_install_unknown_harness_exits_two() {
     );
 }
 
-/// `rd install <unknown-harness>` always exits 2 (Clap usage error).
+/// `agentctl install <unknown-harness>` always exits 2 (Clap usage error).
 #[tokio::test]
 async fn hooks_install_unknown_harness_names_exit_two() {
     let env = common::TmuxEnv::new().await;
 
     for harness in &["aider", "my-custom-harness"] {
         let output = env
-            .rd()
+            .agentctl()
             .args(["install", harness])
             .output()
-            .unwrap_or_else(|_| panic!("spawn rd install {harness}"));
+            .unwrap_or_else(|_| panic!("spawn agentctl install {harness}"));
 
         assert_eq!(
             output.status.code(),
             Some(2),
-            "`rd install {harness}` should exit 2; got: {:?}",
+            "`agentctl install {harness}` should exit 2; got: {:?}",
             output.status,
         );
     }
@@ -53,8 +53,8 @@ async fn hooks_install_unknown_harness_names_exit_two() {
 
 // ── Pi integration tests (task 2.6 and 2.7) ───────────────────────────────────
 
-/// `rd install pi` on a container with no `~/.pi/agent/extensions/`
-/// directory: directory and `radr.ts` are created; file contains all four
+/// `agentctl install pi` on a container with no `~/.pi/agent/extensions/`
+/// directory: directory and `agentctl.ts` are created; file contains all four
 /// event handlers.
 #[tokio::test]
 async fn hooks_install_pi_creates_extension_file() {
@@ -69,24 +69,24 @@ async fn hooks_install_pi_creates_extension_file() {
         .join(".pi")
         .join("agent")
         .join("extensions")
-        .join("radr.ts");
+        .join("agentctl.ts");
 
     // Confirm extension does not exist before install.
     assert!(
         !ext_path.exists(),
-        "radr.ts should not exist before install"
+        "agentctl.ts should not exist before install"
     );
 
     let output = env
-        .rd()
+        .agentctl()
         .args(["install", "pi"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn rd install pi");
+        .expect("spawn agentctl install pi");
 
     assert!(
         output.status.success(),
-        "`rd install pi` should exit 0; got: {:?}\nstderr: {}",
+        "`agentctl install pi` should exit 0; got: {:?}\nstderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr),
     );
@@ -98,10 +98,10 @@ async fn hooks_install_pi_creates_extension_file() {
     );
 
     // File must exist.
-    assert!(ext_path.exists(), "radr.ts should be created");
+    assert!(ext_path.exists(), "agentctl.ts should be created");
 
     // File must contain all four handlers.
-    let content = fs::read_to_string(&ext_path).expect("read radr.ts");
+    let content = fs::read_to_string(&ext_path).expect("read agentctl.ts");
     assert!(
         content.contains(r#"pi.on("session_start""#),
         "missing session_start handler"
@@ -127,7 +127,7 @@ async fn hooks_install_pi_creates_extension_file() {
     );
 }
 
-/// `rd install pi` run twice: second run is a no-op; file is
+/// `agentctl install pi` run twice: second run is a no-op; file is
 /// byte-for-byte identical to after the first run.
 #[tokio::test]
 async fn hooks_install_pi_idempotent() {
@@ -140,15 +140,15 @@ async fn hooks_install_pi_idempotent() {
         .join(".pi")
         .join("agent")
         .join("extensions")
-        .join("radr.ts");
+        .join("agentctl.ts");
 
     // First install.
     let out1 = env
-        .rd()
+        .agentctl()
         .args(["install", "pi"])
         .env("HOME", &fake_home)
         .output()
-        .expect("first rd install pi");
+        .expect("first agentctl install pi");
     assert!(out1.status.success(), "first install should succeed");
 
     let content_after_first = fs::read_to_string(&ext_path).expect("read after first install");
@@ -159,11 +159,11 @@ async fn hooks_install_pi_idempotent() {
 
     // Second install.
     let out2 = env
-        .rd()
+        .agentctl()
         .args(["install", "pi"])
         .env("HOME", &fake_home)
         .output()
-        .expect("second rd install pi");
+        .expect("second agentctl install pi");
     assert!(out2.status.success(), "second install should succeed");
 
     let content_after_second = fs::read_to_string(&ext_path).expect("read after second install");
@@ -189,17 +189,17 @@ async fn hooks_install_pi_idempotent() {
 // ── Claude integration tests (task 2.6 and 2.7) ───────────────────────────────
 
 fn claude_plugin_dir(fake_home: &std::path::Path) -> std::path::PathBuf {
-    fake_home.join(".claude").join("skills").join("radr")
+    fake_home.join(".claude").join("skills").join("agentctl")
 }
 
-/// `rd install claude` on a container with no `~/.claude/skills/`: the plugin
-/// directory is created and contains all eleven radr hook entries.
+/// `agentctl install claude` on a container with no `~/.claude/skills/`: the plugin
+/// directory is created and contains all eleven agentctl hook entries.
 #[tokio::test]
 async fn hooks_install_claude_creates_plugin_directory() {
     let env = common::TmuxEnv::new().await;
 
     // Use an isolated HOME so the install lands in a known location and never
-    // touches the developer's real ~/.claude/skills/radr/.
+    // touches the developer's real ~/.claude/skills/agentctl/.
     let fake_home = env.workspace_path.join("home_claude");
     fs::create_dir_all(&fake_home).expect("create fake home");
 
@@ -214,15 +214,15 @@ async fn hooks_install_claude_creates_plugin_directory() {
     );
 
     let output = env
-        .rd()
+        .agentctl()
         .args(["install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn rd install claude");
+        .expect("spawn agentctl install claude");
 
     assert!(
         output.status.success(),
-        "`rd install claude` should exit 0; got: {:?}\nstderr: {}",
+        "`agentctl install claude` should exit 0; got: {:?}\nstderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr),
     );
@@ -233,7 +233,7 @@ async fn hooks_install_claude_creates_plugin_directory() {
 
     let manifest_content = fs::read_to_string(&manifest_path).expect("read plugin.json");
     let manifest: serde_json::Value = serde_json::from_str(&manifest_content).expect("valid JSON");
-    assert_eq!(manifest["name"], "radr");
+    assert_eq!(manifest["name"], "agentctl");
 
     // Parse and verify all seven distinct hook events are registered (eleven
     // entries total — PreToolUse, PostToolUse, and PostToolUseFailure are each
@@ -279,7 +279,7 @@ async fn hooks_install_claude_creates_plugin_directory() {
     );
 }
 
-/// `rd install claude` run twice: second run deletes and recreates the plugin
+/// `agentctl install claude` run twice: second run deletes and recreates the plugin
 /// directory; resulting files are byte-for-byte identical to after the first
 /// run.
 #[tokio::test]
@@ -294,22 +294,22 @@ async fn hooks_install_claude_reinstall_produces_identical_content() {
 
     // First install.
     let out1 = env
-        .rd()
+        .agentctl()
         .args(["install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("first rd install claude");
+        .expect("first agentctl install claude");
     assert!(out1.status.success(), "first install should succeed");
 
     let content_after_first = fs::read_to_string(&hooks_json_path).expect("read after first");
 
     // Second install (re-install: deletes then rewrites the directory).
     let out2 = env
-        .rd()
+        .agentctl()
         .args(["install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("second rd install claude");
+        .expect("second agentctl install claude");
     assert!(out2.status.success(), "second install should succeed");
 
     let content_after_second = fs::read_to_string(&hooks_json_path).expect("read after second");
@@ -320,7 +320,7 @@ async fn hooks_install_claude_reinstall_produces_identical_content() {
     );
 }
 
-/// `rd uninstall claude` removes the plugin directory entirely; running it
+/// `agentctl uninstall claude` removes the plugin directory entirely; running it
 /// again is a no-op that still exits 0.
 #[tokio::test]
 async fn hooks_uninstall_claude_removes_plugin_directory() {
@@ -331,22 +331,22 @@ async fn hooks_uninstall_claude_removes_plugin_directory() {
 
     let plugin_dir = claude_plugin_dir(&fake_home);
 
-    env.rd()
+    env.agentctl()
         .args(["install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn rd install claude");
+        .expect("spawn agentctl install claude");
     assert!(
         plugin_dir.exists(),
         "plugin directory should exist after install"
     );
 
     let out1 = env
-        .rd()
+        .agentctl()
         .args(["uninstall", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn rd uninstall claude");
+        .expect("spawn agentctl uninstall claude");
     assert!(out1.status.success(), "uninstall should exit 0");
     assert!(
         !plugin_dir.exists(),
@@ -355,11 +355,11 @@ async fn hooks_uninstall_claude_removes_plugin_directory() {
 
     // Second uninstall is a no-op.
     let out2 = env
-        .rd()
+        .agentctl()
         .args(["uninstall", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn rd uninstall claude again");
+        .expect("spawn agentctl uninstall claude again");
     assert!(
         out2.status.success(),
         "second uninstall should still exit 0"
@@ -381,11 +381,11 @@ async fn hooks_install_claude_tool_call_tracking_updates_active_tools() {
         .join("hooks.json");
 
     let install_out = env
-        .rd()
+        .agentctl()
         .args(["install", "claude"])
         .env("HOME", &fake_home)
         .output()
-        .expect("spawn rd install claude");
+        .expect("spawn agentctl install claude");
     assert!(
         install_out.status.success(),
         "install claude should succeed"
@@ -433,9 +433,9 @@ async fn hooks_install_claude_tool_call_tracking_updates_active_tools() {
         .expect("unmatched untyped PostToolUse command should be present");
 
     let pane = "%88";
-    let rd_bin_dir = std::path::Path::new(env!("CARGO_BIN_EXE_rd"))
+    let rd_bin_dir = std::path::Path::new(env!("CARGO_BIN_EXE_agentctl"))
         .parent()
-        .expect("rd binary has a parent dir")
+        .expect("agentctl binary has a parent dir")
         .to_path_buf();
     let path_with_rd = format!(
         "{}:{}",

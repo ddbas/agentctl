@@ -1,37 +1,38 @@
-# radr
+# agentctl
 
 This project implements a **tmux-based agent multiplexer**.
 
 ## Required One-Time Setup for Pi Agents
 
-If you are running inside pi, install the radr lifecycle hooks so your agent
+If you are running inside pi, install the agentctl lifecycle hooks so your agent
 state is tracked in real time:
 
 ```bash
-rd install pi
+agentctl install pi
 ```
 
-This writes `~/.pi/agent/extensions/radr.ts`, a TypeScript extension that
+This writes `~/.pi/agent/extensions/agentctl.ts`, a TypeScript extension that
 subscribes to pi lifecycle events (`session_start`, `before_agent_start`,
-`agent_settled`, `session_shutdown`) and calls `rd state set` / `rd state clear`
-automatically. The command is idempotent — re-running it is safe.
+`agent_settled`, `session_shutdown`) and calls `agentctl state set` /
+`agentctl state clear` automatically. The command is idempotent — re-running it
+is safe.
 
 ## Required One-Time Setup for Claude Agents
 
-If you are running inside Claude Code, install the radr lifecycle hooks so your
-agent state is tracked in real time:
+If you are running inside Claude Code, install the agentctl lifecycle hooks so
+your agent state is tracked in real time:
 
 ```bash
-rd install claude
+agentctl install claude
 ```
 
-This installs a Claude Code plugin at `~/.claude/skills/radr/` (containing
+This installs a Claude Code plugin at `~/.claude/skills/agentctl/` (containing
 `.claude-plugin/plugin.json` and `hooks/hooks.json`) registering eleven hook
-entries that call `rd agent event` / `rd agent clear` at key Claude Code
-lifecycle events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+entries that call `agentctl agent event` / `agentctl agent clear` at key Claude
+Code lifecycle events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `Notification`, `Stop`, `StopFailure`, `SessionEnd`). The command
 never reads or writes `~/.claude/settings.json`, and is idempotent by
-construction — every run deletes and recreates `~/.claude/skills/radr/`.
+construction — every run deletes and recreates `~/.claude/skills/agentctl/`.
 
 ## Running Tasks
 

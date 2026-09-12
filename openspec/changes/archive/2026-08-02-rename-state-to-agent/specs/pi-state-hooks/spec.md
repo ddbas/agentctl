@@ -1,18 +1,19 @@
 ## MODIFIED Requirements
 
-### Requirement: session_start event calls rd agent status idle
+### Requirement: session_start event calls agentctl agent status idle
 
-The pi extension SHALL invoke `rd agent status idle --harness pi` when the
+The pi extension SHALL invoke `agentctl agent status idle --harness pi` when the
 `session_start` event fires, so that the agent's state file is written to
-`$XDG_DATA_HOME/radr/agents/$TMUX_PANE/state.json` with `"state": "idle"`.
-`rd agent status` exits 0 silently when `$TMUX_PANE` is not set.
+`$XDG_DATA_HOME/agentctl/agents/$TMUX_PANE/state.json` with `"state": "idle"`.
+`agentctl agent status` exits 0 silently when `$TMUX_PANE` is not set.
 
 #### Scenario: session_start fires inside tmux
 
 - **WHEN** pi fires `session_start` (reason: `startup`, `new`, `resume`, or
   `fork`) and `$TMUX_PANE` is set
-- **THEN** the state file at `$XDG_DATA_HOME/radr/agents/$TMUX_PANE/state.json`
-  is written with `"state": "idle"` and the current `updated_at` timestamp
+- **THEN** the state file at
+  `$XDG_DATA_HOME/agentctl/agents/$TMUX_PANE/state.json` is written with
+  `"state": "idle"` and the current `updated_at` timestamp
 
 #### Scenario: session_start overwrites state from a prior session in the same pane
 
@@ -20,10 +21,10 @@ The pi extension SHALL invoke `rd agent status idle --harness pi` when the
   session) and `session_start` fires again in that pane
 - **THEN** the existing state file is overwritten with `"state": "idle"`
 
-### Requirement: before_agent_start event calls rd agent status working
+### Requirement: before_agent_start event calls agentctl agent status working
 
-The pi extension SHALL invoke `rd agent status working --harness pi` when the
-`before_agent_start` event fires, reflecting that the agent has started
+The pi extension SHALL invoke `agentctl agent status working --harness pi` when
+the `before_agent_start` event fires, reflecting that the agent has started
 processing the user's prompt.
 
 #### Scenario: before_agent_start fires inside tmux
@@ -32,9 +33,9 @@ processing the user's prompt.
   `$TMUX_PANE` is set
 - **THEN** the agent's state file is updated to `"state": "working"`
 
-### Requirement: agent_settled event calls rd agent status done
+### Requirement: agent_settled event calls agentctl agent status done
 
-The pi extension SHALL invoke `rd agent status done --harness pi` when the
+The pi extension SHALL invoke `agentctl agent status done --harness pi` when the
 `agent_settled` event fires. `agent_settled` fires only when pi will not
 continue automatically (no pending retries, compaction, or follow-up messages),
 making it the correct signal for the `done` state.
@@ -53,17 +54,17 @@ making it the correct signal for the `done` state.
   before the final settlement, i.e. intermediate `agent_end` events do not set
   `done`)
 
-### Requirement: session_shutdown event calls rd agent clear
+### Requirement: session_shutdown event calls agentctl agent clear
 
-The pi extension SHALL invoke `rd agent clear` when the `session_shutdown` event
-fires, so the state file is removed when the session exits or is replaced.
+The pi extension SHALL invoke `agentctl agent clear` when the `session_shutdown`
+event fires, so the state file is removed when the session exits or is replaced.
 
 #### Scenario: session_shutdown fires on quit inside tmux
 
 - **WHEN** pi fires `session_shutdown` with reason `quit` and `$TMUX_PANE` is
   set
-- **THEN** the state file at `$XDG_DATA_HOME/radr/agents/$TMUX_PANE/state.json`
-  is deleted
+- **THEN** the state file at
+  `$XDG_DATA_HOME/agentctl/agents/$TMUX_PANE/state.json` is deleted
 
 #### Scenario: session_shutdown fires on session switch
 
@@ -75,54 +76,55 @@ fires, so the state file is removed when the session exits or is replaced.
 #### Scenario: session_shutdown is a no-op when no state file exists
 
 - **WHEN** pi fires `session_shutdown` but no state file exists for `$TMUX_PANE`
-- **THEN** `rd agent clear` exits 0 without error
+- **THEN** `agentctl agent clear` exits 0 without error
 
-### Requirement: rd agent status and rd agent clear are no-ops outside tmux
+### Requirement: agentctl agent status and agentctl agent clear are no-ops outside tmux
 
-Both `rd agent status <state>` and `rd agent clear` SHALL exit with code 0 and
-write nothing when `$TMUX_PANE` is not set and `--pane` is not supplied.
+Both `agentctl agent status <state>` and `agentctl agent clear` SHALL exit with
+code 0 and write nothing when `$TMUX_PANE` is not set and `--pane` is not
+supplied.
 
 #### Scenario: Extension fires outside tmux
 
-- **WHEN** any pi event fires and the extension calls `rd agent status` or
-  `rd agent clear` with `$TMUX_PANE` unset and no `--pane` flag
+- **WHEN** any pi event fires and the extension calls `agentctl agent status` or
+  `agentctl agent clear` with `$TMUX_PANE` unset and no `--pane` flag
 - **THEN** the command exits 0 and makes no changes to the filesystem
 
-### Requirement: rd install pi generates the pi extension file
+### Requirement: agentctl install pi generates the pi extension file
 
-The `rd install pi` subcommand SHALL write the radr TypeScript extension to
-`~/.pi/agent/extensions/radr.ts`. The file SHALL subscribe to `session_start`,
-`before_agent_start`, `agent_settled`, and `session_shutdown` events and call
-the appropriate `rd agent` commands. The command SHALL be idempotent: re-running
-when the file content is already identical SHALL make no change and SHALL report
-the file as already up to date.
+The `agentctl install pi` subcommand SHALL write the agentctl TypeScript
+extension to `~/.pi/agent/extensions/agentctl.ts`. The file SHALL subscribe to
+`session_start`, `before_agent_start`, `agent_settled`, and `session_shutdown`
+events and call the appropriate `agentctl agent` commands. The command SHALL be
+idempotent: re-running when the file content is already identical SHALL make no
+change and SHALL report the file as already up to date.
 
 #### Scenario: First-time install creates the extension file
 
-- **WHEN** the user runs `rd install pi` and `~/.pi/agent/extensions/radr.ts`
-  does not exist
+- **WHEN** the user runs `agentctl install pi` and
+  `~/.pi/agent/extensions/agentctl.ts` does not exist
 - **THEN** the file is created with handlers for all four events and the command
   prints a summary prefixed with `+`
 
 #### Scenario: Idempotent re-install reports no change
 
-- **WHEN** the user runs `rd install pi` a second time and the file content is
-  already identical to what would be generated
+- **WHEN** the user runs `agentctl install pi` a second time and the file
+  content is already identical to what would be generated
 - **THEN** no write is performed and the command prints the file as already up
   to date (prefixed with `=`)
 
 #### Scenario: Install overwrites a stale extension file
 
-- **WHEN** `~/.pi/agent/extensions/radr.ts` exists but its content differs from
-  the current generated content (e.g. from an older version of `rd`, including
-  one that still generates `rd set-state`/`rd clear-state` or
-  `rd state set`/`rd state clear` calls)
+- **WHEN** `~/.pi/agent/extensions/agentctl.ts` exists but its content differs
+  from the current generated content (e.g. from an older version of `agentctl`,
+  including one that still generates `agentctl set-state`/`agentctl clear-state`
+  or `agentctl state set`/`agentctl state clear` calls)
 - **THEN** the file is overwritten with the new content (using
-  `rd agent status`/ `rd agent clear`) and the command prints the file as
-  updated (prefixed with `~`)
+  `agentctl agent status`/ `agentctl agent clear`) and the command prints the
+  file as updated (prefixed with `~`)
 
 #### Scenario: Install creates the extensions directory if absent
 
 - **WHEN** `~/.pi/agent/extensions/` does not exist
-- **THEN** `rd install pi` creates the directory before writing `radr.ts`, and
-  the command exits 0
+- **THEN** `agentctl install pi` creates the directory before writing
+  `agentctl.ts`, and the command exits 0

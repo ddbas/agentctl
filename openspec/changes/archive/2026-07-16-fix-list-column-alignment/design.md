@@ -1,13 +1,13 @@
 ## Context
 
-The `rd list` command renders a four-column table of active agent panes. Column
-widths are computed by taking the maximum `String::len()` across all values in
-each column, then applying Rust's `{:<N$}` format specifier to left-pad each
-cell.
+The `agentctl list` command renders a four-column table of active agent panes.
+Column widths are computed by taking the maximum `String::len()` across all
+values in each column, then applying Rust's `{:<N$}` format specifier to
+left-pad each cell.
 
 `String::len()` returns byte length. `{:<N$}` pads by Unicode scalar count.
 Neither maps to terminal display width. For session names containing emoji (e.g.
-`🌳 radr (claude-hooks)`):
+`🌳 agentctl (claude-hooks)`):
 
 - `🌳` encodes as 4 UTF-8 bytes but is 1 scalar and 2 display columns.
 - byte-based max inflates the column target, causing over-padding on that row.
@@ -21,7 +21,7 @@ character.
 
 **Goals:**
 
-- Columns in `rd list` output are visually aligned for all Unicode input,
+- Columns in `agentctl list` output are visually aligned for all Unicode input,
   including session names containing emoji or other wide characters.
 - Column width calculation uses terminal display width (via `unicode-width`).
 - Padding is applied in display-column units, not byte or scalar units.

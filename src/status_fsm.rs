@@ -1,5 +1,5 @@
 //! `status_fsm` — a `rust-fsm`-based state machine that derives an agent's
-//! `status` from the stream of events dispatched via `rd agent event`.
+//! `status` from the stream of events dispatched via `agentctl agent event`.
 //!
 //! States are [`AgentState`]'s `Idle | Working | Blocked | Done` variants
 //! (`Unknown` is never a target of any transition, but is accepted as a
@@ -21,7 +21,7 @@ pub enum ToolCallType {
     Elicitation,
 }
 
-/// The five events accepted by `rd agent event`, as FSM inputs.
+/// The five events accepted by `agentctl agent event`, as FSM inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     SessionStarted,

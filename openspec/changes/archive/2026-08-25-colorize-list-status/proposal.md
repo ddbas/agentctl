@@ -1,13 +1,13 @@
 ## Why
 
-`rd list` output is currently plain text, so scanning many tmux panes for agents
-that need attention (`blocked`) or are ready to hand off (`done`) requires
-reading every line's state column carefully. Color-coding the state column lets
-a user visually triage panes at a glance.
+`agentctl list` output is currently plain text, so scanning many tmux panes for
+agents that need attention (`blocked`) or are ready to hand off (`done`)
+requires reading every line's state column carefully. Color-coding the state
+column lets a user visually triage panes at a glance.
 
 ## What Changes
 
-- The `<state>` column of `rd list` output SHALL be rendered with an ANSI
+- The `<state>` column of `agentctl list` output SHALL be rendered with an ANSI
   foreground color based on the agent's status:
   - `idle` → grey
   - `working` → yellow

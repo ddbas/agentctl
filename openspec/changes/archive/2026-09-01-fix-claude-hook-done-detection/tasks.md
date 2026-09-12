@@ -69,17 +69,18 @@
       per-invocation nonce).
 - [x] 5.2 Update the unmatched `PostToolUse` permission-close hook command the
       same way (`--type permission-prompt`, nonce-suffixed id).
-- [x] 5.3 Update `is_radr_command`/superseded-entry handling if needed so the
-      old `--type elicitation` perm- command strings are recognized as
-      superseded and cleanly removed by `rd install claude`'s cleanup pass
-      (verify via existing `get_single_radr_command`/`radr_lookup` matching —
-      likely no code change needed since matching is by exact command string,
-      and the old string will simply fall out of `RADR_CLAUDE_HOOKS` and be
-      treated as superseded).
+- [x] 5.3 Update `is_agentctl_command`/superseded-entry handling if needed so
+      the old `--type elicitation` perm- command strings are recognized as
+      superseded and cleanly removed by `agentctl install claude`'s cleanup pass
+      (verify via existing `get_single_agentctl_command`/`agentctl_lookup`
+      matching — likely no code change needed since matching is by exact command
+      string, and the old string will simply fall out of `AGENTCTL_CLAUDE_HOOKS`
+      and be treated as superseded).
 - [x] 5.4 Update unit tests in `hooks.rs` asserting on the `perm-` hook command
       strings (`--type elicitation` → `--type permission-prompt`).
-- [x] 5.5 Update the doc comment above `RADR_CLAUDE_HOOKS` describing the eleven
-      entries if wording references `--type elicitation` for the perm- pair.
+- [x] 5.5 Update the doc comment above `AGENTCTL_CLAUDE_HOOKS` describing the
+      eleven entries if wording references `--type elicitation` for the perm-
+      pair.
 
 ## 6. Documentation
 

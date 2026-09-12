@@ -7,7 +7,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Log level for radr, exposed as a CLI enum.
+/// Log level for agentctl, exposed as a CLI enum.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum LogLevel {
     /// Trace level — most verbose, for detailed diagnostic information
@@ -40,29 +40,29 @@ impl LogLevel {
     }
 }
 
-/// Resolve the platform-appropriate log directory for radr.
+/// Resolve the platform-appropriate log directory for agentctl.
 ///
 /// Tries `dirs::state_dir()` first (XDG_STATE_HOME or `~/.local/state` on Linux),
-/// falls back to `dirs::data_local_dir()` on other platforms, then appends `radr/logs`.
+/// falls back to `dirs::data_local_dir()` on other platforms, then appends `agentctl/logs`.
 /// Returns the resolved path, but does not create it. No I/O or side effects.
 pub fn log_dir() -> Option<PathBuf> {
     dirs::state_dir()
         .or_else(dirs::data_local_dir)
-        .map(|base| base.join("radr").join("logs"))
+        .map(|base| base.join("agentctl").join("logs"))
 }
 
 /// Compute the expected log file path for a given day.
 ///
-/// Uses the same naming scheme as the rolling appender: `radr.log.YYYY-MM-DD`.
+/// Uses the same naming scheme as the rolling appender: `agentctl.log.YYYY-MM-DD`.
 /// The path is computed based on today's date; it is not verified to exist on disk.
 /// No I/O or side effects.
 pub fn current_log_file(dir: &std::path::Path) -> PathBuf {
     let today = chrono::Local::now().format("%Y-%m-%d");
-    dir.join(format!("radr.log.{}", today))
+    dir.join(format!("agentctl.log.{}", today))
 }
 
 /// Prune old log files, keeping only the most recent `retention_count`.
-/// Matches files with the prefix "radr.log.*" in the log directory.
+/// Matches files with the prefix "agentctl.log.*" in the log directory.
 fn prune_logs(log_path: &PathBuf, retention_count: usize) {
     if let Ok(entries) = fs::read_dir(log_path) {
         let mut files: Vec<_> = entries
@@ -70,7 +70,7 @@ fn prune_logs(log_path: &PathBuf, retention_count: usize) {
                 entry.ok().and_then(|e| {
                     let path = e.path();
                     let file_name = path.file_name()?.to_string_lossy().to_string();
-                    if file_name.starts_with("radr.log.") {
+                    if file_name.starts_with("agentctl.log.") {
                         e.metadata()
                             .ok()
                             .and_then(|m| m.modified().ok())
@@ -110,7 +110,7 @@ pub fn init(level: LogLevel) -> Option<WorkerGuard> {
     prune_logs(&log_path, 7);
 
     // Create rolling file appender
-    let file_appender = tracing_appender::rolling::daily(&log_path, "radr.log");
+    let file_appender = tracing_appender::rolling::daily(&log_path, "agentctl.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     // Set up the subscriber with proper layering
@@ -151,7 +151,7 @@ mod tests {
 
         // Create 10 test log files
         for i in 0..10 {
-            let file_name = format!("radr.log.2026-07-{:02}", i + 1);
+            let file_name = format!("agentctl.log.2026-07-{:02}", i + 1);
             let file_path = log_dir_path.join(&file_name);
             fs::write(&file_path, format!("log content {}", i)).unwrap();
             // Stagger modification times slightly
@@ -168,7 +168,7 @@ mod tests {
                 e.ok().and_then(|entry| {
                     let path = entry.path();
                     let file_name = path.file_name()?.to_string_lossy();
-                    if file_name.starts_with("radr.log.") {
+                    if file_name.starts_with("agentctl.log.") {
                         Some(path)
                     } else {
                         None
@@ -186,14 +186,14 @@ mod tests {
         let log_dir_path = temp_dir.path().to_path_buf();
 
         // Create various files
-        fs::write(log_dir_path.join("radr.log.2026-07-01"), "log 1").unwrap();
-        fs::write(log_dir_path.join("radr.log.2026-07-02"), "log 2").unwrap();
+        fs::write(log_dir_path.join("agentctl.log.2026-07-01"), "log 1").unwrap();
+        fs::write(log_dir_path.join("agentctl.log.2026-07-02"), "log 2").unwrap();
         fs::write(log_dir_path.join("other_file.txt"), "other").unwrap();
         fs::write(log_dir_path.join("readme.md"), "readme").unwrap();
 
         prune_logs(&log_dir_path, 1);
 
-        // Should keep 1 radr.log file and all non-matching files
+        // Should keep 1 agentctl.log file and all non-matching files
         let remaining_files: Vec<_> = fs::read_dir(&log_dir_path)
             .unwrap()
             .filter_map(|e| e.ok().map(|entry| entry.path()))
@@ -202,7 +202,7 @@ mod tests {
         assert_eq!(
             remaining_files.len(),
             3,
-            "should have 1 radr.log + 2 other files"
+            "should have 1 agentctl.log + 2 other files"
         );
         assert!(
             remaining_files
@@ -232,11 +232,11 @@ mod tests {
         let test_dir = PathBuf::from("/tmp/test/logs");
         let result = current_log_file(&test_dir);
 
-        // Should return a path ending with radr.log and today's date
+        // Should return a path ending with agentctl.log and today's date
         let file_name = result.file_name().unwrap().to_string_lossy();
         assert!(
-            file_name.starts_with("radr.log."),
-            "log file should start with 'radr.log.', got: {file_name}"
+            file_name.starts_with("agentctl.log."),
+            "log file should start with 'agentctl.log.', got: {file_name}"
         );
     }
 
@@ -248,12 +248,12 @@ mod tests {
         let result = current_log_file(&test_dir);
         let file_name = result.file_name().unwrap().to_string_lossy();
 
-        // Verify the filename has the pattern radr.log.YYYY-MM-DD
+        // Verify the filename has the pattern agentctl.log.YYYY-MM-DD
         assert!(
-            file_name.starts_with("radr.log."),
-            "should start with 'radr.log.'"
+            file_name.starts_with("agentctl.log."),
+            "should start with 'agentctl.log.'"
         );
-        let date_part = file_name.strip_prefix("radr.log.").unwrap();
+        let date_part = file_name.strip_prefix("agentctl.log.").unwrap();
 
         // Should be 10 characters: YYYY-MM-DD
         assert_eq!(

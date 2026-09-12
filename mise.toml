@@ -5,23 +5,23 @@ enter = "lefthook install"
 description = "Build the cargo project"
 run = "rtk cargo build"
 sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
-outputs = ["target/debug/rd"]
+outputs = ["target/debug/agentctl"]
 
 [tasks."build:release"]
 description = "Build the cargo project in release mode"
 run = "rtk cargo build --release"
 sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
-outputs = ["target/release/rd"]
+outputs = ["target/release/agentctl"]
 
 [tasks.dev]
 description = "Run the cargo project"
 run = "cargo run"
 
 [tasks.install]
-description = "Build release binary and copy it to ~/.local/bin/rd"
+description = "Build release binary and copy it to ~/.local/bin/agentctl"
 depends = ["build:release"]
-run = "mkdir -p ~/.local/bin && cp \"$(pwd)/target/release/rd\" ~/.local/bin/rd"
-outputs = ["~/.local/bin/rd"]
+run = "mkdir -p ~/.local/bin && cp \"$(pwd)/target/release/agentctl\" ~/.local/bin/agentctl"
+outputs = ["~/.local/bin/agentctl"]
 
 [tasks."openspec:open"]
 description = "Render an OpenSpec proposal to HTML and open it in the browser"

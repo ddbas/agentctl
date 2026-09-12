@@ -1,11 +1,11 @@
 ## Why
 
-The `rd` CLI manages tmux sessions. Without container isolation, any test that
-invokes `tmux` will interact with the developer's live sessions, be affected by
-`TMUX`/`TMUX_PANE` env vars set when running inside an existing session, and
-leave orphaned sessions on the host. We need a reproducible, host-safe test
-harness that gives every test its own isolated tmux server before we add
-meaningful CLI coverage.
+The `agentctl` CLI manages tmux sessions. Without container isolation, any test
+that invokes `tmux` will interact with the developer's live sessions, be
+affected by `TMUX`/`TMUX_PANE` env vars set when running inside an existing
+session, and leave orphaned sessions on the host. We need a reproducible,
+host-safe test harness that gives every test its own isolated tmux server before
+we add meaningful CLI coverage.
 
 ## What Changes
 
@@ -14,12 +14,13 @@ meaningful CLI coverage.
 - Add a `tests/common/mod.rs` shared helper module that exports a `TmuxEnv`
   struct: it starts an `alpine`-based Docker container with tmux installed,
   starts an isolated tmux server inside that container on a bind-mounted socket
-  path, and exposes a `rd` binary runner that points at that socket.
+  path, and exposes a `agentctl` binary runner that points at that socket.
 - Add an example E2E test (`tests/e2e_example.rs`) that starts a `hello-world`
   Docker container via testcontainers as a canary for the async runner
   infrastructure.
 - Add a first real integration test (`tests/help_command.rs`) exercising
-  `rd help`, `rd --help`, and `rd` (no args) inside an isolated `TmuxEnv`.
+  `agentctl help`, `agentctl --help`, and `agentctl` (no args) inside an
+  isolated `TmuxEnv`.
 - Update `Cargo.toml` dev-dependencies to include `testcontainers`, `tokio`
   (with `macros`/`rt-multi-thread`/`time` features), and `tempfile`.
 

@@ -1,4 +1,4 @@
-//! `rd agent event` — dispatch a typed event, deriving the pane's status via
+//! `agentctl agent event` — dispatch a typed event, deriving the pane's status via
 //! the status FSM and appending the raw event to `events.jsonl`.
 
 use anyhow::Result;
@@ -8,7 +8,7 @@ use crate::events_log::{EventRecord, append_event};
 use crate::state::{read_agent_info, write_state_with_tools};
 use crate::status_fsm::{self, Event, ToolCallType};
 
-/// One of the five events accepted by `rd agent event <NAME>`.
+/// One of the five events accepted by `agentctl agent event <NAME>`.
 ///
 /// Mirrors `AgentEventSubcommand` in `main.rs`; kept as a separate type here
 /// so this module does not need to depend on clap's derive types.
@@ -40,7 +40,7 @@ impl EventKind {
     }
 }
 
-/// Entry point for `rd agent event <NAME> --id <ID> [--type <TYPE>]
+/// Entry point for `agentctl agent event <NAME> --id <ID> [--type <TYPE>]
 /// [--harness <H>] [--pane <ID>]`.
 ///
 /// Resolution order for pane ID:
@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn no_pane_exits_silently_and_writes_nothing() {
         let result = run(EventKind::SessionStarted, "s1".to_owned(), None, None, None);
-        // Either Ok (no TMUX_PANE set) — matches rd agent status precedent;
+        // Either Ok (no TMUX_PANE set) — matches agentctl agent status precedent;
         // we don't touch global env here to avoid races.
         let _ = result;
     }
