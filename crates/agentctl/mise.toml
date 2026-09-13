@@ -5,7 +5,7 @@ extends = "build"
 
 [tasks."build:test-image"]
 description = "Build the Docker image used by TmuxEnv in integration tests"
-run = "docker build -t am-tmux-test:latest tests/"
+run = "docker build -t tmux-test:latest tests/"
 sources = ["tests/Dockerfile"]
 
 [tasks.dev]

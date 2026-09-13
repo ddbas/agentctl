@@ -8,7 +8,7 @@
 //! server: no shared sessions, no interference with the developer's running
 //! tmux, and automatic cleanup on drop.
 //!
-//! The container uses the `am-tmux-test:latest` local image (Alpine + tmux
+//! The container uses the `tmux-test:latest` local image (Alpine + tmux
 //! pre-installed; build with `mise run //crates/agentctl:build:test-image`). A tmux server is
 //! started inside the container on a Unix socket at `/workspace/tmux.sock`,
 //! which lives on a bind-mounted host `TempDir`. The host `agentctl` binary is
@@ -70,12 +70,12 @@ pub async fn start_generic_container() -> ContainerAsync<GenericImage> {
 /// Using a pre-built image avoids running `apk add` at test time, which
 /// requires container internet access and is unreliable on macOS Docker
 /// Desktop (DNS/network issues cause it to hang indefinitely).
-const TMUX_IMAGE: &str = "am-tmux-test";
+const TMUX_IMAGE: &str = "tmux-test";
 const TMUX_TAG: &str = "latest";
 
 /// A fully isolated tmux test environment backed by a Docker container.
 ///
-/// - An `am-tmux-test` container is started (Alpine + tmux pre-installed;
+/// - An `tmux-test` container is started (Alpine + tmux pre-installed;
 ///   build with `mise run //crates/agentctl:build:test-image`). The container's CMD starts a
 ///   tmux server on the shared workspace socket and prints `"tmux-ready"`
 ///   to stdout once the server is accepting connections.  testcontainers
@@ -146,7 +146,7 @@ impl TmuxEnv {
             .await
             .expect(
                 "failed to start tmux container — is Docker running? \
-                 Is `am-tmux-test:latest` built? Run `mise run //crates/agentctl:build:test-image`.",
+                 Is `tmux-test:latest` built? Run `mise run //crates/agentctl:build:test-image`.",
             );
 
         let xdg_path = workspace_path.join("xdg");
