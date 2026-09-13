@@ -40,11 +40,7 @@ run = "mise run //crates/...:build"
 
 [tasks.ci]
 description = "Run the CI tasks"
-run = [
-  { task = "build" },
-  { task = "test" },
-  { task = "lint" }
-]
+run = [{ task = "build" }, { task = "test" }, { task = "lint" }]
 
 [tasks.dev]
 description = "Run the cargo workspaces"
