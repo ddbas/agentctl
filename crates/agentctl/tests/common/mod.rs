@@ -9,7 +9,7 @@
 //! tmux, and automatic cleanup on drop.
 //!
 //! The container uses the `am-tmux-test:latest` local image (Alpine + tmux
-//! pre-installed; build with `mise run test:build-image`). A tmux server is
+//! pre-installed; build with `mise run //crates/agentctl:build:test-image`). A tmux server is
 //! started inside the container on a Unix socket at `/workspace/tmux.sock`,
 //! which lives on a bind-mounted host `TempDir`. The host `agentctl` binary is
 //! directed at the container's socket via the `AGENTCTL_TMUX_SOCKET` env var.
@@ -65,7 +65,7 @@ pub async fn start_generic_container() -> ContainerAsync<GenericImage> {
 // ── TmuxEnv ───────────────────────────────────────────────────────────────────
 
 /// Pre-built image with tmux installed (see `tests/Dockerfile`).
-/// Build with `mise run test:build-image`.
+/// Build with `mise run //crates/agentctl:build:test-image`.
 ///
 /// Using a pre-built image avoids running `apk add` at test time, which
 /// requires container internet access and is unreliable on macOS Docker
@@ -76,7 +76,7 @@ const TMUX_TAG: &str = "latest";
 /// A fully isolated tmux test environment backed by a Docker container.
 ///
 /// - An `am-tmux-test` container is started (Alpine + tmux pre-installed;
-///   build with `mise run test:build-image`). The container's CMD starts a
+///   build with `mise run //crates/agentctl:build:test-image`). The container's CMD starts a
 ///   tmux server on the shared workspace socket and prints `"tmux-ready"`
 ///   to stdout once the server is accepting connections.  testcontainers
 ///   blocks until that message appears before returning from `.start()`.
@@ -114,7 +114,7 @@ impl TmuxEnv {
     /// # Panics
     ///
     /// Panics if Docker is unavailable, the image is missing (run
-    /// `mise run test:build-image`), or the tmux server fails to start.
+    /// `mise run //crates/agentctl:build:test-image`), or the tmux server fails to start.
     pub async fn new() -> Self {
         // Canonicalise so Docker Desktop's bind-mount path resolution works
         // on macOS (/var/folders symlink -> /private/var/folders).
@@ -146,7 +146,7 @@ impl TmuxEnv {
             .await
             .expect(
                 "failed to start tmux container — is Docker running? \
-                 Is `am-tmux-test:latest` built? Run `mise run test:build-image`.",
+                 Is `am-tmux-test:latest` built? Run `mise run //crates/agentctl:build:test-image`.",
             );
 
         let xdg_path = workspace_path.join("xdg");

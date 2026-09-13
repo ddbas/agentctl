@@ -1,8 +1,5 @@
 # Docker image for isolated tmux integration tests.
 #
-# Build:
-#   mise run test:build-image
-#
 # This image is used by TmuxEnv in tests/common/mod.rs. It provides a
 # minimal Alpine environment with tmux pre-installed so that tests never
 # perform runtime package installation (which requires container internet

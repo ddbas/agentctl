@@ -1,9 +1,13 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 monorepo_root = true
-settings.experimental = true
+
+[settings]
+experimental = true
+lockfile = true
 
 [monorepo]
 config_roots = ["crates/*"]
+lockfile = true
 
 [hooks]
 enter = "mise exec -- lefthook install"
@@ -13,7 +17,6 @@ lefthook = "latest"
 "github:rtk-ai/rtk" = "latest"
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@fission-ai/openspec" = "latest"
-pandoc = "latest"
 prettier = "latest"
 rust = "1.96.0"
 "cargo:cargo-edit" = "latest"
@@ -36,6 +39,14 @@ sources = ["Cargo.toml", "src/**/*.rs", "tests/**/*.rs"]
 description = "Build the cargo workspaces"
 run = "mise run //crates/...:build"
 
+[tasks.ci]
+description = "Run the CI tasks"
+run = [
+  { task = "build" },
+  { task = "test" },
+  { task = "lint" }
+]
+
 [tasks.dev]
 description = "Run the cargo workspaces"
 run = "mise run //crates/...:dev"
@@ -43,6 +54,12 @@ run = "mise run //crates/...:dev"
 [tasks.format]
 description = "Format the cargo workspaces"
 run = "mise exec -- cargo fmt"
+
+[tasks.install]
+description = "Build release binary and copy it to ~/.local/bin/agentctl"
+depends = ["build:release"]
+run = "mkdir -p ~/.local/bin && cp \"$(pwd)/target/release/agentctl\" ~/.local/bin/agentctl"
+outputs = ["~/.local/bin/agentctl"]
 
 [tasks.lint]
 description = "Lint the cargo workspaces"
@@ -60,9 +77,3 @@ fi
 [tasks.test]
 description = "Test the cargo workspaces"
 run = "mise run //crates/...:test"
-
-[tasks.install]
-description = "Build release binary and copy it to ~/.local/bin/agentctl"
-depends = ["build:release"]
-run = "mkdir -p ~/.local/bin && cp \"$(pwd)/target/release/agentctl\" ~/.local/bin/agentctl"
-outputs = ["~/.local/bin/agentctl"]
