@@ -12,7 +12,7 @@ pre-commit:
         jobs:
           - name: rust
             glob: "*.rs"
-            run: cargo fmt
+            run: mise run format
             stage_fixed: true
           - name: markdown
             glob: "*.md"
@@ -26,4 +26,4 @@ pre-commit:
       run: mise run test
     - name: openspec-validate
       glob: "openspec/**"
-      run: bash scripts/openspec-validate-staged.sh {staged_files}
+      run: mise exec -- openspec validate --all --no-interactive
