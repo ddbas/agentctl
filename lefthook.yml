@@ -23,12 +23,7 @@ pre-commit:
       run: cargo clippy -- -D warnings
       stage_fixed: true
     - name: test
-      run: cargo test
-      glob:
-        - "Cargo.toml"
-        - "Cargo.lock"
-        - "src/**/*.rs"
-        - "tests/**/*.rs"
+      run: mise run test
     - name: openspec-validate
       glob: "openspec/**"
       run: bash scripts/openspec-validate-staged.sh {staged_files}

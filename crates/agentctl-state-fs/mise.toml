@@ -1,0 +1,8 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.build]
+extends = "build"
+outputs = ["../../target/debug/libagentctl_state_fs.{d,rlib}"]
+
+[tasks.test]
+extends = "test"

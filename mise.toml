@@ -1,21 +1,48 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+monorepo_root = true
+settings.experimental = true
+
+[monorepo]
+config_roots = ["crates/*"]
+
 [hooks]
-enter = "lefthook install"
+enter = "mise exec -- lefthook install"
+
+[tools]
+lefthook = "latest"
+"github:rtk-ai/rtk" = "latest"
+"npm:@colbymchenry/codegraph" = "latest"
+"npm:@fission-ai/openspec" = "latest"
+pandoc = "latest"
+prettier = "latest"
+rust = "1.96.0"
+"cargo:cargo-edit" = "latest"
+
+[task_templates.build]
+description = "Build the cargo workspace"
+run = "mise exec -- cargo build"
+sources = ["Cargo.toml", "src/**/*.rs"]
+
+[task_templates.dev]
+description = "Run the cargo workspace"
+run = "mise exec -- cargo run"
+
+[task_templates.test]
+description = "Run the cargo test suite"
+run = "mise exec -- cargo test"
+sources = ["Cargo.toml", "src/**/*.rs", "tests/**/*.rs"]
 
 [tasks.build]
-description = "Build the cargo project"
-run = "rtk cargo build --workspace"
-sources = ["Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml"]
-outputs = ["target/debug/agentctl"]
-
-[tasks."build:release"]
-description = "Build the cargo project in release mode"
-run = "rtk cargo build --workspace --release"
-sources = ["Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml"]
-outputs = ["target/release/agentctl"]
+description = "Build the cargo workspaces"
+run = "mise run //crates/...:build"
 
 [tasks.dev]
-description = "Run the cargo project"
-run = "cargo run"
+description = "Run the cargo workspaces"
+run = "mise run //crates/...:dev"
+
+[tasks.test]
+description = "Test the cargo workspaces"
+run = "mise run //crates/...:test"
 
 [tasks.install]
 description = "Build release binary and copy it to ~/.local/bin/agentctl"
@@ -36,18 +63,3 @@ description = "Build the Docker image used by TmuxEnv in integration tests"
 run = "docker build -t am-tmux-test:latest crates/agentctl/tests/ && mkdir -p target && docker inspect am-tmux-test:latest --format '{{.Id}}' > target/.test-image-id"
 sources = ["crates/agentctl/tests/Dockerfile"]
 outputs = ["target/.test-image-id"]
-
-[tasks.test]
-description = "Run the cargo test suite"
-run = "rtk cargo test --workspace"
-sources = ["Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml"]
-
-[tools]
-lefthook = "latest"
-"github:rtk-ai/rtk" = "latest"
-"npm:@colbymchenry/codegraph" = "latest"
-"npm:@fission-ai/openspec" = "latest"
-pandoc = "latest"
-prettier = "latest"
-rust = "1.96.0"
-"cargo:cargo-edit" = "latest"
