@@ -40,6 +40,19 @@ run = "mise run //crates/...:build"
 description = "Run the cargo workspaces"
 run = "mise run //crates/...:dev"
 
+[tasks.lint]
+description = "Lint the cargo workspaces"
+usage = '''
+flag "--fix" help="Automatically fix linting issues"
+'''
+run = '''
+if [[ -n "${usage_fix}" ]]; then
+  mise exec -- cargo clippy --fix --allow-dirty --allow-staged -- -D warnings
+else
+  mise exec -- cargo clippy -- -D warnings
+fi
+'''
+
 [tasks.test]
 description = "Test the cargo workspaces"
 run = "mise run //crates/...:test"

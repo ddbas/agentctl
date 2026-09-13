@@ -20,7 +20,7 @@ pre-commit:
             stage_fixed: true
     - name: lint
       glob: "*.rs"
-      run: cargo clippy -- -D warnings
+      run: mise run lint --fix
       stage_fixed: true
     - name: test
       run: mise run test
