@@ -1,0 +1,16 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.build]
+extends = "build"
+
+[tasks."build:test-image"]
+description = "Build the Docker image used by TmuxEnv in integration tests"
+run = "docker build -t am-tmux-test:latest tests/"
+sources = ["tests/Dockerfile"]
+
+[tasks.dev]
+extends = "dev"
+
+[tasks.test]
+extends = "test"
+depends = ["build:test-image"]

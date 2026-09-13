@@ -1,0 +1,12 @@
+[package]
+name = "agentctl-harness-pi"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+agentctl-harness.workspace = true
+anyhow.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

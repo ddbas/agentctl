@@ -12,7 +12,7 @@ pre-commit:
         jobs:
           - name: rust
             glob: "*.rs"
-            run: cargo fmt
+            run: mise run format
             stage_fixed: true
           - name: markdown
             glob: "*.md"
@@ -20,15 +20,10 @@ pre-commit:
             stage_fixed: true
     - name: lint
       glob: "*.rs"
-      run: cargo clippy -- -D warnings
+      run: mise run lint --fix
       stage_fixed: true
     - name: test
-      run: cargo test
-      glob:
-        - "Cargo.toml"
-        - "Cargo.lock"
-        - "src/**/*.rs"
-        - "tests/**/*.rs"
+      run: mise run test
     - name: openspec-validate
       glob: "openspec/**"
-      run: bash scripts/openspec-validate-staged.sh {staged_files}
+      run: mise exec -- openspec validate --all --no-interactive

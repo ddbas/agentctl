@@ -1,21 +1,58 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+monorepo_root = true
+
+[settings]
+experimental = true
+lockfile = true
+
+[monorepo]
+config_roots = ["crates/*"]
+lockfile = true
+
 [hooks]
-enter = "lefthook install"
+enter = "mise exec -- lefthook install"
+
+[tools]
+lefthook = "latest"
+"github:rtk-ai/rtk" = "latest"
+"npm:@colbymchenry/codegraph" = "latest"
+"npm:@fission-ai/openspec" = "latest"
+prettier = "latest"
+rust = { version = "1.96.0", profile = "default" }
+
+[task_templates.build]
+description = "Build the cargo workspace"
+run = "mise exec -- cargo build"
+sources = ["Cargo.toml", "src/**/*.rs"]
+
+[task_templates.dev]
+description = "Run the cargo workspace"
+run = "mise exec -- cargo run"
+
+[task_templates.test]
+description = "Run the cargo test suite"
+run = "mise exec -- cargo test"
+sources = ["Cargo.toml", "src/**/*.rs", "tests/**/*.rs"]
 
 [tasks.build]
-description = "Build the cargo project"
-run = "rtk cargo build"
-sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
-outputs = ["target/debug/agentctl"]
+description = "Build the cargo workspaces"
+run = "mise run //crates/...:build"
 
-[tasks."build:release"]
-description = "Build the cargo project in release mode"
-run = "rtk cargo build --release"
-sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
-outputs = ["target/release/agentctl"]
+[tasks.ci]
+description = "Run the CI tasks"
+run = [
+  { task = "build" },
+  { task = "test" },
+  { task = "lint" }
+]
 
 [tasks.dev]
-description = "Run the cargo project"
-run = "cargo run"
+description = "Run the cargo workspaces"
+run = "mise run //crates/...:dev"
+
+[tasks.format]
+description = "Format the cargo workspaces"
+run = "mise exec -- cargo fmt"
 
 [tasks.install]
 description = "Build release binary and copy it to ~/.local/bin/agentctl"
@@ -23,31 +60,19 @@ depends = ["build:release"]
 run = "mkdir -p ~/.local/bin && cp \"$(pwd)/target/release/agentctl\" ~/.local/bin/agentctl"
 outputs = ["~/.local/bin/agentctl"]
 
-[tasks."openspec:open"]
-description = "Render an OpenSpec proposal to HTML and open it in the browser"
+[tasks.lint]
+description = "Lint the cargo workspaces"
 usage = '''
-arg "<change-id>" help="OpenSpec change ID to preview (e.g. my-feature)"
-complete "change-id" run="openspec list --json | jq -r '.changes[].name'"
+flag "--fix" help="Automatically fix linting issues"
 '''
-run = "scripts/view-proposal.sh ${usage_change_id?}"
-
-[tasks."test:build-image"]
-description = "Build the Docker image used by TmuxEnv in integration tests"
-run = "docker build -t am-tmux-test:latest tests/ && mkdir -p target && docker inspect am-tmux-test:latest --format '{{.Id}}' > target/.test-image-id"
-sources = ["tests/Dockerfile"]
-outputs = ["target/.test-image-id"]
+run = '''
+if [[ -n "${usage_fix}" ]]; then
+  mise exec -- cargo clippy --fix --allow-dirty --allow-staged -- -D warnings
+else
+  mise exec -- cargo clippy -- -D warnings
+fi
+'''
 
 [tasks.test]
-description = "Run the cargo test suite"
-run = "rtk cargo test"
-sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs", "tests/**/*.rs"]
-
-[tools]
-lefthook = "latest"
-"github:rtk-ai/rtk" = "latest"
-"npm:@colbymchenry/codegraph" = "latest"
-"npm:@fission-ai/openspec" = "latest"
-pandoc = "latest"
-prettier = "latest"
-rust = "1.96.0"
-"cargo:cargo-edit" = "latest"
+description = "Test the cargo workspaces"
+run = "mise run //crates/...:test"

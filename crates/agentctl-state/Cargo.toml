@@ -1,0 +1,15 @@
+[package]
+name = "agentctl-state"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rust-fsm.workspace = true
+agentctl-logging.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

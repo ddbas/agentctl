@@ -1,0 +1,25 @@
+[package]
+name = "agentctl"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "agentctl"
+path = "src/main.rs"
+
+[dependencies]
+agentctl-core.workspace = true
+agentctl-state.workspace = true
+agentctl-state-fs.workspace = true
+agentctl-harness.workspace = true
+agentctl-harness-pi.workspace = true
+agentctl-harness-claude.workspace = true
+agentctl-logging.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+testcontainers.workspace = true
+tokio.workspace = true
+serde_json.workspace = true

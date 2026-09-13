@@ -1,0 +1,7 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.build]
+extends = "build"
+
+[tasks.test]
+extends = "test"

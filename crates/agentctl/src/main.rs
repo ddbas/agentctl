@@ -1,0 +1,501 @@
+//! `agentctl` — the composition root. Contains only `clap` argument
+//! definitions, conversions from CLI-derived enums to `agentctl-core`/domain
+//! types, and the composition root itself (constructing
+//! `FileAgentRepository`, harness implementations, and the logging sink).
+//! No business logic beyond one `App` call per subcommand.
+
+use clap::{CommandFactory, Parser, Subcommand};
+
+use agentctl_core::{App, Field};
+use agentctl_harness_claude::ClaudeHarness;
+use agentctl_harness_pi::PiHarness;
+use agentctl_state_fs::FileAgentRepository;
+
+#[derive(Parser)]
+#[command(
+    name = "agentctl",
+    about = "📡 agentctl — tmux based agent multiplexer",
+    long_about = "📡 agentctl — tmux based agent multiplexer\n\nSpot and manage AI agent processes running across your tmux sessions.",
+    version,
+    propagate_version = true,
+    // Disable built-in `help` subcommand so we can define our own.
+    disable_help_subcommand = true,
+)]
+struct Cli {
+    /// Log level for the log file: trace, debug, info, warn, or error
+    /// (default: info). Does not affect stdout/stderr output.
+    #[arg(long, global = true, default_value = "info", value_name = "LEVEL")]
+    log_level: LogLevelArg,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Show usage information.
+    Help,
+
+    /// List tmux panes running agent harness processes.
+    ///
+    /// Queries every pane across all tmux sessions via `tmux list-panes -a`
+    /// and prints one line per pane whose foreground process is a known agent
+    /// harness (`claude` or `pi`).  By default, output has five tab-delimited
+    /// columns: `<agent>\t<session>\t<window>.<pane>\t<status>\t<activeTools>`.
+    /// Every row has the same number of tab-separated fields, even when a
+    /// trailing column is empty. The rendered columns can be customized via
+    /// `--columns`/`-c`.
+    ///
+    /// `node` panes are resolved to `pi` when the pane's shell has a direct
+    /// child process whose argv[0] basename is `pi`.
+    ///
+    /// When no agents are found, no output is produced and the command exits
+    /// successfully.  If tmux is not running, the list is treated as empty.
+    #[command(alias = "ls")]
+    List {
+        /// Target a specific tmux server socket file.
+        /// Forwarded as `tmux -S <path>`.  Falls back to the
+        /// `AGENTCTL_TMUX_SOCKET` environment variable when not set.
+        #[arg(short, long, value_name = "PATH")]
+        server: Option<String>,
+
+        /// Sort output by this property.
+        /// Valid values: agent, session, pane, status, updatedAt, activeTools.
+        #[arg(
+            long = "sort-by",
+            value_name = "KEY",
+            default_value_t = FieldArg::UpdatedAt
+        )]
+        sort_by: FieldArg,
+
+        /// Reverse the sort order.
+        /// For `updatedAt` (the default key) this means oldest-active first.
+        #[arg(short = 'r', long)]
+        reverse: bool,
+
+        /// Comma-delimited, ordered list of columns to render.
+        /// Valid values: agent, session, pane, status, updatedAt, activeTools.
+        /// Order and duplicates are preserved (no deduplication).
+        #[arg(
+            short = 'c',
+            long = "columns",
+            value_name = "COLUMNS",
+            value_delimiter = ',',
+            default_value = agentctl_core::DEFAULT_COLUMNS_STR
+        )]
+        columns: Vec<FieldArg>,
+    },
+
+    /// Install agentctl on a harness.
+    ///
+    /// Writes the necessary integration files for the chosen harness so that
+    /// `agentctl list` shows real-time agent state without polling. Today this means
+    /// installing hook integrations, but may include more in the future.
+    Install {
+        /// Harness to install agentctl on.
+        #[arg(value_name = "HARNESS")]
+        harness: HarnessArg,
+    },
+
+    /// Uninstall agentctl from a harness.
+    ///
+    /// Removes the integration files written by `agentctl install <harness>`,
+    /// leaving all other user configuration untouched. Idempotent: running
+    /// this on a harness that was never installed (or already uninstalled)
+    /// is a no-op that exits 0.
+    ///
+    /// - `pi`: deletes `~/.pi/agent/extensions/agentctl.ts` if present.
+    /// - `claude`: removes the `~/.claude/skills/agentctl/` plugin directory (and
+    ///   all its contents) if present; never touches `~/.claude/settings.json`.
+    Uninstall {
+        /// Harness to uninstall agentctl from.
+        #[arg(value_name = "HARNESS")]
+        harness: HarnessArg,
+    },
+
+    /// Manage agent state.
+    Agent {
+        #[command(subcommand)]
+        subcommand: AgentSubcommand,
+    },
+
+    /// Print agentctl's runtime paths and metadata.
+    ///
+    /// Prints resolved paths (log directory, current log file) and metadata
+    /// (version, effective log level) as `key: value` lines. Performs no
+    /// filesystem writes.
+    Info,
+}
+
+#[derive(Subcommand)]
+enum AgentSubcommand {
+    /// Dispatch a typed event; the pane's status is derived from the event
+    /// stream via a finite state machine.
+    ///
+    /// Reads `$TMUX_PANE` from the environment to identify the current pane.
+    /// Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not
+    /// supplied — suitable for calling from hooks that may run outside tmux.
+    ///
+    /// `--harness` and `--pane` are declared once here and inherited by every
+    /// event subcommand below (they may appear before or after the event
+    /// name on the command line).
+    Event {
+        /// Harness name to write to the state file (e.g. `claude`).
+        /// Defaults to `"unknown"` when omitted.
+        #[arg(long, value_name = "HARNESS", global = true)]
+        harness: Option<String>,
+
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID", global = true)]
+        pane: Option<String>,
+
+        #[command(subcommand)]
+        event: AgentEventSubcommand,
+    },
+
+    /// Whole-session cleanup for the current agent pane.
+    ///
+    /// Removes the status file and any other per-agent artifacts recorded
+    /// for the pane. Reads `$TMUX_PANE` from the environment. Exits 0
+    /// silently when `$TMUX_PANE` is not set and `--pane` is not supplied, or
+    /// when no state file exists for the pane.
+    Clear {
+        /// Override the pane ID instead of reading `$TMUX_PANE`.
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+    },
+}
+
+/// The five events accepted by `agentctl agent event <NAME>`.
+///
+/// `--id` is required on all five; `--type` is only accepted on the two
+/// `TOOL_CALL_*` variants.
+#[derive(Subcommand)]
+enum AgentEventSubcommand {
+    /// A harness session began (or resumed / was cleared). Resets the pane's
+    /// status to `idle` from any prior status.
+    #[command(name = "SESSION_STARTED")]
+    SessionStarted {
+        /// Unique id for this session (used to correlate events.jsonl entries).
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+
+    /// A run (agent turn) started.
+    #[command(name = "RUN_STARTED")]
+    RunStarted {
+        /// Unique id for this run.
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+
+    /// A run (agent turn) finished.
+    #[command(name = "RUN_FINISHED")]
+    RunFinished {
+        /// Unique id for this run (matching the corresponding RUN_STARTED).
+        #[arg(long, value_name = "ID")]
+        id: String,
+
+        /// Override the pane's `activeTools` count instead of leaving it
+        /// untouched. Intended for reconciling against a harness's
+        /// authoritative in-flight background-task count (e.g. Claude
+        /// Code's `background_tasks` array delivered to `Stop`/
+        /// `StopFailure` hooks), which can diverge from agentctl's own
+        /// increment/decrement counter for tools that launch async
+        /// background work (the `Monitor` tool, backgrounded shells,
+        /// async subagents) — such tools fire `PostToolUse` as soon as the
+        /// launch itself returns, well before the background work
+        /// actually finishes.
+        #[arg(long, value_name = "N")]
+        active_tools: Option<u32>,
+    },
+
+    /// A tool call started.
+    #[command(name = "TOOL_CALL_START")]
+    ToolCallStart {
+        /// Unique id for this tool call.
+        #[arg(long, value_name = "ID")]
+        id: String,
+
+        /// Payload type. `elicitation` drives the agent into `blocked`.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<ToolCallTypeArg>,
+    },
+
+    /// A tool call finished.
+    #[command(name = "TOOL_CALL_RESULT")]
+    ToolCallResult {
+        /// Unique id for this tool call (matching the corresponding
+        /// TOOL_CALL_START).
+        #[arg(long, value_name = "ID")]
+        id: String,
+
+        /// Payload type. `elicitation` clears a `blocked` status back to
+        /// `working`.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<ToolCallTypeArg>,
+    },
+}
+
+// ── CLI-local mirror enums ────────────────────────────────────────────────────
+
+/// Accepted `--type` values for `TOOL_CALL_START` / `TOOL_CALL_RESULT`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[value(rename_all = "kebab-case")]
+enum ToolCallTypeArg {
+    Custom,
+    Elicitation,
+}
+
+impl From<ToolCallTypeArg> for agentctl_state::ToolCallType {
+    fn from(value: ToolCallTypeArg) -> Self {
+        match value {
+            ToolCallTypeArg::Custom => agentctl_state::ToolCallType::Custom,
+            ToolCallTypeArg::Elicitation => agentctl_state::ToolCallType::Elicitation,
+        }
+    }
+}
+
+/// Harnesses supported by `agentctl install` and `agentctl uninstall`.
+///
+/// The bin never contains harness-specific logic beyond this mapping — it
+/// resolves to a harness *name* which `App::install`/`App::uninstall` match
+/// against `Harness::name()` at runtime, so adding a new harness only means
+/// adding a variant here and registering its `Harness` implementation in the
+/// composition root below.
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum HarnessArg {
+    /// Pi coding agent — writes `~/.pi/agent/extensions/agentctl.ts`.
+    Pi,
+    /// Claude Code — installs a plugin at `~/.claude/skills/agentctl/`.
+    Claude,
+}
+
+impl HarnessArg {
+    fn as_str(&self) -> &'static str {
+        match self {
+            HarnessArg::Pi => "pi",
+            HarnessArg::Claude => "claude",
+        }
+    }
+}
+
+/// Mirrors [`agentctl_core::Field`] as a `clap`-derived enum; every library
+/// crate stays free of a `clap` dependency.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default)]
+enum FieldArg {
+    Agent,
+    Session,
+    Pane,
+    Status,
+    #[default]
+    #[value(name = "updatedAt")]
+    UpdatedAt,
+    #[value(name = "activeTools")]
+    ActiveTools,
+}
+
+impl From<FieldArg> for Field {
+    fn from(value: FieldArg) -> Self {
+        match value {
+            FieldArg::Agent => Field::Agent,
+            FieldArg::Session => Field::Session,
+            FieldArg::Pane => Field::Pane,
+            FieldArg::Status => Field::Status,
+            FieldArg::UpdatedAt => Field::UpdatedAt,
+            FieldArg::ActiveTools => Field::ActiveTools,
+        }
+    }
+}
+
+impl std::fmt::Display for FieldArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Field::from(*self))
+    }
+}
+
+/// Mirrors [`agentctl_logging::LogLevel`] as a `clap`-derived enum.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum LogLevelArg {
+    #[value(name = "trace")]
+    Trace,
+    #[value(name = "debug")]
+    Debug,
+    #[value(name = "info")]
+    Info,
+    #[value(name = "warn")]
+    Warn,
+    #[value(name = "error")]
+    Error,
+}
+
+impl From<LogLevelArg> for agentctl_logging::LogLevel {
+    fn from(value: LogLevelArg) -> Self {
+        match value {
+            LogLevelArg::Trace => agentctl_logging::LogLevel::Trace,
+            LogLevelArg::Debug => agentctl_logging::LogLevel::Debug,
+            LogLevelArg::Info => agentctl_logging::LogLevel::Info,
+            LogLevelArg::Warn => agentctl_logging::LogLevel::Warn,
+            LogLevelArg::Error => agentctl_logging::LogLevel::Error,
+        }
+    }
+}
+
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("error: {err:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    // Initialize logging (best-effort; failures are non-fatal)
+    let _guard = agentctl_logging::init("agentctl", cli.log_level.into());
+
+    agentctl_logging::ops::debug(&format!(
+        "CLI invocation: agentctl {:?}",
+        std::env::args().collect::<Vec<_>>()
+    ));
+
+    // Composition root: the only place concrete infrastructure is chosen.
+    let repo = FileAgentRepository::xdg();
+    let harnesses: Vec<Box<dyn agentctl_harness::Harness>> =
+        vec![Box::new(PiHarness), Box::new(ClaudeHarness)];
+    let app = App::new(&repo, harnesses);
+
+    match cli.command {
+        None | Some(Commands::Help) => {
+            Cli::command().print_long_help()?;
+        }
+        Some(Commands::List {
+            server,
+            sort_by,
+            reverse,
+            columns,
+        }) => {
+            let output = app.list(
+                server,
+                sort_by.into(),
+                reverse,
+                columns.into_iter().map(Into::into).collect(),
+            )?;
+            print!("{output}");
+        }
+        Some(Commands::Install { harness }) => {
+            println!("{}", app.install(harness.as_str())?);
+        }
+        Some(Commands::Uninstall { harness }) => {
+            println!("{}", app.uninstall(harness.as_str())?);
+        }
+        Some(Commands::Agent {
+            subcommand:
+                AgentSubcommand::Event {
+                    harness,
+                    pane,
+                    event,
+                },
+        }) => {
+            let (kind, id, tool_call_type) = match event {
+                AgentEventSubcommand::SessionStarted { id } => {
+                    (agentctl_core::EventKind::SessionStarted, id, None)
+                }
+                AgentEventSubcommand::RunStarted { id } => {
+                    (agentctl_core::EventKind::RunStarted, id, None)
+                }
+                AgentEventSubcommand::RunFinished { id, active_tools } => (
+                    agentctl_core::EventKind::RunFinished { active_tools },
+                    id,
+                    None,
+                ),
+                AgentEventSubcommand::ToolCallStart { id, r#type } => (
+                    agentctl_core::EventKind::ToolCallStart,
+                    id,
+                    r#type.map(Into::into),
+                ),
+                AgentEventSubcommand::ToolCallResult { id, r#type } => (
+                    agentctl_core::EventKind::ToolCallResult,
+                    id,
+                    r#type.map(Into::into),
+                ),
+            };
+            app.dispatch_event(kind, id, tool_call_type, harness, pane)?;
+        }
+        Some(Commands::Agent {
+            subcommand: AgentSubcommand::Clear { pane },
+        }) => {
+            app.clear(pane)?;
+        }
+        Some(Commands::Info) => {
+            print!("{}", app.info(cli.log_level.into())?);
+        }
+    }
+
+    Ok(())
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    // ── invalid-value clap rejection ─────────────────────────────────────────
+
+    #[test]
+    fn invalid_columns_value_rejected_by_clap() {
+        let result = <super::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--columns",
+            "bogus",
+        ]);
+        assert!(
+            result.is_err(),
+            "expected clap error for unknown --columns value"
+        );
+    }
+
+    #[test]
+    fn invalid_sort_by_rejected_by_clap() {
+        let result = <super::Cli as clap::Parser>::try_parse_from([
+            "agentctl",
+            "list",
+            "--sort-by",
+            "foobar",
+        ]);
+        assert!(
+            result.is_err(),
+            "expected clap error for unknown sort-by value"
+        );
+    }
+
+    #[test]
+    fn columns_and_sort_by_share_identical_vocabulary() {
+        for value in [
+            "agent",
+            "session",
+            "pane",
+            "status",
+            "updatedAt",
+            "activeTools",
+        ] {
+            let sort_result = <super::Cli as clap::Parser>::try_parse_from([
+                "agentctl",
+                "list",
+                "--sort-by",
+                value,
+            ]);
+            let columns_result = <super::Cli as clap::Parser>::try_parse_from([
+                "agentctl",
+                "list",
+                "--columns",
+                value,
+            ]);
+            assert!(sort_result.is_ok(), "--sort-by {value} should be accepted");
+            assert!(
+                columns_result.is_ok(),
+                "--columns {value} should be accepted"
+            );
+        }
+    }
+}
