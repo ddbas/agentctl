@@ -31,3 +31,6 @@ specifiers = ["latest"]
 version = "1.96.0"
 backend = "core:rust"
 specifiers = ["1.96.0"]
+
+[tools.rust.options]
+profile = "default"
