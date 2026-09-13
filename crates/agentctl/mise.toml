@@ -2,7 +2,6 @@
 
 [tasks.build]
 extends = "build"
-outputs = ["../../target/debug/agentctl{,.d}"]
 
 [tasks."build:test-image"]
 description = "Build the Docker image used by TmuxEnv in integration tests"

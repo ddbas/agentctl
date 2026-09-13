@@ -2,7 +2,6 @@
 
 [tasks.build]
 extends = "build"
-outputs = ["../../target/debug/libagentctl_tmux.{d,rlib}"]
 
 [tasks.test]
 extends = "test"
