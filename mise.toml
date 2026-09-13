@@ -19,7 +19,6 @@ lefthook = "latest"
 "npm:@fission-ai/openspec" = "latest"
 prettier = "latest"
 rust = "1.96.0"
-"cargo:cargo-edit" = "latest"
 
 [task_templates.build]
 description = "Build the cargo workspace"

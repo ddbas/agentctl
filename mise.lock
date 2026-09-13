@@ -2,11 +2,6 @@
 
 lockfile_version = 1
 
-[[tools."cargo:cargo-edit"]]
-version = "0.13.11"
-backend = "cargo:cargo-edit"
-specifiers = ["latest"]
-
 [[tools."github:rtk-ai/rtk"]]
 version = "0.43.0"
 backend = "github:rtk-ai/rtk"
@@ -25,11 +20,6 @@ specifiers = ["latest"]
 [[tools."npm:@fission-ai/openspec"]]
 version = "1.4.1"
 backend = "npm:@fission-ai/openspec"
-specifiers = ["latest"]
-
-[[tools.pandoc]]
-version = "3.10"
-backend = "github:jgm/pandoc"
 specifiers = ["latest"]
 
 [[tools.prettier]]
