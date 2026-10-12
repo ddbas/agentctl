@@ -1,22 +1,22 @@
 ## 1. Phase 0: Scaffold and measure (serial)
 
-- [ ] 1.1 Add `pnpm-workspace.yaml`, root `package.json` (private, pins
+- [x] 1.1 Add `pnpm-workspace.yaml`, root `package.json` (private, pins
       `packageManager`), and `.npmrc` as needed
-- [ ] 1.2 Pin Node 26.x and pnpm in `mise.toml` (keep Rust until cutover); add
+- [x] 1.2 Pin Node 26.x and pnpm in `mise.toml` (keep Rust until cutover); add
       `.node-version`
-- [ ] 1.3 Add `turbo.json` with `build`, `typecheck`, `lint`, `test`, `ci` tasks
+- [x] 1.3 Add `turbo.json` with `build`, `typecheck`, `lint`, `test`, `ci` tasks
       (`test` depends on `build`)
-- [ ] 1.4 Add shared `tsconfig.base.json` (strict, ESM, `noEmit`, TypeScript
+- [x] 1.4 Add shared `tsconfig.base.json` (strict, ESM, `noEmit`, TypeScript
       7.x) and per-workspace tsconfigs
-- [ ] 1.5 Add `biome.json` (format + lint, `noRestrictedImports` for core
+- [x] 1.5 Add `biome.json` (format + lint, `noRestrictedImports` for core
       boundary); keep prettier for markdown
-- [ ] 1.6 Scaffold `apps/agentctl`, `packages/core`, `packages/adapters` with
+- [x] 1.6 Scaffold `apps/agentctl`, `packages/core`, `packages/adapters` with
       `package.json` and entry files
-- [ ] 1.7 Add `apps/agentctl` Rspack config: node target, swc loader, shebang
+- [x] 1.7 Add `apps/agentctl` Rspack config: node target, swc loader, shebang
       banner, single output file; verify a hello-world bundle runs
-- [ ] 1.8 Verify tooling works with TypeScript 7 (tsc, Biome, Rspack, vitest);
+- [x] 1.8 Verify tooling works with TypeScript 7 (tsc, Biome, Rspack, vitest);
       record any workarounds
-- [ ] 1.9 Measure cold start of a hello-world bundle with pino + zod imported vs
+- [x] 1.9 Measure cold start of a hello-world bundle with pino + zod imported vs
       Rust `agentctl agent event`; record budget in design.md Open Questions
 - [ ] 1.10 Capture Rust-written fixtures (state.json, events.jsonl,
       list/info/help stdout) from the Rust binary into
@@ -24,21 +24,21 @@
 
 ## 2. Phase 0: Core interfaces and e2e harness (serial)
 
-- [ ] 2.1 Define domain types and port interfaces in `packages/core`
+- [x] 2.1 Define domain types and port interfaces in `packages/core`
       (`AgentRepository`, `Tmux`, `Harness`, `Logger`, `AgentInfo`, `Event`)
-- [ ] 2.2 Port the e2e support module to
+- [x] 2.2 Port the e2e support module to
       `apps/agentctl/tests/e2e/support/tmux-env.ts` with `testcontainers` and
       `AGENTCTL_BIN` selection
-- [ ] 2.3 Port the canary and help e2e tests; run against the Rust binary
+- [x] 2.3 Port the canary and help e2e tests; run against the Rust binary
       (`AGENTCTL_BIN=target/debug/agentctl`) and confirm green
-- [ ] 2.4 Port `agent_commands`, `hooks`, and `list_sessions` e2e tests; confirm
+- [x] 2.4 Port `agent_commands`, `hooks`, and `list_sessions` e2e tests; confirm
       green against Rust
 - [ ] 2.5 Add a CI job leg that builds Rust and runs the vitest e2e suite with
       `AGENTCTL_BIN` set to the Rust binary
 
 ## 3. Phase 1: Leaf modules (parallel; one folder each)
 
-- [ ] 3.1 Port `agentctl-state` (status FSM transition table, `AgentInfo`) with
+- [x] 3.1 Port `agentctl-state` (status FSM transition table, `AgentInfo`) with
       its unit tests into `packages/core`
 - [ ] 3.2 Port `agentctl-logging` to `packages/adapters/src/logging` using pino;
       match `structured-logging` spec (file path, level, line format)
@@ -54,9 +54,9 @@
 
 ## 4. Phase 2: Integration (serial)
 
-- [ ] 4.1 Port `agentctl-core` `list` (sorting, columns, relative time, node→pi
+- [x] 4.1 Port `agentctl-core` `list` (sorting, columns, relative time, node→pi
       resolution) with its unit tests
-- [ ] 4.2 Port `agentctl-core` `App` use cases (install, uninstall,
+- [x] 4.2 Port `agentctl-core` `App` use cases (install, uninstall,
       dispatchEvent, clear, info)
 - [ ] 4.3 Implement `apps/agentctl` commander wiring and composition root; match
       clap help text, aliases, global `--log-level`, and `AGENTCTL_TMUX_SOCKET`

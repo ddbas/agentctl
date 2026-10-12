@@ -1,0 +1,44 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!crates",
+      "!target",
+      "!openspec",
+      "!.*",
+      "!**/fixtures"
+    ]
+  },
+  "formatter": { "indentStyle": "space", "indentWidth": 2 },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "overrides": [
+    {
+      "includes": ["packages/core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@agentctl/adapters": "core must not depend on adapters",
+                  "pino": "core must not import infrastructure",
+                  "zod": "core must not import infrastructure"
+                },
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "core must not touch node APIs"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

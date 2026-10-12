@@ -205,9 +205,20 @@ makes wording-only edits in `agent-events`, `info-command`, and
 Rollback: before cutover, nothing user-facing changes (Rust remains the
 installed binary). After cutover, revert the cutover commit to restore Rust.
 
+## Phase 0 findings
+
+- Rspack 2.x emits CJS; the bundle is `dist/cli.cjs` (package is `type: module`,
+  so `.cjs` extension is required). No ESM experiment needed.
+- pnpm 12 needs `allowBuilds` entries (ssh2, cpu-features, protobufjs set to
+  `false`) in `pnpm-workspace.yaml`.
+- Biome 2.5: `rules.preset: "recommended"`; `noRestrictedImports` lives under
+  `style`. TypeScript 7.0.2, vitest 5, Biome and Rspack all work together.
+
 ## Open Questions
 
-- Cold-start budget for `agent event`: what latency is acceptable?
+- ~~Cold-start budget for `agent event`~~: measured Phase 0 (hello-world bundle
+  with pino + zod, Node 26.11): ~38 ms/run vs Rust debug ~26 ms/run (includes
+  process spawn). Budget agreed: **≤ 100 ms** per `agent event` invocation.
 - Exact `info` `version` source: `apps/agentctl/package.json` version (currently
   `0.1.0`, same as Cargo) injected at build time by Rspack `DefinePlugin`?
 - Does anyone consume the log file format outside `agentctl info`? (Determines

@@ -18,6 +18,8 @@ lefthook = "latest"
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@fission-ai/openspec" = "latest"
 prettier = "latest"
+node = "26.11.1"
+pnpm = "12.10.1"
 rust = { version = "1.96.0", profile = "default" }
 
 [task_templates.build]
