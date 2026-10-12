@@ -15,6 +15,8 @@ machine SHALL apply the following transitions:
   `active_tools` count SHALL NOT influence this transition: `RUN_FINISHED`
   drives `status` to `Done` whether `active_tools` is `0` or greater than `0`.
 - `Working` on `TOOL_CALL_START` with `type: elicitation` → `Blocked`
+- `Done` on `TOOL_CALL_START` (no `type`, or `type: custom`) → `Working`
+- `Done` on `TOOL_CALL_START` with `type: elicitation` → `Blocked`
 - `Blocked` on `TOOL_CALL_RESULT` with `type: elicitation` → `Working`
 
 The status machine SHALL NOT read `active_tools` for any transition. An event
@@ -105,14 +107,40 @@ change `status`, but SHALL still be appended to `events.jsonl`. There is no
   `TOOL_CALL_RESULT --id t1 --type elicitation` is dispatched
 - **THEN** the pane's `status` becomes `working`
 
-#### Scenario: custom-typed tool call events do not change status
+#### Scenario: TOOL_CALL_START moves a done pane to working
+
+- **WHEN** a pane's `status` is `done` and `TOOL_CALL_START --id t5` (no
+  `--type`, or `--type custom`) is dispatched
+- **THEN** the pane's `status` becomes `working` and `active_tools` is
+  incremented
+
+#### Scenario: elicitation TOOL_CALL_START moves a done pane to blocked
+
+- **WHEN** a pane's `status` is `done` and
+  `TOOL_CALL_START --id t6 --type elicitation` is dispatched
+- **THEN** the pane's `status` becomes `blocked`
+
+#### Scenario: TOOL_CALL_RESULT does not move a done pane
+
+- **WHEN** a pane's `status` is `done` and `TOOL_CALL_RESULT --id t7` is
+  dispatched
+- **THEN** the pane's `status` remains `done` and `active_tools` is decremented
+  (never below `0`)
+
+#### Scenario: TOOL_CALL_START does not move an idle pane
+
+- **WHEN** a pane's `status` is `idle` and `TOOL_CALL_START --id t8` is
+  dispatched
+- **THEN** the pane's `status` remains `idle`
+
+#### Scenario: custom-typed tool call events do not change a working pane's status
 
 - **WHEN** a pane's `status` is `working` and
   `TOOL_CALL_START --id t2 --type custom` (or
   `TOOL_CALL_RESULT --id t2 --type custom`) is dispatched
 - **THEN** the pane's `status` remains `working`
 
-#### Scenario: tool call events without a type do not change status
+#### Scenario: tool call events without a type do not change a working pane's status
 
 - **WHEN** a pane's `status` is `working` and `TOOL_CALL_START --id t3` (no
   `--type`) is dispatched

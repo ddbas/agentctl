@@ -7,6 +7,11 @@
       test with one asserting `RunFinished` reaches `Done` from every state;
       update remaining `RunFinished { active_tools: 0 }` test call sites
 
+- [ ] 1.3 Add `Done` + `TOOL_CALL_START` transitions (`Working` for
+      untyped/custom, `Blocked` for elicitation); add unit tests incl.
+      `TOOL_CALL_RESULT` and `Idle` + `TOOL_CALL_START` staying no-ops, and
+      update the existing custom/no-type no-op tests (they start from `Working`)
+
 ## 2. Dispatch
 
 - [ ] 2.1 In `crates/agentctl-core/src/app.rs` `dispatch_event`, construct
@@ -15,7 +20,9 @@
 - [ ] 2.2 Add/adjust `app.rs` tests: `RUN_FINISHED` with nonzero counter →
       `done` with counter preserved; `RUN_FINISHED --active-tools N` → `done`
       with counter `N`; blocked + nonzero counter → `done`
-- [ ] 2.3 Update any integration tests in `crates/agentctl/tests/hooks.rs` that
+- [ ] 2.3 Add an `app.rs` test: `TOOL_CALL_START` on a `done` pane → `working`
+      with counter incremented
+- [ ] 2.4 Update any integration tests in `crates/agentctl/tests/hooks.rs` that
       assert a Stop-with-background-tasks pane stays `working`
 
 ## 3. Docs and specs

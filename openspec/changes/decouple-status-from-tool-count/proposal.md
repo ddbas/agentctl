@@ -16,6 +16,9 @@ in the background. The same gate also lets a leaked counter (e.g. a missed pi
   events that affect status remain elicitation-typed ones
   (`TOOL_CALL_START --type elicitation` → `blocked`,
   `TOOL_CALL_RESULT --type elicitation` → `working`).
+- `TOOL_CALL_START` SHALL also move `done` → `working` (or `done` → `blocked`
+  when typed `elicitation`), so a turn the harness starts on its own (e.g. a
+  Claude wake-up after a background task) self-corrects at its first tool call.
 - `active_tools` becomes purely informational: it is still maintained (+1 / −1 /
   `--active-tools` override / reset on `SESSION_STARTED`) and shown in the
   `activeTools` column, but never influences `status`.
@@ -35,8 +38,8 @@ in the background. The same gate also lets a leaked counter (e.g. a missed pi
 ### Modified Capabilities
 
 - `agent-events`: the "Events derive status via a finite state machine"
-  requirement drops the `active_tools == 0` gate on `RUN_FINISHED`; the
-  nonzero-count scenario is replaced.
+  requirement drops the `active_tools == 0` gate on `RUN_FINISHED` and adds
+  `Done` → `Working`/`Blocked` transitions on `TOOL_CALL_START`.
 - `claude-state-hooks`: the `Stop` and `StopFailure` requirements no longer gate
   `done` on the reconciled count; the "does not force done while a background
   task is still running" scenario is replaced.
@@ -53,5 +56,7 @@ in the background. The same gate also lets a leaked counter (e.g. a missed pi
 - No change to hook commands, `state.json` schema, `events.jsonl`, list columns,
   or sorting.
 - Known trade-off: a Claude "wake-up" turn (background task completion
-  re-engaging the model) may show `done` if it emits no `UserPromptSubmit`.
-  Unverified; see design.
+  re-engaging the model) may show `done` until its first tool call, if it emits
+  no `UserPromptSubmit`. Unverified; see design.
+- Known risk: a `TOOL_CALL_START` hook delivered after `RUN_FINISHED` (async
+  hook ordering) would flip a finished pane to `working`; see design.

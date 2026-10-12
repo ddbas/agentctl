@@ -43,19 +43,39 @@ still reconciles the counter to Claude's authoritative number, which is now
 exactly the useful signal alongside `done` ("turn over, N background tasks").
 Removing it would regress the count with no benefit.
 
-**3. Accept the wake-up-turn trade-off (option A) for now.** If a background
-task completion re-engages Claude without `UserPromptSubmit`, that turn shows
-`done`. Rejected alternative: `TOOL_CALL_START` from `done` → `working` — hooks
-are async, so a late `PreToolUse` after `Stop` would wrongly flip `done` →
-`working`, and it re-couples tools to status. Better future fix: find a Claude
-hook that marks a wake-up and map it to `RUN_STARTED`.
+**3. Accept that a wake-up turn is not detected at its start; recover on the
+first tool call.** If a background task completion re-engages Claude without
+`UserPromptSubmit`, the pane shows `done` at the start of that turn. To bound
+the inaccuracy, `TOOL_CALL_START` moves `Done` → `Working` (or `Done` →
+`Blocked` when typed `elicitation`): a tool starting means the model is acting,
+so the first tool call of the wake-up turn corrects the status.
+`TOOL_CALL_RESULT` is unchanged. This is a transition on the event stream only;
+it does not read `active_tools`, so decision 1 still holds. Rejected
+alternative: a dedicated wake-up hook (`PostToolBatch`, `MessageDisplay`) — none
+cleanly marks a turn start; revisit only if the spike (tasks 4.2) shows
+`UserPromptSubmit` does not fire on background-task wake-ups.
 
 ## Risks / Trade-offs
 
-- [Wake-up turn shows `done` while the model works] → Unverified whether it
+- [Wake-up turn shows `done` until its first tool call] → Unverified whether it
   occurs; verify in a testcontainer with a short background shell and inspect
-  `events.jsonl`. If real, follow up with a wake-up hook (preferred) rather than
-  re-coupling.
+  `events.jsonl`. A wake-up turn that uses no tools stays `done`.
+- [Late `TOOL_CALL_START` after `RUN_FINISHED` flips a finished pane to
+  `working`, and nothing flips it back until the next turn] → Hooks are async,
+  but the last `PreToolUse` is separated from `Stop` by the tool's run time, its
+  `PostToolUse`, and a final model response, so delivery would have to lag by
+  seconds. pi is unaffected (its extension uses `execFileSync`, so events are
+  ordered); only Claude's async hooks can race. Accepted (option A); if
+  observed, follow up with hook-stamped event timestamps (`--at`) so the FSM can
+  drop stale `TOOL_CALL_START`s, rather than a time-based grace window.
+- [Background subagent tool calls after the parent's `Stop` revive the pane to
+  `working`] → Intended: a subagent is an LLM doing real work. The pane stays
+  `working` until the parent's next `Stop` (the subagent's report-back fires
+  `UserPromptSubmit`). Background shells/`Monitor` fire no tool hooks and are
+  unaffected.
+- [`dispatch_event` read-modify-write is unlocked, so overlapping async hook
+  processes can overwrite each other] → Pre-existing (affects the counter); out
+  of scope.
 - [`activeTools` can stay stale after a silent background completion] →
   Pre-existing; unchanged. Status is now honest regardless.
 - [Users relying on `working` ≈ "anything running"] → Intentional behavior
