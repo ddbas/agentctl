@@ -128,9 +128,7 @@ impl<'a> App<'a> {
         let event = match kind {
             EventKind::SessionStarted => Event::SessionStarted,
             EventKind::RunStarted => Event::RunStarted,
-            EventKind::RunFinished { .. } => Event::RunFinished {
-                active_tools: new_active_tools,
-            },
+            EventKind::RunFinished { .. } => Event::RunFinished,
             EventKind::ToolCallStart => Event::ToolCallStart {
                 r#type: tool_call_type,
             },
@@ -610,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn run_finished_with_nonzero_active_tools_leaves_status_unchanged() {
+    fn run_finished_with_nonzero_active_tools_drives_done_and_preserves_counter() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let repo = FileAgentRepository::new(tmp.path().to_path_buf());
         let a = app(&repo);
@@ -641,11 +639,54 @@ mod tests {
         )
         .expect("run finished");
         let info = repo.read_agent_info("%1").expect("info");
-        assert_eq!(
-            info.status,
-            AgentState::Working,
-            "still busy — status unchanged"
-        );
+        assert_eq!(info.status, AgentState::Done);
+        assert_eq!(info.active_tools, 1);
+    }
+
+    #[test]
+    fn run_finished_without_override_preserves_nonzero_counter_and_is_done() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = FileAgentRepository::new(tmp.path().to_path_buf());
+        let a = app(&repo);
+        let ev = |k, id: &str| {
+            a.dispatch_event(
+                k,
+                id.to_owned(),
+                None,
+                Some("pi".to_owned()),
+                Some("%1".to_owned()),
+            )
+            .expect("dispatch")
+        };
+        ev(EventKind::RunStarted, "r1");
+        ev(EventKind::ToolCallStart, "t1");
+        ev(EventKind::RunFinished { active_tools: None }, "r1");
+        let info = repo.read_agent_info("%1").expect("info");
+        assert_eq!(info.status, AgentState::Done);
+        assert_eq!(info.active_tools, 1);
+    }
+
+    #[test]
+    fn tool_call_start_on_done_pane_moves_to_working_and_increments() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = FileAgentRepository::new(tmp.path().to_path_buf());
+        let a = app(&repo);
+        let ev = |k, id: &str| {
+            a.dispatch_event(
+                k,
+                id.to_owned(),
+                None,
+                Some("claude".to_owned()),
+                Some("%1".to_owned()),
+            )
+            .expect("dispatch")
+        };
+        ev(EventKind::RunStarted, "r1");
+        ev(EventKind::RunFinished { active_tools: None }, "r1");
+        assert_eq!(repo.read_agent_info("%1").unwrap().status, AgentState::Done);
+        ev(EventKind::ToolCallStart, "t1");
+        let info = repo.read_agent_info("%1").expect("info");
+        assert_eq!(info.status, AgentState::Working);
         assert_eq!(info.active_tools, 1);
     }
 
@@ -690,6 +731,29 @@ mod tests {
         .expect("run finished");
         let info = repo.read_agent_info("%1").expect("info");
         assert_eq!(info.status, AgentState::Done);
+    }
+
+    #[test]
+    fn run_finished_from_blocked_with_nonzero_counter_drives_done() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = FileAgentRepository::new(tmp.path().to_path_buf());
+        let a = app(&repo);
+        let d = |k, t| {
+            a.dispatch_event(
+                k,
+                "x".to_owned(),
+                t,
+                Some("claude".to_owned()),
+                Some("%1".to_owned()),
+            )
+            .expect("dispatch")
+        };
+        d(EventKind::RunStarted, None);
+        d(EventKind::ToolCallStart, Some(ToolCallType::Elicitation));
+        d(EventKind::RunFinished { active_tools: None }, None);
+        let info = repo.read_agent_info("%1").expect("info");
+        assert_eq!(info.status, AgentState::Done);
+        assert_eq!(info.active_tools, 1);
     }
 
     // ── clear ─────────────────────────────────────────────────────────────────

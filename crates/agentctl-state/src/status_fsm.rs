@@ -26,12 +26,9 @@ pub enum ToolCallType {
 pub enum Event {
     SessionStarted,
     RunStarted,
-    /// A run finished. Carries the reconciled `active_tools` count (computed
-    /// by the caller before invoking the FSM); the transition to `Done` is
-    /// gated on this being `0`.
-    RunFinished {
-        active_tools: u32,
-    },
+    /// A run finished. Always drives status to `Done`; the tool counter is
+    /// deliberately not part of the status machine.
+    RunFinished,
     ToolCallStart {
         r#type: Option<ToolCallType>,
     },
@@ -64,15 +61,23 @@ impl StateMachineImpl for StatusFsm {
 
         // Wildcard: RUN_FINISHED is authoritative from any current status
         // (Stop/StopFailure fired, the harness says the turn is over),
-        // provided there's no reconciled in-flight work left. When
-        // active_tools is still nonzero, RUN_FINISHED is a no-op for status.
-        if let Event::RunFinished { active_tools } = input {
-            return if *active_tools == 0 { Some(Done) } else { None };
+        // independent of any tool counter.
+        if matches!(input, Event::RunFinished) {
+            return Some(Done);
         }
 
         match (state, input) {
             (Idle, Event::RunStarted) => Some(Working),
             (Done, Event::RunStarted) => Some(Working),
+            // A harness-initiated turn (e.g. background-task wake-up) self-corrects
+            // at its first tool call.
+            (
+                Done,
+                Event::ToolCallStart {
+                    r#type: Some(Elicitation),
+                },
+            ) => Some(Blocked),
+            (Done, Event::ToolCallStart { .. }) => Some(Working),
             (
                 Working,
                 Event::ToolCallStart {
@@ -151,45 +156,69 @@ mod tests {
 
     #[test]
     fn run_finished_moves_working_to_done() {
-        assert_eq!(
-            apply_event(Working, &Event::RunFinished { active_tools: 0 }),
-            Done
-        );
+        assert_eq!(apply_event(Working, &Event::RunFinished), Done);
     }
 
     #[test]
     fn run_finished_moves_idle_to_done() {
-        assert_eq!(
-            apply_event(Idle, &Event::RunFinished { active_tools: 0 }),
-            Done
-        );
+        assert_eq!(apply_event(Idle, &Event::RunFinished), Done);
     }
 
     #[test]
     fn run_finished_moves_blocked_to_done() {
-        assert_eq!(
-            apply_event(Blocked, &Event::RunFinished { active_tools: 0 }),
-            Done
-        );
+        assert_eq!(apply_event(Blocked, &Event::RunFinished), Done);
     }
 
     #[test]
     fn run_finished_moves_done_to_done() {
-        assert_eq!(
-            apply_event(Done, &Event::RunFinished { active_tools: 0 }),
-            Done
-        );
+        assert_eq!(apply_event(Done, &Event::RunFinished), Done);
     }
 
     #[test]
-    fn run_finished_with_nonzero_active_tools_is_noop_from_every_state() {
-        for state in [Idle, Working, Blocked, Done] {
+    fn run_finished_reaches_done_from_every_state() {
+        for state in [Idle, Working, Blocked, Done, Unknown] {
+            assert_eq!(apply_event(state, &Event::RunFinished), Done);
+        }
+    }
+
+    #[test]
+    fn tool_call_start_moves_done_to_working() {
+        for t in [None, Some(ToolCallType::Custom)] {
             assert_eq!(
-                apply_event(state, &Event::RunFinished { active_tools: 1 }),
-                state,
-                "RunFinished with active_tools > 0 should be a no-op from {state:?}"
+                apply_event(Done, &Event::ToolCallStart { r#type: t }),
+                Working
             );
         }
+    }
+
+    #[test]
+    fn elicitation_tool_call_start_moves_done_to_blocked() {
+        let event = Event::ToolCallStart {
+            r#type: Some(ToolCallType::Elicitation),
+        };
+        assert_eq!(apply_event(Done, &event), Blocked);
+    }
+
+    #[test]
+    fn tool_call_result_does_not_move_done() {
+        for t in [
+            None,
+            Some(ToolCallType::Custom),
+            Some(ToolCallType::Elicitation),
+        ] {
+            assert_eq!(
+                apply_event(Done, &Event::ToolCallResult { r#type: t }),
+                Done
+            );
+        }
+    }
+
+    #[test]
+    fn tool_call_start_does_not_move_idle() {
+        assert_eq!(
+            apply_event(Idle, &Event::ToolCallStart { r#type: None }),
+            Idle
+        );
     }
 
     #[test]
@@ -253,9 +282,6 @@ mod tests {
 
     #[test]
     fn done_run_finished_is_noop_when_already_done() {
-        assert_eq!(
-            apply_event(Done, &Event::RunFinished { active_tools: 0 }),
-            Done
-        );
+        assert_eq!(apply_event(Done, &Event::RunFinished), Done);
     }
 }
