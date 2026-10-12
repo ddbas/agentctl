@@ -128,10 +128,10 @@ socket path so that `agentctl` subcommands use the isolated server.
 - **THEN** the selected binary runs and the result exposes `status`, `stdout`,
   and `stderr`
 
-#### Scenario: The same suite runs against the Rust binary
+#### Scenario: A native binary is executed directly
 
-- **WHEN** `AGENTCTL_BIN` points at the Rust `target/debug/agentctl` binary
-  during the migration window
+- **WHEN** `AGENTCTL_BIN` points at a non-JavaScript executable (anything other
+  than `.js`, `.cjs`, or `.mjs`)
 - **THEN** `env.agentctl()` runs that binary directly (not under `node`) and the
   same tests execute unchanged
 
