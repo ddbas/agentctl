@@ -1,10 +1,10 @@
 ## Purpose
 
-Define the Cargo workspace structure for `agentctl`: the set of crates, their
-dependency boundaries, and the architectural constraints (single filesystem
-access point for agent-state, trait-based harness integrations, business logic
-isolated in `agentctl-core`, and a thin binary composition root) that keep the
-codebase modular and testable.
+Define the pnpm and Turborepo workspace structure for `agentctl`: the set of
+workspaces, their dependency boundaries, and the architectural constraints
+(single filesystem access point for agent-state, interface-based harness
+integrations, business logic isolated in `packages/core`, and a thin app
+composition root) that keep the codebase modular and testable.
 
 ## Requirements
 
