@@ -1,0 +1,3 @@
+{"event":"SESSION_STARTED","id":"s1","harness":"claude","pane_id":"%42","timestamp":"2026-10-12T19:56:09.780441Z"}
+{"event":"RUN_STARTED","id":"r1","harness":"claude","pane_id":"%42","timestamp":"2026-10-12T19:56:09.786970Z"}
+{"event":"TOOL_CALL_START","id":"t1","type":"elicitation","harness":"claude","pane_id":"%42","timestamp":"2026-10-12T19:56:09.793099Z"}

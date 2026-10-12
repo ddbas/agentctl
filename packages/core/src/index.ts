@@ -18,4 +18,9 @@ export {
   validateStateFiles,
 } from "./panes.ts";
 export * from "./ports.ts";
-export { formatTimestamp, timestampMillis, toRfc3339 } from "./time.ts";
+export {
+  formatMicros,
+  formatTimestamp,
+  timestampMillis,
+  toRfc3339,
+} from "./time.ts";

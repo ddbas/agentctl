@@ -1,0 +1,15 @@
+Installed agentctl plugin for claude (11 hook entries):
+  + ~/.claude/skills/agentctl/.claude-plugin/plugin.json
+  + ~/.claude/skills/agentctl/hooks/hooks.json
+    SessionStart (startup|resume|clear) → id=$(cat | jq -r '.session_id'); agentctl agent event SESSION_STARTED --id "$id" --harness claude
+    UserPromptSubmit                    → id=$(cat | jq -r '.session_id'); agentctl agent event RUN_STARTED --id "$id" --harness claude [async]
+    PreToolUse                          → id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_START --id "$id" --harness claude [async]
+    PreToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_START --id "$id" --type elicitation --harness claude [async]
+    PostToolUse                         → id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id "$id" --harness claude [async]
+    PostToolUse (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude [async]
+    PostToolUseFailure                  → id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id "$id" --harness claude [async]
+    PostToolUseFailure (AskUserQuestion|ExitPlanMode) → id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id "$id" --type elicitation --harness claude [async]
+    Stop                                → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); agentctl agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
+    StopFailure                         → payload=$(cat); id=$(echo "$payload" | jq -r '.session_id'); n=$(echo "$payload" | jq -r '(.background_tasks // []) | length'); agentctl agent event RUN_FINISHED --id "$id" --active-tools "$n" --harness claude [async]
+    SessionEnd                          → agentctl agent clear
+(requires `jq` on PATH to parse hook payloads)

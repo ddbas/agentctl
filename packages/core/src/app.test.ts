@@ -36,7 +36,7 @@ class MemoryRepo implements AgentRepository {
 
 const runtime = (env: Record<string, string> = {}): Runtime => ({
   env: (n) => env[n],
-  now: () => new Date("2026-01-01T00:00:00.000Z"),
+  nowTimestamp: () => "2026-01-01T00:00:00Z",
   stdoutIsTerminal: false,
   version: "9.9.9",
   logDir: () => "/home/u/logs",

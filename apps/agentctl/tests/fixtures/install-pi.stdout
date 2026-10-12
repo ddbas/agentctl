@@ -1,0 +1,8 @@
+Installed agentctl extension for pi:
+  + ~/.pi/agent/extensions/agentctl.ts
+    session_start        → agentctl agent event SESSION_STARTED --harness pi
+    before_agent_start   → agentctl agent event RUN_STARTED --harness pi
+    agent_settled        → agentctl agent event RUN_FINISHED --harness pi
+    tool_call            → agentctl agent event TOOL_CALL_START --harness pi
+    tool_result          → agentctl agent event TOOL_CALL_RESULT --harness pi
+    session_shutdown     → agentctl agent clear

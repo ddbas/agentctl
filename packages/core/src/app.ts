@@ -21,7 +21,6 @@ import type {
   Runtime,
   Tmux,
 } from "./ports.ts";
-import { formatTimestamp } from "./time.ts";
 
 export interface AppDeps {
   repo: AgentRepository;
@@ -136,7 +135,7 @@ export class App {
       ...(toolCallType === undefined ? {} : { type: toolCallType }),
       harness: harnessStr,
       pane_id: paneId,
-      timestamp: formatTimestamp(runtime.now()),
+      timestamp: runtime.nowTimestamp(),
     };
     repo.appendEvent(paneId, record);
   }

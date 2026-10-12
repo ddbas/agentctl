@@ -1,0 +1,121 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id \"$id\" --harness claude",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id \"$id\" --type elicitation --harness claude",
+            "type": "command"
+          }
+        ],
+        "matcher": "AskUserQuestion|ExitPlanMode"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id \"$id\" --harness claude",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_RESULT --id \"$id\" --type elicitation --harness claude",
+            "type": "command"
+          }
+        ],
+        "matcher": "AskUserQuestion|ExitPlanMode"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_START --id \"$id\" --harness claude",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.tool_use_id'); agentctl agent event TOOL_CALL_START --id \"$id\" --type elicitation --harness claude",
+            "type": "command"
+          }
+        ],
+        "matcher": "AskUserQuestion|ExitPlanMode"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "agentctl agent clear",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "id=$(cat | jq -r '.session_id'); agentctl agent event SESSION_STARTED --id \"$id\" --harness claude",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|resume|clear"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "payload=$(cat); id=$(echo \"$payload\" | jq -r '.session_id'); n=$(echo \"$payload\" | jq -r '(.background_tasks // []) | length'); agentctl agent event RUN_FINISHED --id \"$id\" --active-tools \"$n\" --harness claude",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "payload=$(cat); id=$(echo \"$payload\" | jq -r '.session_id'); n=$(echo \"$payload\" | jq -r '(.background_tasks // []) | length'); agentctl agent event RUN_FINISHED --id \"$id\" --active-tools \"$n\" --harness claude",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "id=$(cat | jq -r '.session_id'); agentctl agent event RUN_STARTED --id \"$id\" --harness claude",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

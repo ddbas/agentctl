@@ -63,7 +63,8 @@ export interface Logger {
 export interface Runtime {
   /** Environment variable lookup. */
   env(name: string): string | undefined;
-  now(): Date;
+  /** Current instant as a chrono-style RFC 3339 UTC string. */
+  nowTimestamp(): string;
   /** Whether stdout is a terminal (controls colored output). */
   stdoutIsTerminal: boolean;
   version: string;
