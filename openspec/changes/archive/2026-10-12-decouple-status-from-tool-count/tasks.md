@@ -37,6 +37,6 @@
 
 - [x] 4.1 Run the full test suite via `mise run` (per AGENTS.md) and confirm
       green
-- [ ] 4.2 Optional spike: in a testcontainer, run Claude with a short background
-      shell and inspect `events.jsonl` to confirm whether a wake-up turn emits
-      `UserPromptSubmit`
+- [x] 4.2 (skipped) Optional spike: in a testcontainer, run Claude with a short
+      background shell and inspect `events.jsonl` to confirm whether a wake-up
+      turn emits `UserPromptSubmit`
