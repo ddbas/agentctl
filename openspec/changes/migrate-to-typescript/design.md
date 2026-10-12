@@ -75,8 +75,11 @@ second runtime outside the pnpm/node brief).
 ### 3. Distribution: private package + `pnpm link --global`
 
 `apps/agentctl/package.json` is private with a `bin` entry pointing at the
-bundle. Replaces `cargo install --path .` in the README. _Alternatives:_ npm
-publish (needs release workflow, changesets), standalone binaries (heaviest CI).
+bundle. Replaces `cargo install --path .` in the README. pnpm 12 removed
+`pnpm link --global` (and `pnpm add -g link:` does not link bins), so the root
+script `pnpm install:local` builds the bundle (made executable by an Rspack
+plugin) and symlinks it to `~/.local/bin/agentctl`. _Alternatives:_ npm publish
+(needs release workflow, changesets), standalone binaries (heaviest CI).
 
 ### 4. CLI: commander
 
@@ -213,6 +216,19 @@ installed binary). After cutover, revert the cutover commit to restore Rust.
   `false`) in `pnpm-workspace.yaml`.
 - Biome 2.5: `rules.preset: "recommended"`; `noRestrictedImports` lives under
   `style`. TypeScript 7.0.2, vitest 5, Biome and Rspack all work together.
+
+## Phase 2 findings
+
+- Cold start of `agent event` (20-run average, release Rust vs bundle): Rust ~5
+  ms, TS bundle ~48 ms (bare `node -e 0` is ~29 ms). Within the agreed 100 ms
+  budget, so no hand-rolled logger / valibot / lazy imports were needed.
+- Stdout of `list` (all sort/columns variants, against a live host tmux with
+  Rust-written state), `help`, `--help`, `-h`, `--version`, `info` is
+  byte-identical between the Rust and TS binaries. Written state/events files
+  and install/uninstall output are identical apart from timestamps; clap's
+  usage-error text differs from commander's (accepted, exit code 2 preserved).
+- `-h` short help and root `--help` are served from fixtures captured from the
+  Rust binary; subcommand `--help` uses commander's default format.
 
 ## Open Questions
 

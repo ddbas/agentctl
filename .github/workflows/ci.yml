@@ -13,10 +13,27 @@ env:
   MISE_EXPERIMENTAL: true
 
 jobs:
+  # TypeScript implementation: build, typecheck, lint, and test (including the
+  # e2e suite against the bundled TS binary).
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v3
-      - run: mise run ci
+      - run: mise exec -- pnpm install --frozen-lockfile
+      - run: mise exec -- pnpm turbo run ci
+
+  # Temporary reference leg (removed at cutover): runs the same vitest e2e
+  # suite against the Rust binary to prove the ported tests are correct.
+  e2e-rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v3
+      - run: mise exec -- cargo build
+      - run: mise exec -- pnpm install --frozen-lockfile
+      - run: mise exec -- pnpm --filter agentctl run test:e2e
+        env:
+          AGENTCTL_BIN: ${{ github.workspace }}/target/debug/agentctl

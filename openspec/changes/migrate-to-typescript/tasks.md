@@ -18,7 +18,7 @@
       record any workarounds
 - [x] 1.9 Measure cold start of a hello-world bundle with pino + zod imported vs
       Rust `agentctl agent event`; record budget in design.md Open Questions
-- [ ] 1.10 Capture Rust-written fixtures (state.json, events.jsonl,
+- [x] 1.10 Capture Rust-written fixtures (state.json, events.jsonl,
       list/info/help stdout) from the Rust binary into
       `apps/agentctl/tests/fixtures/`
 
@@ -33,22 +33,22 @@
       (`AGENTCTL_BIN=target/debug/agentctl`) and confirm green
 - [x] 2.4 Port `agent_commands`, `hooks`, and `list_sessions` e2e tests; confirm
       green against Rust
-- [ ] 2.5 Add a CI job leg that builds Rust and runs the vitest e2e suite with
+- [x] 2.5 Add a CI job leg that builds Rust and runs the vitest e2e suite with
       `AGENTCTL_BIN` set to the Rust binary
 
 ## 3. Phase 1: Leaf modules (parallel; one folder each)
 
 - [x] 3.1 Port `agentctl-state` (status FSM transition table, `AgentInfo`) with
       its unit tests into `packages/core`
-- [ ] 3.2 Port `agentctl-logging` to `packages/adapters/src/logging` using pino;
+- [x] 3.2 Port `agentctl-logging` to `packages/adapters/src/logging` using pino;
       match `structured-logging` spec (file path, level, line format)
-- [ ] 3.3 Port `agentctl-state-fs` to `packages/adapters/src/state-fs` with zod
+- [x] 3.3 Port `agentctl-state-fs` to `packages/adapters/src/state-fs` with zod
       schemas; test against Rust-written fixtures
-- [ ] 3.4 Port `agentctl-tmux` to `packages/adapters/src/tmux` using `execFile`;
+- [x] 3.4 Port `agentctl-tmux` to `packages/adapters/src/tmux` using `execFile`;
       port its unit tests
-- [ ] 3.5 Port `agentctl-harness-pi` to `packages/adapters/src/harness-pi`;
+- [x] 3.5 Port `agentctl-harness-pi` to `packages/adapters/src/harness-pi`;
       output files identical to Rust's (diff test)
-- [ ] 3.6 Port `agentctl-harness-claude` to
+- [x] 3.6 Port `agentctl-harness-claude` to
       `packages/adapters/src/harness-claude`; output files identical to Rust's
       (diff test)
 
@@ -58,16 +58,16 @@
       resolution) with its unit tests
 - [x] 4.2 Port `agentctl-core` `App` use cases (install, uninstall,
       dispatchEvent, clear, info)
-- [ ] 4.3 Implement `apps/agentctl` commander wiring and composition root; match
+- [x] 4.3 Implement `apps/agentctl` commander wiring and composition root; match
       clap help text, aliases, global `--log-level`, and `AGENTCTL_TMUX_SOCKET`
       fallback
-- [ ] 4.4 Make every e2e test pass against the TS bundle
-- [ ] 4.5 Diff stdout of the Rust and TS binaries for `list`, `info`, `help` on
+- [x] 4.4 Make every e2e test pass against the TS bundle
+- [x] 4.5 Diff stdout of the Rust and TS binaries for `list`, `info`, `help` on
       shared fixtures; resolve all differences
-- [ ] 4.6 Run `agent event` cold-start measurement against the agreed budget;
+- [x] 4.6 Run `agent event` cold-start measurement against the agreed budget;
       adjust (hand-rolled logger / valibot / lazy imports) if exceeded
-- [ ] 4.7 Verify `pnpm link --global` provides `agentctl` on PATH and installed
-      pi/claude hooks work end to end
+- [x] 4.7 Verify the linked `agentctl` (`pnpm install:local`; pnpm 12 has no
+      `link --global`) is on PATH and installed pi/claude hooks work end to end
 
 ## 5. Phase 3: Cutover (serial)
 

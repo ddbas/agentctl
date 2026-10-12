@@ -12,8 +12,6 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "lint": "biome check .",
-    "build": "echo core has no build step",
-    "ci": "true"
+    "lint": "biome check ."
   }
 }

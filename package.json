@@ -6,16 +6,18 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "biome check . && prettier --check \"**/*.md\"",
-    "format": "biome check --write . && prettier --write \"**/*.md\"",
+    "lint": "turbo run lint //#lint:md",
     "test": "turbo run test",
-    "ci": "turbo run ci"
+    "lint:md": "prettier --check \"**/*.md\"",
+    "format": "biome check --write . && prettier --write \"**/*.md\"",
+    "install:local": "turbo run build --filter=agentctl && mkdir -p \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}\" && ln -sf \"$PWD/apps/agentctl/dist/cli.cjs\" \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}/agentctl\""
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@types/node": "26.6.5",
     "turbo": "2.11.7",
     "typescript": "7.0.2",
-    "vitest": "5.0.4"
+    "vitest": "5.0.4",
+    "prettier": "3.9.10"
   }
 }

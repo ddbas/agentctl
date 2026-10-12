@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { chmodSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { rspack } from "@rspack/core";
 
 const pkg = JSON.parse(
@@ -30,6 +31,16 @@ export default {
       raw: true,
       entryOnly: true,
     }),
+    {
+      // Make the bundle directly executable (it carries a shebang).
+      apply(compiler: {
+        hooks: { afterEmit: { tap: (name: string, fn: () => void) => void } };
+      }) {
+        compiler.hooks.afterEmit.tap("chmod-bin", () => {
+          chmodSync(join(import.meta.dirname, "dist", "cli.cjs"), 0o755);
+        });
+      },
+    },
     new rspack.DefinePlugin({
       __AGENTCTL_VERSION__: JSON.stringify(pkg.version),
     }),

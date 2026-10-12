@@ -2,3 +2,9 @@
 .agents/
 .pi/
 .opencode/
+node_modules/
+dist/
+.turbo/
+pnpm-lock.yaml
+target/
+**/fixtures/

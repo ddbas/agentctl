@@ -14,7 +14,6 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "lint": "biome check .",
-    "build": "echo adapters has no build step"
+    "lint": "biome check ."
   }
 }
