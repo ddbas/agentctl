@@ -13,8 +13,8 @@ state machine, and appends every dispatched event to an append-only
 
 The system SHALL provide
 `agentctl agent event <EVENT_NAME> [--id <ID>] [--type <TYPE>] [--harness <HARNESS>] [--pane <PANE_ID>]`
-as nested clap subcommands, one per supported event name. Supported event names
-are `SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and
+as nested subcommands, one per supported event name. Supported event names are
+`SESSION_STARTED`, `RUN_STARTED`, `RUN_FINISHED`, `TOOL_CALL_START`, and
 `TOOL_CALL_RESULT`.
 
 #### Scenario: Unknown event name is rejected
@@ -123,10 +123,10 @@ with accepted values `custom` and `elicitation`. `SESSION_STARTED`,
 ### Requirement: Events derive status via a finite state machine
 
 The system SHALL derive the pane's `status` field from the sequence of
-dispatched events using a finite state machine (implemented with the `rust-fsm`
-crate) with states `Idle`, `Working`, `Blocked`, `Done`. `Idle` SHALL be the
-machine's declared start state and `Done` SHALL be its declared end state. The
-machine SHALL apply the following transitions:
+dispatched events using a finite state machine (implemented as an exhaustive
+transition table) with states `Idle`, `Working`, `Blocked`, `Done`. `Idle` SHALL
+be the machine's declared start state and `Done` SHALL be its declared end
+state. The machine SHALL apply the following transitions:
 
 - Any status on `SESSION_STARTED` → `Idle`
 - `Idle` on `RUN_STARTED` → `Working`

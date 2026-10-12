@@ -82,4 +82,4 @@
       guidance, no cargo), and `openspec/config.yaml` tech stack
 - [x] 5.6 Re-index codegraph and confirm no references to removed crates remain
 - [x] 5.7 Run `pnpm turbo run ci` and `openspec validate --all --no-interactive`
-- [ ] 5.8 Archive the change so delta specs update `openspec/specs/`
+- [x] 5.8 Archive the change so delta specs update `openspec/specs/`

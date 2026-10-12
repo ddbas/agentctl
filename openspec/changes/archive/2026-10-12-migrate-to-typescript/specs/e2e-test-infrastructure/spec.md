@@ -1,18 +1,20 @@
 ## RENAMED Requirements
 
+<!-- prettier-ignore-start -->
 - FROM: `### Requirement: Tests directory exists with integration test support`
 - TO: `### Requirement: E2E test workspace exists with vitest`
-
 - FROM: `### Requirement: Shared test helper module`
 - TO: `### Requirement: Shared e2e helper module`
 
-- FROM:
-  `### Requirement: agentctl binary runner targets the isolated tmux socket`
-- TO:
-  `### Requirement: agentctl runner targets the isolated tmux socket and a selectable binary`
+<!-- prettier-ignore-start -->
+- FROM: `### Requirement: agentctl binary runner targets the isolated tmux socket`
+- TO: `### Requirement: agentctl runner targets the isolated tmux socket and a selectable binary`
+<!-- prettier-ignore-end -->
 
 - FROM: `### Requirement: Async container-backed tests with Tokio runtime`
 - TO: `### Requirement: Async container-backed tests`
+
+<!-- prettier-ignore-end -->
 
 ## MODIFIED Requirements
 

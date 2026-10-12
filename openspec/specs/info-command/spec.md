@@ -17,7 +17,8 @@ filesystem writes. The printed keys, in order, SHALL be: `version`, `log level`,
 
 - **WHEN** the user runs `agentctl info`
 - **THEN** the command prints exactly four `key: value` lines, in order:
-  `version: <CARGO_PKG_VERSION>`, `log level: <effective log level>`,
+  `version: <package version of apps/agentctl>`,
+  `log level: <effective log level>`,
   `log directory: <tilde-abbreviated log directory path>`,
   `current log file: <tilde-abbreviated current log file path>`
 - **AND** no files or directories are created or modified as a result

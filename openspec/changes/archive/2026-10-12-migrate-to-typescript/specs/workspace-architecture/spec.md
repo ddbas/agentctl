@@ -1,29 +1,19 @@
 ## RENAMED Requirements
 
+<!-- prettier-ignore-start -->
 - FROM: `### Requirement: agentctl is organized as a Cargo workspace`
 - TO: `### Requirement: agentctl is organized as a pnpm and Turborepo workspace`
-
-- FROM:
-  `### Requirement: agentctl-state-fs is the sole filesystem access point for agent-state persistence`
-- TO:
-  `### Requirement: The state-fs adapter is the sole filesystem access point for agent-state persistence`
-
-- FROM:
-  `### Requirement: Harness integrations are defined by a shared trait and one crate per harness`
-- TO:
-  `### Requirement: Harness integrations are defined by a shared interface and one module per harness`
-
-- FROM:
-  `### Requirement: agentctl-core contains all business logic and depends only on trait ports`
-- TO:
-  `### Requirement: The core package contains all business logic and depends only on interface ports`
-
+- FROM: `### Requirement: agentctl-state-fs is the sole filesystem access point for agent-state persistence`
+- TO: `### Requirement: The state-fs adapter is the sole filesystem access point for agent-state persistence`
+- FROM: `### Requirement: Harness integrations are defined by a shared trait and one crate per harness`
+- TO: `### Requirement: Harness integrations are defined by a shared interface and one module per harness`
+- FROM: `### Requirement: agentctl-core contains all business logic and depends only on trait ports`
+- TO: `### Requirement: The core package contains all business logic and depends only on interface ports`
 - FROM: `### Requirement: agentctl binary is a thin composition root`
 - TO: `### Requirement: The agentctl app is a thin composition root`
-
-- FROM:
-  `### Requirement: Every library crate depends on agentctl-logging for its logging interface`
+- FROM: `### Requirement: Every library crate depends on agentctl-logging for its logging interface`
 - TO: `### Requirement: Every library module logs through the core Logger port`
+<!-- prettier-ignore-end -->
 
 ## MODIFIED Requirements
 
