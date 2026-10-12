@@ -1,18 +1,15 @@
-# Build
-target/
-
 # macOS
 .DS_Store
+
+# Node / TypeScript
+node_modules/
+dist/
+.turbo/
+.vitest/
+*.tsbuildinfo
 
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
 .beads-credential-key
 .beads/proxieddb/
-
-# Node / TypeScript
-node_modules/
-dist/
-.turbo/
-*.tsbuildinfo
-.vitest/

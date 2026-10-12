@@ -3,6 +3,6 @@ schema: spec-driven
 # Project context (optional)
 # This is shown to AI when creating artifacts.
 context: |
-  Tech stack: Rust, Cargo
+  Tech stack: TypeScript (Node 26), pnpm, Turborepo, Rspack, Biome, vitest
   CLI binary: agentctl
   We use conventional commits

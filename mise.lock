@@ -183,11 +183,3 @@ provenance = "github-attestations"
 version = "3.8.5"
 backend = "npm:prettier"
 specifiers = ["latest"]
-
-[[tools.rust]]
-version = "1.96.0"
-backend = "core:rust"
-specifiers = ["1.96.0"]
-
-[tools.rust.options]
-profile = "default"

@@ -5,9 +5,15 @@ across your tmux sessions.
 
 ## Installation
 
+Requires [mise](https://mise.jdx.dev) (pins Node and pnpm) and `tmux`.
+
 ```bash
-cargo install --path .
+mise install
+mise exec -- pnpm install --frozen-lockfile
+mise exec -- pnpm install:local   # builds the bundle and symlinks ~/.local/bin/agentctl
 ```
+
+Set `AGENTCTL_INSTALL_DIR` to install somewhere other than `~/.local/bin`.
 
 ## Usage
 
@@ -266,9 +272,9 @@ enters `blocked` today.
 
 ### Status model
 
-`status` is derived from the event stream by a finite state machine (built on
-the `rust-fsm` crate) rather than being set directly. Each agent pane can be in
-one of five statuses:
+`status` is derived from the event stream by a finite state machine (a small
+transition table in `packages/core`) rather than being set directly. Each agent
+pane can be in one of five statuses:
 
 | Status    | Meaning                             |
 | --------- | ----------------------------------- |

@@ -97,10 +97,10 @@ binary doesn't know how to run, and nothing currently cleans them up.
   `main` subcommand and clap's exhaustive `AgentSubcommand` enum means any
   future reuse of that name would need a deliberate, reviewed code change;
   revisit the predicate then if needed.
-- [Only fixes settings.json files already on disk the next time `agentctl
-  install claude`/`agentctl uninstall claude` runs — doesn't retroactively fix
-  files without a user action] → Consistent with how every prior rename
-  migration in this codebase already works (documented precedent in
+- [Only fixes settings.json files already on disk the next time
+  `agentctl install claude`/`agentctl uninstall claude` runs — doesn't
+  retroactively fix files without a user action] → Consistent with how every
+  prior rename migration in this codebase already works (documented precedent in
   `claude-state-hooks` spec's existing migration scenarios); no new precedent
   being set.
 

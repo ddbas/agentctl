@@ -10,20 +10,19 @@ pre-commit:
       group:
         parallel: true
         jobs:
-          - name: rust
-            glob: "*.rs"
-            run: mise run format
+          - name: biome
+            glob: "*.{ts,json}"
+            run: mise exec -- pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
             stage_fixed: true
           - name: markdown
             glob: "*.md"
-            run: mise exec -- prettier --write {staged_files}
+            run: mise exec -- pnpm exec prettier --write {staged_files}
             stage_fixed: true
     - name: lint
-      glob: "*.rs"
-      run: mise run lint --fix
-      stage_fixed: true
+      glob: "*.{ts,json,md}"
+      run: mise exec -- pnpm turbo run lint typecheck //#lint:md
     - name: test
-      run: mise run test
+      run: mise exec -- pnpm test
     - name: openspec-validate
       glob: "openspec/**"
       run: mise exec -- openspec validate --all --no-interactive

@@ -71,15 +71,15 @@
 
 ## 5. Phase 3: Cutover (serial)
 
-- [ ] 5.1 Remove `crates/`, `Cargo.toml`, `Cargo.lock`, and `target/` ignore
+- [x] 5.1 Remove `crates/`, `Cargo.toml`, `Cargo.lock`, and `target/` ignore
       entry
-- [ ] 5.2 Remove the Rust e2e CI leg; confirm no e2e test file changed
-- [ ] 5.3 Strip Rust from `mise.toml` (toolchain, `task_templates`, `[monorepo]`
+- [x] 5.2 Remove the Rust e2e CI leg; confirm no e2e test file changed
+- [x] 5.3 Strip Rust from `mise.toml` (toolchain, `task_templates`, `[monorepo]`
       roots, per-crate `mise.toml` files); keep tool pins
-- [ ] 5.4 Update `lefthook.yml` (replace `*.rs` hooks with
+- [x] 5.4 Update `lefthook.yml` (replace `*.rs` hooks with
       Biome/turbo/prettier-md) and `.github/workflows/ci.yml`
-- [ ] 5.5 Update `README.md` install and usage, `AGENTS.md` (mise/turbo
+- [x] 5.5 Update `README.md` install and usage, `AGENTS.md` (mise/turbo
       guidance, no cargo), and `openspec/config.yaml` tech stack
-- [ ] 5.6 Re-index codegraph and confirm no references to removed crates remain
-- [ ] 5.7 Run `pnpm turbo run ci` and `openspec validate --all --no-interactive`
+- [x] 5.6 Re-index codegraph and confirm no references to removed crates remain
+- [x] 5.7 Run `pnpm turbo run ci` and `openspec validate --all --no-interactive`
 - [ ] 5.8 Archive the change so delta specs update `openspec/specs/`
