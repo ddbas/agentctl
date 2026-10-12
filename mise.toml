@@ -25,6 +25,11 @@ description = "Build the cargo workspace"
 run = "mise exec -- cargo build"
 sources = ["Cargo.toml", "src/**/*.rs"]
 
+[task_templates."build:release"]
+description = "Build the cargo workspace"
+run = "mise exec -- cargo build --release"
+sources = ["Cargo.toml", "src/**/*.rs"]
+
 [task_templates.dev]
 description = "Run the cargo workspace"
 run = "mise exec -- cargo run"
@@ -37,6 +42,10 @@ sources = ["Cargo.toml", "src/**/*.rs", "tests/**/*.rs"]
 [tasks.build]
 description = "Build the cargo workspaces"
 run = "mise run //crates/...:build"
+
+[tasks."build:release"]
+description = "Build the cargo workspaces"
+run = "mise run //crates/...:build:release"
 
 [tasks.ci]
 description = "Run the CI tasks"

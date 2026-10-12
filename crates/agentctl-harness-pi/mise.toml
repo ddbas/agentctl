@@ -3,5 +3,8 @@
 [tasks.build]
 extends = "build"
 
+[tasks."build:release"]
+extends = "build:release"
+
 [tasks.test]
 extends = "test"

@@ -3,6 +3,9 @@
 [tasks.build]
 extends = "build"
 
+[tasks."build:release"]
+extends = "build:release"
+
 [tasks."build:test-image"]
 description = "Build the Docker image used by TmuxEnv in integration tests"
 run = "docker build -t am-tmux-test:latest tests/"
