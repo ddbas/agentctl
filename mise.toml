@@ -1,6 +1,6 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
-# mise only pins tools. Tasks live in package.json / turbo.json.
+# mise pins tools and exposes tasks that delegate to the pnpm scripts in package.json.
 
 [settings]
 experimental = true
@@ -17,3 +17,31 @@ lefthook = "latest"
 node = "26.11.1"
 pnpm = "12.10.1"
 prettier = "latest"
+
+[tasks.build]
+description = "Build all packages"
+run = "pnpm run build"
+
+[tasks.typecheck]
+description = "Typecheck all packages"
+run = "pnpm run typecheck"
+
+[tasks.lint]
+description = "Lint all packages and markdown"
+run = "pnpm run lint"
+
+[tasks.test]
+description = "Run all tests"
+run = "pnpm run test"
+
+[tasks."lint:md"]
+description = "Check markdown formatting"
+run = "pnpm run lint:md"
+
+[tasks.format]
+description = "Format code and markdown"
+run = "pnpm run format"
+
+[tasks."install:local"]
+description = "Build and symlink agentctl into the local bin dir"
+run = "pnpm run install:local"
