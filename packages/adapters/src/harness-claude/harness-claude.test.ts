@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTmp, readFixture } from "../test-support.ts";
+import manifestAsset from "./assets/.claude-plugin/plugin.json?raw";
+import hooksAsset from "./assets/hooks/hooks.json?raw";
 import {
-  buildClaudeHooksJson,
-  CLAUDE_HOOKS,
   formatClaudeUninstallSummary,
   installClaudeTo,
   uninstallClaudeTo,
@@ -13,7 +13,7 @@ import {
 afterEach(() => vi.unstubAllEnvs());
 
 const pluginDir = (home: string) => join(home, ".claude", "skills", "agentctl");
-const FIXTURE_DIR = "home/.claude/skills/agentctl";
+const assetHooks = (): Hooks => JSON.parse(hooksAsset).hooks;
 
 type Hooks = Record<
   string,
@@ -23,15 +23,15 @@ const readHooks = (dir: string): Hooks =>
   JSON.parse(readFileSync(join(dir, "hooks", "hooks.json"), "utf8")).hooks;
 
 describe("claude harness", () => {
-  it("writes files byte-identical to the Rust-generated ones", () => {
+  it("copies the asset files verbatim", () => {
     const dir = pluginDir(makeTmp());
     installClaudeTo(dir);
     expect(readFileSync(join(dir, "hooks", "hooks.json"), "utf8")).toBe(
-      readFixture(FIXTURE_DIR, "hooks", "hooks.json"),
+      hooksAsset,
     );
     expect(
       readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8"),
-    ).toBe(readFixture(FIXTURE_DIR, ".claude-plugin", "plugin.json"));
+    ).toBe(manifestAsset);
   });
 
   it("install summary matches the Rust output", () => {
@@ -43,8 +43,8 @@ describe("claude harness", () => {
   });
 
   it("registers eleven entries across the expected events", () => {
-    expect(CLAUDE_HOOKS).toHaveLength(11);
-    const hooks = (buildClaudeHooksJson() as { hooks: Hooks }).hooks;
+    const hooks = assetHooks();
+    expect(Object.values(hooks).flat()).toHaveLength(11);
     for (const e of [
       "SessionStart",
       "UserPromptSubmit",
@@ -61,7 +61,7 @@ describe("claude harness", () => {
   });
 
   it("async flags, matchers and commands", () => {
-    const hooks = (buildClaudeHooksJson() as { hooks: Hooks }).hooks;
+    const hooks = assetHooks();
     const first = (e: string) => hooks[e]?.[0];
     expect(first("SessionStart")?.matcher).toBe("startup|resume|clear");
     expect(first("SessionStart")?.hooks[0]?.async).toBeUndefined();

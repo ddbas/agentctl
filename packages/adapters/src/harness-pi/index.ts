@@ -1,3 +1,4 @@
+/// <reference path="../assets.d.ts" />
 import {
   existsSync,
   mkdirSync,
@@ -9,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Harness } from "@agentctl/core";
 import { tildeCollapse } from "../paths.ts";
-import { PI_EXTENSION_CONTENT } from "./extension.ts";
+import PI_EXTENSION_CONTENT from "./assets/agentctl.ts?raw";
 
 export { PI_EXTENSION_CONTENT };
 

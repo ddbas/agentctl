@@ -16,12 +16,15 @@ export default {
     rules: [
       {
         test: /\.ts$/,
+        resourceQuery: { not: [/raw/] },
         loader: "builtin:swc-loader",
         options: {
           jsc: { parser: { syntax: "typescript" }, target: "es2023" },
         },
         type: "javascript/auto",
       },
+      // Hook assets (`import x from "./assets/foo?raw"`) are embedded as text.
+      { resourceQuery: /raw/, type: "asset/source" },
     ],
   },
   optimization: { minimize: false },

@@ -1,9 +1,6 @@
 export { nowTimestamp } from "./clock.ts";
 export {
-  buildClaudeHooksJson,
-  CLAUDE_HOOKS,
   ClaudeHarness,
-  claudePluginManifest,
   defaultClaudePluginDir,
   installClaudeTo,
   uninstallClaudeTo,
