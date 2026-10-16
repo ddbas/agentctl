@@ -6,7 +6,8 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint:biome //#lint:prettier",
+    "lint": "turbo run //#lint:biome //#lint:prettier",
+    "lint:biome": "biome check .",
     "test": "turbo run test",
     "lint:prettier": "prettier --check \"**/*.md\"",
     "preinstall:local": "turbo run build --filter=agentctl",

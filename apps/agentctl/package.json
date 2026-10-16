@@ -25,7 +25,6 @@
     "build": "rspack build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "pnpm run build:test-image && vitest run",
-    "lint:biome": "biome check .",
     "build:test-image": "docker build -q -t am-tmux-test:latest tests/",
     "test:e2e": "pnpm run build:test-image && vitest run tests/e2e"
   }
