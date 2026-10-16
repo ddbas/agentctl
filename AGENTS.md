@@ -7,6 +7,8 @@ pnpm Turborepo monorepo. It uses `mise` to manage tools and tasks.
 
 - You MUST never update any `AGENTS.md` files without explicit permission from
   the user.
+- You MUST never skip git hooks. If a git hook fails, you MUST address or fix
+  the reported issue.
 
 ## Layout
 
