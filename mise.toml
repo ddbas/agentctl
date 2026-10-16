@@ -16,7 +16,6 @@ lefthook = "latest"
 "npm:@fission-ai/openspec" = "latest"
 node = "26.11.1"
 pnpm = "12.10.1"
-prettier = "latest"
 
 [tasks.build]
 description = "Build all packages"

@@ -20,9 +20,9 @@ pre-commit:
             stage_fixed: true
     - name: lint
       glob: "*.{ts,json,md}"
-      run: mise exec -- pnpm turbo run lint typecheck //#lint:md
+      run: "mise run lint ::: typecheck"
     - name: test
-      run: mise exec -- pnpm test
+      run: mise run test
     - name: openspec-validate
       glob: "openspec/**"
       run: mise exec -- openspec validate --all --no-interactive
