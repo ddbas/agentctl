@@ -29,14 +29,6 @@ run = "pnpm run typecheck"
 description = "Run all linters (biome and prettier)"
 run = "pnpm run lint"
 
-[tasks."lint:biome"]
-description = "Lint and check formatting with biome"
-run = "pnpm run lint:biome"
-
-[tasks."lint:prettier"]
-description = "Check markdown formatting with prettier"
-run = "pnpm run lint:prettier"
-
 [tasks.test]
 description = "Run all tests"
 run = "pnpm run test"
