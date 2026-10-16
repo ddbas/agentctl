@@ -10,7 +10,7 @@ Requires [mise](https://mise.jdx.dev) (pins Node and pnpm) and `tmux`.
 ```bash
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- pnpm install:local   # builds the bundle and symlinks ~/.local/bin/agentctl
+mise run install             # builds the bundle and symlinks ~/.local/bin/agentctl
 ```
 
 Set `AGENTCTL_INSTALL_DIR` to install somewhere other than `~/.local/bin`.

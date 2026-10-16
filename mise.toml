@@ -41,6 +41,6 @@ run = "pnpm run lint:md"
 description = "Format code and markdown"
 run = "pnpm run format"
 
-[tasks."install:local"]
+[tasks.install]
 description = "Build and symlink agentctl into the local bin dir"
 run = "pnpm run install:local"
