@@ -43,8 +43,8 @@ A pnpm + Turborepo TypeScript workspace:
 - `packages/core` — `App` use cases, list rendering, status FSM, and the port
   interfaces (`AgentRepository`, `Tmux`, `Harness`, `Logger`). Must not import
   infrastructure (enforced by a Biome `noRestrictedImports` rule).
-- `packages/adapters` — tmux, state-fs, harness-pi, harness-claude and logging
-  adapters, one folder each.
+- `packages/{tmux,state-fs,logging,harness-pi,harness-claude}` — one adapter
+  package each adapters, one folder each.
 
 ## Running Tasks
 

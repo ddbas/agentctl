@@ -7,8 +7,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeTmp, readFixture } from "../test-support.ts";
 import { installPiTo, PI_EXTENSION_CONTENT, uninstallPiTo } from "./index.ts";
+import { makeTmp, readFixture } from "./test-support.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 

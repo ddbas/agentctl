@@ -7,8 +7,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeTmp } from "../test-support.ts";
 import { currentLogFile, initLogging, logDir, pruneLogs } from "./index.ts";
+import { makeTmp } from "./test-support.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 

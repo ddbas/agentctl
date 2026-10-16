@@ -115,8 +115,8 @@ not supplied.
 
 The `agentctl install pi` subcommand SHALL write the agentctl TypeScript
 extension to `~/.pi/agent/extensions/agentctl.ts` by copying the standalone
-asset `packages/adapters/src/harness-pi/assets/agentctl.ts` verbatim. The file
-SHALL subscribe to `session_start`, `before_agent_start`, `agent_settled`,
+asset `packages/harness-pi/src/assets/agentctl.ts` verbatim. The file SHALL
+subscribe to `session_start`, `before_agent_start`, `agent_settled`,
 `session_shutdown`, `tool_call`, and `tool_result` events and call the
 appropriate `agentctl agent event` / `agentctl agent clear` commands. The
 command SHALL be idempotent: re-running when the file content is already

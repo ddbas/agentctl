@@ -7,7 +7,11 @@
     "agentctl": "./dist/cli.cjs"
   },
   "dependencies": {
-    "@agentctl/adapters": "workspace:*",
+    "@agentctl/harness-claude": "workspace:*",
+    "@agentctl/harness-pi": "workspace:*",
+    "@agentctl/logging": "workspace:*",
+    "@agentctl/state-fs": "workspace:*",
+    "@agentctl/tmux": "workspace:*",
     "@agentctl/core": "workspace:*",
     "commander": "15.0.0",
     "picocolors": "1.1.1"

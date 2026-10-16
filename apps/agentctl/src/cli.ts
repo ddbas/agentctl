@@ -1,20 +1,17 @@
-import {
-  ClaudeHarness,
-  currentLogFile,
-  ExecTmux,
-  FileAgentRepository,
-  initLogging,
-  logDir,
-  nowTimestamp,
-  PiHarness,
-  tildeCollapse,
-} from "@agentctl/adapters";
+import { homedir } from "node:os";
 import {
   type App,
   App as AppClass,
   type LogLevel,
+  nowTimestamp,
   type Runtime,
+  tildeCollapse,
 } from "@agentctl/core";
+import { ClaudeHarness } from "@agentctl/harness-claude";
+import { PiHarness } from "@agentctl/harness-pi";
+import { currentLogFile, initLogging, logDir } from "@agentctl/logging";
+import { FileAgentRepository } from "@agentctl/state-fs";
+import { ExecTmux } from "@agentctl/tmux";
 import { CommanderError } from "commander";
 import { LONG_HELP, SHORT_HELP } from "./help.ts";
 import { buildProgram, type ProgramDeps } from "./program.ts";
@@ -37,7 +34,7 @@ function createApp(logLevel: LogLevel, argv: string[]): App {
     version: VERSION,
     logDir: () => logDir(),
     currentLogFile: (dir) => currentLogFile(dir),
-    tildeCollapse: (path) => tildeCollapse(path),
+    tildeCollapse: (path) => tildeCollapse(path, homedir()),
   };
 
   return new AppClass({

@@ -17,9 +17,9 @@ import {
   type AgentState,
   type EventRecord,
   formatTimestamp,
+  nowTimestamp,
 } from "@agentctl/core";
 import { z } from "zod";
-import { nowTimestamp } from "../clock.ts";
 
 const RFC3339 =
   /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;

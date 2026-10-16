@@ -17,10 +17,12 @@ export {
   resolveFromProcessTable,
   validateStateFiles,
 } from "./panes.ts";
+export { tildeCollapse } from "./paths.ts";
 export * from "./ports.ts";
 export {
   formatMicros,
   formatTimestamp,
+  nowTimestamp,
   timestampMillis,
   toRfc3339,
 } from "./time.ts";

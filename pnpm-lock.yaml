@@ -190,12 +190,24 @@ importers:
 
   apps/agentctl:
     dependencies:
-      '@agentctl/adapters':
-        specifier: workspace:*
-        version: link:../../packages/adapters
       '@agentctl/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentctl/harness-claude':
+        specifier: workspace:*
+        version: link:../../packages/harness-claude
+      '@agentctl/harness-pi':
+        specifier: workspace:*
+        version: link:../../packages/harness-pi
+      '@agentctl/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
+      '@agentctl/state-fs':
+        specifier: workspace:*
+        version: link:../../packages/state-fs
+      '@agentctl/tmux':
+        specifier: workspace:*
+        version: link:../../packages/tmux
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -213,7 +225,25 @@ importers:
         specifier: 12.2.0
         version: 12.2.0
 
-  packages/adapters:
+  packages/core:
+    dependencies:
+      picocolors:
+        specifier: 1.1.1
+        version: 1.1.1
+
+  packages/harness-claude:
+    dependencies:
+      '@agentctl/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/harness-pi:
+    dependencies:
+      '@agentctl/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/logging:
     dependencies:
       '@agentctl/core':
         specifier: workspace:*
@@ -221,15 +251,21 @@ importers:
       pino:
         specifier: 10.4.0
         version: 10.4.0
+
+  packages/state-fs:
+    dependencies:
+      '@agentctl/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: 4.6.7
         version: 4.6.7
 
-  packages/core:
+  packages/tmux:
     dependencies:
-      picocolors:
-        specifier: 1.1.1
-        version: 1.1.1
+      '@agentctl/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

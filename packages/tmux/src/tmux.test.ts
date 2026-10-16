@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeTmp } from "../test-support.ts";
 import { ExecTmux, parsePanes, parseProcessTable } from "./index.ts";
+import { makeTmp } from "./test-support.ts";
 
 describe("parsePanes", () => {
   it("parses tab-delimited rows and tolerates bad numbers", () => {

@@ -34,13 +34,13 @@ implementation SHALL be readable by the TypeScript implementation.
 ### Requirement: agentctl is organized as a pnpm and Turborepo workspace
 
 The project SHALL be organized as a pnpm workspace orchestrated by Turborepo
-with exactly one application workspace and two library workspaces:
-`apps/agentctl` (the CLI executable and composition root), `packages/core`
-(domain types, the status state machine, use cases, and port interfaces) and
-`packages/adapters` (tmux, state-fs, harness-pi, harness-claude, and logging
-implementations, each in its own folder). Applications SHALL live under `apps/`;
-only libraries SHALL live under `packages/`. No Cargo manifest, Rust source, or
-`crates/` directory SHALL remain in the repository.
+with one application workspace and a set of library workspaces: `apps/agentctl`
+(the CLI executable and composition root), `packages/core` (domain types, the
+status state machine, use cases, and port interfaces) and one adapter package
+each for `packages/tmux`, `packages/state-fs`, `packages/logging`,
+`packages/harness-pi` and `packages/harness-claude`. Applications SHALL live
+under `apps/`; only libraries SHALL live under `packages/`. No Cargo manifest,
+Rust source, or `crates/` directory SHALL remain in the repository.
 
 #### Scenario: Workspace builds as a whole
 
@@ -61,9 +61,9 @@ only libraries SHALL live under `packages/`. No Cargo manifest, Rust source, or
 
 ### Requirement: The state-fs adapter is the sole filesystem access point for agent-state persistence
 
-No module other than `packages/adapters/src/state-fs` SHALL perform filesystem
-reads or writes against agent-state files (`state.json`, `events.jsonl`, or
-their containing directories). The state-fs adapter SHALL implement the
+No module other than `packages/state-fs/src` SHALL perform filesystem reads or
+writes against agent-state files (`state.json`, `events.jsonl`, or their
+containing directories). The state-fs adapter SHALL implement the
 `AgentRepository` interface defined in `packages/core`.
 
 #### Scenario: Only state-fs touches agent-state paths
@@ -84,8 +84,8 @@ their containing directories). The state-fs adapter SHALL implement the
 `packages/core` SHALL define a `Harness` interface describing the install and
 uninstall contract for a harness integration, with no harness-specific code and
 no filesystem or process I/O of its own. Each supported harness SHALL be
-implemented in its own folder in `packages/adapters` (`harness-pi`,
-`harness-claude`, ...) that implements `Harness`.
+implemented in its own package (`packages/harness-pi`,
+`packages/harness-claude`, ...) that implements `Harness`.
 
 #### Scenario: Adding a new harness does not modify existing harness modules
 
@@ -103,16 +103,16 @@ implemented in its own folder in `packages/adapters` (`harness-pi`,
 ### Requirement: The core package contains all business logic and depends only on interface ports
 
 `packages/core` SHALL implement every current CLI use case (list, install,
-uninstall, agent event dispatch, clear, info) and SHALL NOT depend on
-`packages/adapters`, `commander`, `pino`, or `zod`. All infrastructure it needs
+uninstall, agent event dispatch, clear, info) and SHALL NOT depend on the
+adapter packages, `commander`, `pino`, or `zod`. All infrastructure it needs
 (agent repository, tmux, harnesses, logger) SHALL be expressed as interfaces
 declared in `packages/core` and injected by the caller.
 
 #### Scenario: core has no concrete infrastructure dependencies
 
 - **WHEN** `packages/core/package.json` and its source imports are inspected
-- **THEN** it lists no dependency on, and no source file imports from,
-  `@agentctl/adapters`, `commander`, `pino`, or `zod`
+- **THEN** it lists no dependency on, and no source file imports from, any
+  `@agentctl/*` adapter package, `commander`, `pino`, or `zod`
 
 #### Scenario: core exposes one entry point per CLI command
 
@@ -124,7 +124,8 @@ declared in `packages/core` and injected by the caller.
 
 #### Scenario: Boundary is enforced by tooling
 
-- **WHEN** a file in `packages/core` adds an import from `@agentctl/adapters`
+- **WHEN** a file in `packages/core` adds an import from an adapter package such
+  as `@agentctl/tmux`
 - **THEN** `pnpm turbo run lint` fails
 
 ### Requirement: The agentctl app is a thin composition root
@@ -158,7 +159,7 @@ configure the concrete logger.
 #### Scenario: Only the logging adapter imports pino
 
 - **WHEN** the repository is searched for imports of `pino`
-- **THEN** every match is inside `packages/adapters/src/logging`
+- **THEN** every match is inside `packages/logging/src`
 
 ### Requirement: Tool versions and tasks are pinned and defined in the workspace
 

@@ -31,3 +31,11 @@ export function timestampMillis(timestamp: string): number {
   const ms = Date.parse(timestamp);
   return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
 }
+
+/** Current instant as a chrono-style RFC 3339 UTC string (microsecond precision). */
+export function nowTimestamp(): string {
+  const micros = Math.floor(
+    (performance.timeOrigin + performance.now()) * 1000,
+  );
+  return formatMicros(micros);
+}

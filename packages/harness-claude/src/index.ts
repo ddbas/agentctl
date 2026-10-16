@@ -1,9 +1,8 @@
-/// <reference path="../assets.d.ts" />
+/// <reference path="./assets.d.ts" />
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Harness } from "@agentctl/core";
-import { tildeCollapse } from "../paths.ts";
+import { type Harness, tildeCollapse } from "@agentctl/core";
 import manifestAsset from "./assets/.claude-plugin/plugin.json?raw";
 import hooksJsonAsset from "./assets/hooks/hooks.json?raw";
 
@@ -58,8 +57,8 @@ export function formatClaudeInstallSummary(pluginDir: string): string {
   const rows = claudeHookRows();
   const lines = [
     `Installed agentctl plugin for claude (${rows.length} hook entries):`,
-    `  + ${tildeCollapse(manifestPath(pluginDir))}`,
-    `  + ${tildeCollapse(hooksJsonPath(pluginDir))}`,
+    `  + ${tildeCollapse(manifestPath(pluginDir), homedir())}`,
+    `  + ${tildeCollapse(hooksJsonPath(pluginDir), homedir())}`,
   ];
   for (const hook of rows) {
     const eventDisplay =
@@ -95,7 +94,7 @@ export function formatClaudeUninstallSummary(
   pluginDir: string,
   removed: boolean,
 ): string {
-  const display = tildeCollapse(pluginDir);
+  const display = tildeCollapse(pluginDir, homedir());
   return removed
     ? `Uninstalled agentctl plugin for claude:\n  - ${display}`
     : `Uninstalled agentctl plugin for claude:\n  = ${display} (nothing to remove)`;

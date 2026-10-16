@@ -302,9 +302,8 @@ environment and `--pane` is not supplied.
 
 The `agentctl install claude` subcommand SHALL install agentctl's eleven hook
 entries as a Claude Code plugin under `~/.claude/skills/agentctl/`, by copying
-the standalone assets in `packages/adapters/src/harness-claude/assets/`
-verbatim: `.claude-plugin/plugin.json` and `hooks/hooks.json`. The command
-SHALL:
+the standalone assets in `packages/harness-claude/src/assets/` verbatim:
+`.claude-plugin/plugin.json` and `hooks/hooks.json`. The command SHALL:
 
 1. Create `~/.claude/skills/` if it does not already exist.
 2. Delete `~/.claude/skills/agentctl/` and its full contents if it already

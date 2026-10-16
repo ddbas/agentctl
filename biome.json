@@ -25,7 +25,11 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "@agentctl/adapters": "core must not depend on adapters",
+                  "@agentctl/tmux": "core must not depend on adapters",
+                  "@agentctl/state-fs": "core must not depend on adapters",
+                  "@agentctl/logging": "core must not depend on adapters",
+                  "@agentctl/harness-pi": "core must not depend on adapters",
+                  "@agentctl/harness-claude": "core must not depend on adapters",
                   "pino": "core must not import infrastructure",
                   "zod": "core must not import infrastructure"
                 },

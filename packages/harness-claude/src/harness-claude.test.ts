@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeTmp, readFixture } from "../test-support.ts";
 import manifestAsset from "./assets/.claude-plugin/plugin.json?raw";
 import hooksAsset from "./assets/hooks/hooks.json?raw";
 import {
@@ -9,6 +8,7 @@ import {
   installClaudeTo,
   uninstallClaudeTo,
 } from "./index.ts";
+import { makeTmp, readFixture } from "./test-support.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 

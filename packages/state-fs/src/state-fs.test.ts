@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { makeTmp, readFixture } from "../test-support.ts";
 import { AgentInfoSchema, FileAgentRepository, xdgDataHome } from "./index.ts";
+import { makeTmp, readFixture } from "./test-support.ts";
 
 const repo = () => {
   const base = makeTmp();

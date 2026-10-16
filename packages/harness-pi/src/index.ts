@@ -1,4 +1,4 @@
-/// <reference path="../assets.d.ts" />
+/// <reference path="./assets.d.ts" />
 import {
   existsSync,
   mkdirSync,
@@ -8,8 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Harness } from "@agentctl/core";
-import { tildeCollapse } from "../paths.ts";
+import { type Harness, tildeCollapse } from "@agentctl/core";
 import PI_EXTENSION_CONTENT from "./assets/agentctl.ts?raw";
 
 export { PI_EXTENSION_CONTENT };
@@ -23,7 +22,7 @@ export function defaultPiExtensionPath(home: string = homedir()): string {
 }
 
 function piInstallSummary(dest: string, status: FileStatus): string {
-  const pathDisplay = tildeCollapse(dest);
+  const pathDisplay = tildeCollapse(dest, homedir());
   const lines = ["Installed agentctl extension for pi:"];
   if (status === "unchanged") {
     lines.push(`  = ${pathDisplay} (already up to date)`);
@@ -59,7 +58,7 @@ export function installPiTo(dest: string): string {
 export function uninstallPiTo(dest: string): string {
   const removed = existsSync(dest);
   if (removed) rmSync(dest);
-  const pathDisplay = tildeCollapse(dest);
+  const pathDisplay = tildeCollapse(dest, homedir());
   return [
     "Uninstalled agentctl extension for pi:",
     removed ? `  - ${pathDisplay}` : `  = ${pathDisplay} (nothing to remove)`,
