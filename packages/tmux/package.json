@@ -12,6 +12,6 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "lint": "biome check ."
+    "lint:biome": "biome check ."
   }
 }

@@ -26,20 +26,20 @@ description = "Typecheck all packages"
 run = "pnpm run typecheck"
 
 [tasks.lint]
-description = "Lint all packages and markdown"
+description = "Run all linters (biome and prettier)"
 run = "pnpm run lint"
+
+[tasks."lint:biome"]
+description = "Lint and check formatting with biome"
+run = "pnpm run lint:biome"
+
+[tasks."lint:prettier"]
+description = "Check markdown formatting with prettier"
+run = "pnpm run lint:prettier"
 
 [tasks.test]
 description = "Run all tests"
 run = "pnpm run test"
-
-[tasks."lint:md"]
-description = "Check markdown formatting"
-run = "pnpm run lint:md"
-
-[tasks.format]
-description = "Format code and markdown"
-run = "pnpm run format"
 
 [tasks.install]
 description = "Build and symlink agentctl into the local bin dir"

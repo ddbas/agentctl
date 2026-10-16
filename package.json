@@ -6,10 +6,9 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint //#lint:md",
+    "lint": "turbo run lint:biome //#lint:prettier",
     "test": "turbo run test",
-    "lint:md": "prettier --check \"**/*.md\"",
-    "format": "biome check --write . && prettier --write \"**/*.md\"",
+    "lint:prettier": "prettier --check \"**/*.md\"",
     "preinstall:local": "turbo run build --filter=agentctl",
     "install:local": "mkdir -p \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}\" && ln -sf \"$PWD/apps/agentctl/dist/cli.cjs\" \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}/agentctl\""
   },

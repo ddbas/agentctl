@@ -10,15 +10,21 @@
     "typecheck": {
       "dependsOn": ["^typecheck"]
     },
-    "lint": {},
+    "lint:biome": {},
     "test": {
       "dependsOn": ["build"],
       "passThroughEnv": ["AGENTCTL_BIN", "DOCKER_HOST", "TESTCONTAINERS_*"]
     },
     "ci": {
-      "dependsOn": ["build", "typecheck", "lint", "test", "//#lint:md"]
+      "dependsOn": [
+        "build",
+        "typecheck",
+        "lint:biome",
+        "test",
+        "//#lint:prettier"
+      ]
     },
-    "//#lint:md": {
+    "//#lint:prettier": {
       "inputs": ["**/*.md", ".prettierrc.json", ".prettierignore"]
     }
   }
