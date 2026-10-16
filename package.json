@@ -11,7 +11,7 @@
     "test": "turbo run test",
     "lint:prettier": "prettier --check \"**/*.md\"",
     "preinstall:local": "turbo run build --filter=agentctl",
-    "install:local": "mkdir -p \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}\" && ln -sf \"$PWD/apps/agentctl/dist/cli.cjs\" \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}/agentctl\""
+    "install:local": "mkdir -p \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}\" && rm -f \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}/agentctl\" && install -m 755 \"$PWD/apps/agentctl/dist/cli.cjs\" \"${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}/agentctl\""
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
