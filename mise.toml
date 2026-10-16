@@ -43,4 +43,4 @@ run = "pnpm run format"
 
 [tasks.install]
 description = "Build and symlink agentctl into the local bin dir"
-run = "pnpm run install:local"
+run = "pnpm run install"
