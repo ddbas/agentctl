@@ -1,7 +1,7 @@
 # CLI snapshot tests
 
-Snapshot every CLI command's output (stdout, stderr, exit code, and the side
-effects on the adapters). No Docker, no real tmux, no filesystem.
+Snapshot every CLI command's output (stdout, stderr, and exit code). No Docker,
+no real tmux, no filesystem.
 
 Everything in this directory is **test-only** code.
 

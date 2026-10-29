@@ -9,6 +9,3 @@ world: noLogDir
 
 --- stderr
 error: failed to resolve log directory
-
---- effects
-(empty)

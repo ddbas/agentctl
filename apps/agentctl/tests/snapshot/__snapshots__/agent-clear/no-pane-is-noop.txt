@@ -9,6 +9,3 @@ world: working
 
 --- stderr
 (empty)
-
---- effects
-(empty)

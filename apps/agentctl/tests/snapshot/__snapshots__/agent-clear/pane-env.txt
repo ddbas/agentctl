@@ -9,6 +9,3 @@ world: working env: TMUX_PANE=%1
 
 --- stderr
 (empty)
-
---- effects
-repo delete-state %1

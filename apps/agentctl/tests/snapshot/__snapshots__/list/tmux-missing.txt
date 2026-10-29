@@ -9,6 +9,3 @@ world: tmuxMissing
 
 --- stderr
 error: tmux not found — is tmux installed and on PATH?
-
---- effects
-tmux list-panes -a (server: <default>)

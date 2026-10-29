@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: option '--sort-by <KEY>' argument 'bogus' is invalid. Allowed choices are agent, session, pane, status, updatedAt, activeTools.
-
---- effects
-(empty)

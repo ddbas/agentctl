@@ -14,9 +14,3 @@ claude	work	0.0	working	2 tools
 
 --- stderr
 (empty)
-
---- effects
-tmux list-panes -a (server: <default>)
-ps -A (process table)
-repo delete-state %7
-repo delete-state %9

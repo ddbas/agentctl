@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: unknown option '--bogus'
-
---- effects
-(empty)

@@ -32,6 +32,3 @@ Commands:
 
 --- stderr
 (empty)
-
---- effects
-(empty)

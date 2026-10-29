@@ -15,6 +15,3 @@ Options:
 
 --- stderr
 (empty)
-
---- effects
-(empty)

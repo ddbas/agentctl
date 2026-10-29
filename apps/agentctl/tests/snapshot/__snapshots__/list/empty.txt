@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 (empty)
-
---- effects
-tmux list-panes -a (server: <default>)

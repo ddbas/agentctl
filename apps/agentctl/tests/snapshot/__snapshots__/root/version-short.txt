@@ -9,6 +9,3 @@ agentctl 0.0.0-dev
 
 --- stderr
 (empty)
-
---- effects
-(empty)

@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: unknown command 'BOGUS'
-
---- effects
-(empty)

@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: option '--log-level <LEVEL>' argument 'bogus' is invalid. Allowed choices are trace, debug, info, warn, error.
-
---- effects
-(empty)

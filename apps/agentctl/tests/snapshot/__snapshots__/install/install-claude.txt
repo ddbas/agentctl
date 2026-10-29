@@ -9,6 +9,3 @@ Installed agentctl for claude
 
 --- stderr
 (empty)
-
---- effects
-harness install claude

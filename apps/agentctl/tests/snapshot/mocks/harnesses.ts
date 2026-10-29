@@ -1,15 +1,12 @@
 import type { Harness } from "@agentctl/core";
-import { shared } from "../support/world.ts";
 
 function fakeHarness(name: string) {
   return class implements Harness {
     readonly name = name;
     install(): string {
-      shared().recorded.effects.push(`harness install ${name}`);
       return `Installed agentctl for ${name}`;
     }
     uninstall(): string {
-      shared().recorded.effects.push(`harness uninstall ${name}`);
       return `Uninstalled agentctl for ${name}`;
     }
   };

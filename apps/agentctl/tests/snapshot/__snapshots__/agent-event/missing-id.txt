@@ -9,6 +9,3 @@ world: empty env: TMUX_PANE=%1
 
 --- stderr
 error: required option '--id <ID>' not specified
-
---- effects
-(empty)

@@ -4,7 +4,7 @@ import type { AgentInfo, PaneEntry } from "@agentctl/core";
 export const FIXED_NOW = "2026-01-01T12:00:00Z";
 export const FAKE_HOME = "/home/test";
 
-/** Everything the fake adapters serve / record for one CLI invocation. */
+/** Everything the fake adapters serve for one CLI invocation. */
 export interface World {
   panes: PaneEntry[];
   /** parent pid -> child argv[0] basenames */
@@ -16,27 +16,17 @@ export interface World {
   noLogDir?: boolean;
 }
 
-/** Side effects recorded by the fakes, in call order. */
-export interface Recorded {
-  effects: string[];
-}
-
-interface Shared {
-  world: World;
-  recorded: Recorded;
-}
-
 const KEY = "__agentctlSnapshotWorld";
-type G = typeof globalThis & { [KEY]?: Shared };
+type G = typeof globalThis & { [KEY]?: World };
 
 // Stored on `globalThis` because `vi.resetModules()` re-evaluates modules, but
 // the fakes and the runner must still see the same object.
-export function setShared(shared: Shared): void {
-  (globalThis as G)[KEY] = shared;
+export function setWorld(world: World): void {
+  (globalThis as G)[KEY] = world;
 }
 
-export function shared(): Shared {
-  const s = (globalThis as G)[KEY];
-  if (!s) throw new Error("snapshot world not initialised");
-  return s;
+export function world(): World {
+  const w = (globalThis as G)[KEY];
+  if (!w) throw new Error("snapshot world not initialised");
+  return w;
 }

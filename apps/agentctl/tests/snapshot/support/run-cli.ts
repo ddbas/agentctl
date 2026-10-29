@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { WORLDS, type WorldName } from "../fixtures/worlds.ts";
-import { type Recorded, setShared } from "./world.ts";
+import { setWorld } from "./world.ts";
 
 export interface CliCase {
   /** Snapshot sub-directory. */
@@ -15,7 +15,7 @@ export interface CliCase {
   tty?: boolean;
 }
 
-export interface CliResult extends Recorded {
+export interface CliResult {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -28,8 +28,7 @@ const ENV_VARS = ["TMUX_PANE", "AGENTCTL_TMUX_SOCKET"];
  * the mocked adapters, capturing stdout, stderr and the exit code.
  */
 export async function runCli(c: CliCase): Promise<CliResult> {
-  const recorded: Recorded = { effects: [] };
-  setShared({ world: WORLDS[c.world ?? "empty"], recorded });
+  setWorld(WORLDS[c.world ?? "empty"]);
 
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -58,7 +57,6 @@ export async function runCli(c: CliCase): Promise<CliResult> {
       exitCode: Number(process.exitCode ?? 0),
       stdout: stdout.join(""),
       stderr: stderr.join(""),
-      effects: recorded.effects,
     };
   } finally {
     // Never leak a non-zero exit code into the vitest process itself.
@@ -82,6 +80,5 @@ export function renderSnapshot(c: CliCase, r: CliResult): string {
     section("exit code", String(r.exitCode)),
     section("stdout", r.stdout),
     section("stderr", r.stderr),
-    section("effects", r.effects.join("\n")),
   ].join("\n");
 }

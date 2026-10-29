@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: command-argument value 'bogus' is invalid for argument 'HARNESS'. Allowed choices are pi, claude.
-
---- effects
-(empty)

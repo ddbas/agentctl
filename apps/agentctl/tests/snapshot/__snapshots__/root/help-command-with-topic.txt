@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: too many arguments for 'help'. Expected 0 arguments but got 1: list.
-
---- effects
-(empty)

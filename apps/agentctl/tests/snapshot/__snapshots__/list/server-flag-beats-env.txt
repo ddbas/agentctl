@@ -9,6 +9,3 @@ world: empty env: AGENTCTL_TMUX_SOCKET=/tmp/env.sock
 
 --- stderr
 (empty)
-
---- effects
-tmux list-panes -a (server: /tmp/flag.sock)

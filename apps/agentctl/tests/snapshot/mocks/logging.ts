@@ -1,4 +1,4 @@
-import { FAKE_HOME, shared } from "../support/world.ts";
+import { FAKE_HOME, world } from "../support/world.ts";
 
 const LOG_DIR = `${FAKE_HOME}/.local/state/agentctl/logs`;
 
@@ -10,7 +10,6 @@ export const loggingMock = {
     warn() {},
     error() {},
   }),
-  logDir: (): string | undefined =>
-    shared().world.noLogDir ? undefined : LOG_DIR,
+  logDir: (): string | undefined => (world().noLogDir ? undefined : LOG_DIR),
   currentLogFile: (dir: string): string => `${dir}/agentctl.log.2026-01-01`,
 };

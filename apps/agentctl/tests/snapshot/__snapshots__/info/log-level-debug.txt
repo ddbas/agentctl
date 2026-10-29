@@ -12,6 +12,3 @@ current log file: ~/.local/state/agentctl/logs/agentctl.log.2026-01-01
 
 --- stderr
 (empty)
-
---- effects
-(empty)

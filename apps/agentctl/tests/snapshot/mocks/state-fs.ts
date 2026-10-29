@@ -4,13 +4,13 @@ import type {
   AgentState,
   EventRecord,
 } from "@agentctl/core";
-import { FIXED_NOW, shared } from "../support/world.ts";
+import { FIXED_NOW, world } from "../support/world.ts";
 
 class FakeRepository implements AgentRepository {
   private readonly infos = new Map<string, AgentInfo>();
 
   constructor() {
-    for (const info of shared().world.states) {
+    for (const info of world().states) {
       this.infos.set(info.pane_id, { ...info });
     }
   }
@@ -25,9 +25,6 @@ class FakeRepository implements AgentRepository {
     status: AgentState,
     activeTools: number,
   ): void {
-    shared().recorded.effects.push(
-      `repo write-state ${paneId} harness=${harness} status=${status} active_tools=${activeTools}`,
-    );
     this.infos.set(paneId, {
       pane_id: paneId,
       harness,
@@ -38,7 +35,6 @@ class FakeRepository implements AgentRepository {
   }
 
   deleteState(paneId: string): void {
-    shared().recorded.effects.push(`repo delete-state ${paneId}`);
     this.infos.delete(paneId);
   }
 
@@ -46,11 +42,7 @@ class FakeRepository implements AgentRepository {
     return [...this.infos.values()];
   }
 
-  appendEvent(paneId: string, record: EventRecord): void {
-    shared().recorded.effects.push(
-      `repo append-event ${paneId} ${JSON.stringify(record)}`,
-    );
-  }
+  appendEvent(paneId: string, record: EventRecord): void {}
 }
 
 /** Replacement module for `@agentctl/state-fs`. */

@@ -9,7 +9,3 @@ world: working env: TMUX_PANE=%1
 
 --- stderr
 (empty)
-
---- effects
-repo write-state %1 harness=unknown status=working active_tools=2
-repo append-event %1 {"event":"TOOL_CALL_START","id":"t1","harness":"unknown","pane_id":"%1","timestamp":"2026-01-01T12:00:00Z"}

@@ -9,6 +9,3 @@ world: empty env: TMUX_PANE=%1
 
 --- stderr
 error: option '--type <TYPE>' argument 'bogus' is invalid. Allowed choices are custom, elicitation.
-
---- effects
-(empty)

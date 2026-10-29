@@ -9,6 +9,3 @@ world: empty
 
 --- stderr
 error: option '-s, --server <PATH>' argument missing
-
---- effects
-(empty)
