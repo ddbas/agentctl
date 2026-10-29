@@ -1,0 +1,14 @@
+$ agentctl list
+world: empty
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)
+
+--- effects
+tmux list-panes -a (server: <default>)

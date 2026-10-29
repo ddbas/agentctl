@@ -1,0 +1,14 @@
+$ agentctl agent event RUN_STARTED --id r1
+world: empty
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

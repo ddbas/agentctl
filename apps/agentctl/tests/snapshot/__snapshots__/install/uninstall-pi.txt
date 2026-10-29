@@ -1,0 +1,14 @@
+$ agentctl uninstall pi
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Uninstalled agentctl for pi
+
+--- stderr
+(empty)
+
+--- effects
+harness uninstall pi

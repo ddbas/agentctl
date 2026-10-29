@@ -1,0 +1,39 @@
+$ agentctl
+world: empty
+
+--- exit code
+0
+
+--- stdout
+📡 agentctl — tmux based agent multiplexer
+
+Spot and manage AI agent processes running across your tmux sessions.
+
+Usage: agentctl [OPTIONS] [COMMAND]
+
+Commands:
+  help       Show usage information
+  list       List tmux panes running agent harness processes
+  install    Install agentctl on a harness
+  uninstall  Uninstall agentctl from a harness
+  agent      Manage agent state
+  info       Print agentctl's runtime paths and metadata
+
+Options:
+      --log-level <LEVEL>
+          Log level for the log file: trace, debug, info, warn, or error (default: info). Does not affect stdout/stderr output
+          
+          [default: info]
+          [possible values: trace, debug, info, warn, error]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

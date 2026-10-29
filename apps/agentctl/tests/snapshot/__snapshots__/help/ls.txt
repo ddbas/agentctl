@@ -1,0 +1,38 @@
+$ agentctl ls --help
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl list|ls [options]
+
+List tmux panes running agent harness processes.
+
+Queries every pane across all tmux sessions via `tmux list-panes -a` and prints
+one line per pane whose foreground process is a known agent harness (`claude` or
+`pi`).
+
+Options:
+  -s, --server <PATH>      Target a specific tmux server socket file. Forwarded
+                           as `tmux -S <path>`. Falls back to the
+                           `AGENTCTL_TMUX_SOCKET` environment variable when not
+                           set
+  --sort-by <KEY>          Sort output by this property. Valid values: agent,
+                           session, pane, status, updatedAt, activeTools
+                           (choices: "agent", "session", "pane", "status",
+                           "updatedAt", "activeTools", default: "updatedAt")
+  -r, --reverse            Reverse the sort order. For `updatedAt` (the default
+                           key) this means oldest-active first
+  -c, --columns <COLUMNS>  Comma-delimited, ordered list of columns to render.
+                           Valid values: agent, session, pane, status,
+                           updatedAt, activeTools. Order and duplicates are
+                           preserved (no deduplication) (default:
+                           agent,session,pane,status,activeTools)
+  -h, --help               Print help
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

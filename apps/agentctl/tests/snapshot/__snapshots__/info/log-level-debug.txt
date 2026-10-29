@@ -1,0 +1,17 @@
+$ agentctl info --log-level debug
+world: empty
+
+--- exit code
+0
+
+--- stdout
+version: 0.0.0-dev
+log level: debug
+log directory: ~/.local/state/agentctl/logs
+current log file: ~/.local/state/agentctl/logs/agentctl.log.2026-01-01
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

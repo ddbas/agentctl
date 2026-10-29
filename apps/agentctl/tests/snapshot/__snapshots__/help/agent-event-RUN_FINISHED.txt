@@ -1,0 +1,23 @@
+$ agentctl agent event RUN_FINISHED --help
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent event RUN_FINISHED [options]
+
+A run (agent turn) finished
+
+Options:
+  --id <ID>           Unique id for this run (matching the corresponding
+                      RUN_STARTED)
+  --active-tools <N>  Override the pane's `activeTools` count instead of leaving
+                      it untouched
+  -h, --help          Print help
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

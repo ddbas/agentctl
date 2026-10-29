@@ -1,0 +1,37 @@
+$ agentctl agent event --help
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent event [options] [command]
+
+Dispatch a typed event; the pane's status is derived from the event stream via a
+finite state machine.
+
+Reads `$TMUX_PANE` from the environment to identify the current pane. Exits 0
+silently when `$TMUX_PANE` is not set and `--pane` is not supplied.
+
+Options:
+  --harness <HARNESS>         Harness name to write to the state file (e.g.
+                              `claude`). Defaults to `"unknown"` when omitted
+  --pane <PANE_ID>            Override the pane ID instead of reading
+                              `$TMUX_PANE`
+  -h, --help                  Print help
+
+Commands:
+  SESSION_STARTED [options]   A harness session began (or resumed / was
+                              cleared). Resets the pane's status to `idle` from
+                              any prior status
+  RUN_STARTED [options]       A run (agent turn) started
+  RUN_FINISHED [options]      A run (agent turn) finished
+  TOOL_CALL_START [options]   A tool call started
+  TOOL_CALL_RESULT [options]  A tool call finished
+  help [command]              display help for command
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

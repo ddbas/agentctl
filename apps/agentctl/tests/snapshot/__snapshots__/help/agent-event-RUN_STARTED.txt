@@ -1,0 +1,20 @@
+$ agentctl agent event RUN_STARTED --help
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent event RUN_STARTED [options]
+
+A run (agent turn) started
+
+Options:
+  --id <ID>   Unique id for this run
+  -h, --help  Print help
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

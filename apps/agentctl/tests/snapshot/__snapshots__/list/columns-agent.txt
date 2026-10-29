@@ -1,0 +1,22 @@
+$ agentctl list --columns agent
+world: mixed
+
+--- exit code
+0
+
+--- stdout
+claude
+claude
+pi
+pi
+claude
+claude
+
+--- stderr
+(empty)
+
+--- effects
+tmux list-panes -a (server: <default>)
+ps -A (process table)
+repo delete-state %7
+repo delete-state %9

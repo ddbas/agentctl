@@ -1,0 +1,14 @@
+$ agentctl uninstall bogus
+world: empty
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: command-argument value 'bogus' is invalid for argument 'HARNESS'. Allowed choices are pi, claude.
+
+--- effects
+(empty)

@@ -1,0 +1,14 @@
+$ agentctl agent clear --pane %99
+world: working
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)
+
+--- effects
+repo delete-state %99

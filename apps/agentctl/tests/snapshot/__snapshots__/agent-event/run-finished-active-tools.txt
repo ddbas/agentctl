@@ -1,0 +1,15 @@
+$ agentctl agent event RUN_FINISHED --id r1 --active-tools 3
+world: working env: TMUX_PANE=%1
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)
+
+--- effects
+repo write-state %1 harness=unknown status=done active_tools=3
+repo append-event %1 {"event":"RUN_FINISHED","id":"r1","harness":"unknown","pane_id":"%1","timestamp":"2026-01-01T12:00:00Z"}

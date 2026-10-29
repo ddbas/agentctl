@@ -1,0 +1,14 @@
+$ agentctl list --server /tmp/flag.sock
+world: empty env: AGENTCTL_TMUX_SOCKET=/tmp/env.sock
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)
+
+--- effects
+tmux list-panes -a (server: /tmp/flag.sock)

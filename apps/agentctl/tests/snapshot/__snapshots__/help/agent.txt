@@ -1,0 +1,34 @@
+$ agentctl agent --help
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent [options] [command]
+
+Manage agent state
+
+Options:
+  -h, --help       Print help
+
+Commands:
+  event [options]  Dispatch a typed event; the pane's status is derived from the
+                   event stream via a finite state machine.
+                   
+                   Reads `$TMUX_PANE` from the environment to identify the
+                   current pane. Exits 0 silently when `$TMUX_PANE` is not set
+                   and `--pane` is not supplied.
+  clear [options]  Whole-session cleanup for the current agent pane.
+                   
+                   Removes the status file and any other per-agent artifacts
+                   recorded for the pane. Exits 0 silently when `$TMUX_PANE` is
+                   not set and `--pane` is not supplied, or when no state file
+                   exists for the pane.
+  help [command]   display help for command
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

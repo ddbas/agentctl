@@ -33,6 +33,14 @@ run = "pnpm run lint"
 description = "Run all tests"
 run = "pnpm run test"
 
+[tasks."test:snapshot"]
+description = "Run CLI output snapshot tests (no Docker)"
+run = "pnpm --filter agentctl run test:snapshot"
+
+[tasks."test:snapshot:update"]
+description = "Update CLI output snapshots after an intended output change"
+run = "pnpm --filter agentctl run test:snapshot:update"
+
 [tasks.install]
 description = "Build and symlink agentctl into the local bin dir"
 run = "pnpm run install:local"

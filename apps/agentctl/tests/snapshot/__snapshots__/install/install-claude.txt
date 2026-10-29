@@ -1,0 +1,14 @@
+$ agentctl install claude
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Installed agentctl for claude
+
+--- stderr
+(empty)
+
+--- effects
+harness install claude

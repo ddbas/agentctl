@@ -1,0 +1,25 @@
+$ agentctl uninstall --help
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl uninstall [options] <HARNESS>
+
+Uninstall agentctl from a harness.
+
+Removes the integration files written by `agentctl install <harness>`, leaving
+all other user configuration untouched. Idempotent.
+
+Arguments:
+  HARNESS     Harness to uninstall agentctl from (choices: "pi", "claude")
+
+Options:
+  -h, --help  Print help
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

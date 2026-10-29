@@ -1,0 +1,22 @@
+$ agentctl list -c status,agent
+world: mixed (tty)
+
+--- exit code
+0
+
+--- stdout
+[31mblocked[39m	claude
+[33mworking[39m	claude
+[90midle[39m	pi
+[32mdone[39m	pi
+unknown	claude
+unknown	claude
+
+--- stderr
+(empty)
+
+--- effects
+tmux list-panes -a (server: <default>)
+ps -A (process table)
+repo delete-state %7
+repo delete-state %9

@@ -1,0 +1,14 @@
+$ agentctl -V
+world: empty
+
+--- exit code
+0
+
+--- stdout
+agentctl 0.0.0-dev
+
+--- stderr
+(empty)
+
+--- effects
+(empty)

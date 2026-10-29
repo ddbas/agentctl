@@ -1,0 +1,22 @@
+$ agentctl list --columns updatedAt
+world: mixed
+
+--- exit code
+0
+
+--- stdout
+2026-01-01T11:30:00+00:00
+2026-01-01T11:00:00+00:00
+2026-01-01T10:00:00+00:00
+2026-01-01T09:00:00+00:00
+
+
+
+--- stderr
+(empty)
+
+--- effects
+tmux list-panes -a (server: <default>)
+ps -A (process table)
+repo delete-state %7
+repo delete-state %9

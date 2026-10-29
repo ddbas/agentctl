@@ -1,0 +1,15 @@
+$ agentctl agent event --harness claude SESSION_STARTED --id s1 --pane %8
+world: empty
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)
+
+--- effects
+repo write-state %8 harness=claude status=idle active_tools=0
+repo append-event %8 {"event":"SESSION_STARTED","id":"s1","harness":"claude","pane_id":"%8","timestamp":"2026-01-01T12:00:00Z"}

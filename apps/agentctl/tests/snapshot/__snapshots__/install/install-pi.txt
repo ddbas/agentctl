@@ -1,0 +1,14 @@
+$ agentctl install pi
+world: empty
+
+--- exit code
+0
+
+--- stdout
+Installed agentctl for pi
+
+--- stderr
+(empty)
+
+--- effects
+harness install pi

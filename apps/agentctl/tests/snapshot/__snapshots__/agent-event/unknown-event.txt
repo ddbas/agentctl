@@ -1,0 +1,14 @@
+$ agentctl agent event BOGUS --id x
+world: empty
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: unknown command 'BOGUS'
+
+--- effects
+(empty)

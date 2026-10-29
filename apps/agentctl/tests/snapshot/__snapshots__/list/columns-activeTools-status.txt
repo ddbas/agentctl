@@ -1,0 +1,22 @@
+$ agentctl list --columns activeTools,status
+world: mixed
+
+--- exit code
+0
+
+--- stdout
+1 tool	blocked
+2 tools	working
+	idle
+	done
+	unknown
+	unknown
+
+--- stderr
+(empty)
+
+--- effects
+tmux list-panes -a (server: <default>)
+ps -A (process table)
+repo delete-state %7
+repo delete-state %9

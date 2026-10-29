@@ -1,0 +1,14 @@
+$ agentctl info
+world: noLogDir
+
+--- exit code
+1
+
+--- stdout
+(empty)
+
+--- stderr
+error: failed to resolve log directory
+
+--- effects
+(empty)
