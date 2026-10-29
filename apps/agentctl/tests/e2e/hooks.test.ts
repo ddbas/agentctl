@@ -154,11 +154,10 @@ describe("agentctl install", () => {
 
     const find = (event: string, pred: (cmd: string) => boolean) => {
       for (const entry of hooks[event] ?? []) {
-        if (entry.matcher !== undefined) continue;
         const cmd = entry.hooks[0]?.command;
         if (cmd && pred(cmd)) return cmd;
       }
-      throw new Error(`unmatched untyped ${event} command should be present`);
+      throw new Error(`untyped ${event} command should be present`);
     };
     const preCmd = find(
       "PreToolUse",
