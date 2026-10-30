@@ -172,11 +172,6 @@ export class TmuxEnv {
   /** Create a fake agent pane in the container's tmux; returns its pane ID. */
   async createFakeAgentPane(agent: string): Promise<string> {
     await this.exec([
-      "sh",
-      "-c",
-      `cp /bin/sleep /tmp/${agent} && chmod +x /tmp/${agent}`,
-    ]);
-    await this.exec([
       "tmux",
       "-S",
       "/workspace/tmux.sock",
@@ -202,7 +197,7 @@ export class TmuxEnv {
       "send-keys",
       "-t",
       paneId,
-      `exec /tmp/${agent} 9999`,
+      `exec bash -c 'exec -a ${agent} bash -c "sleep 9999; :"'`,
       "Enter",
     ]);
     await new Promise((r) => setTimeout(r, 700));

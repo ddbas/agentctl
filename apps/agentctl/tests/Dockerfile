@@ -9,6 +9,6 @@
 # directly by TmuxEnv but serves as documentation of the intended use.
 FROM alpine:latest
 
-RUN apk add --no-cache tmux
+RUN apk add --no-cache tmux bash
 
 ENV TERM=xterm-256color
