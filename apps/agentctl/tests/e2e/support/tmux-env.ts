@@ -95,10 +95,13 @@ export class TmuxEnv {
     mkdirSync(workspacePath);
 
     const container = await new GenericContainer(TMUX_IMAGE)
+      // tmux only serves clients with the same uid as the server, so run the
+      // server as the host user that will invoke agentctl.
+      .withUser(`${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`)
       .withEntrypoint(["sh"])
       .withCommand([
         "-c",
-        "tmux -S /workspace/tmux.sock new-session -d -s _init && { chmod 777 /workspace/tmux.sock || true; } && echo 'tmux-ready' && tail -f /dev/null",
+        "tmux -S /workspace/tmux.sock new-session -d -s _init && echo 'tmux-ready' && tail -f /dev/null",
       ])
       .withBindMounts([{ source: workspacePath, target: "/workspace" }])
       .withWaitStrategy(Wait.forLogMessage("tmux-ready"))
