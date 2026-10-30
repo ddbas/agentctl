@@ -15,4 +15,16 @@ Everything in this directory is **test-only** code.
 - `support/` — helpers (`run-cli.ts` runs the real `src/cli.ts` in-process).
 - `__snapshots__/` — the reviewable output. Review diffs here in PRs.
 
-Run: `pnpm test:snapshot`. Accept intended changes: `pnpm test:snapshot:update`.
+Run everything: `mise run test`.
+
+Run only these tests:
+
+```sh
+mise exec -- pnpm --filter agentctl exec vitest run tests/snapshot
+```
+
+Accept intended output changes:
+
+```sh
+mise exec -- pnpm --filter agentctl exec vitest run tests/snapshot -u
+```

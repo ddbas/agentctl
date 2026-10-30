@@ -26,8 +26,6 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "pnpm run build:test-image && vitest run",
     "build:test-image": "docker build -q -t am-tmux-test:latest tests/",
-    "test:e2e": "pnpm run build:test-image && vitest run tests/e2e",
-    "test:snapshot": "vitest run tests/snapshot",
-    "test:snapshot:update": "vitest run tests/snapshot -u"
+    "test:e2e": "pnpm run build:test-image && vitest run tests/e2e"
   }
 }
