@@ -1,9 +1,0 @@
-# Agent configs
-.agents/
-.pi/
-.opencode/
-node_modules/
-dist/
-.turbo/
-pnpm-lock.yaml
-**/fixtures/

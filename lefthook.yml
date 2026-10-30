@@ -4,25 +4,7 @@ post-checkout:
     - name: codegraph
       run: mise exec -- codegraph init
 pre-commit:
-  parallel: true
   jobs:
-    - name: format
-      group:
-        parallel: true
-        jobs:
-          - name: biome
-            glob: "*.{ts,json}"
-            run: mise exec -- pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
-            stage_fixed: true
-          - name: markdown
-            glob: "*.md"
-            run: mise exec -- pnpm exec prettier --write {staged_files}
-            stage_fixed: true
-    - name: lint
-      glob: "*.{ts,json,md}"
-      run: "mise run lint ::: typecheck"
-    - name: test
-      run: mise run test
-    - name: openspec-validate
-      glob: "openspec/**"
-      run: mise exec -- openspec validate --all --no-interactive
+    - name: verify
+      run: mise run verify:fix
+      stage_fixed: true

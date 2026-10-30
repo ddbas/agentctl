@@ -10,7 +10,7 @@
     "picocolors": "1.1.1"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests"
   }
 }

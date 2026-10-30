@@ -1,31 +1,26 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "agentGuidance": false,
+  "globalDependencies": ["tsconfig.base.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "rspack.config.*", "package.json", "tsconfig.json"],
-      "outputs": ["dist/**"]
-    },
-    "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "outputs": []
     },
     "test": {
       "dependsOn": ["build"],
       "passThroughEnv": ["AGENTCTL_BIN", "DOCKER_HOST", "TESTCONTAINERS_*"]
     },
-    "ci": {
-      "dependsOn": [
-        "build",
-        "typecheck",
-        "test",
-        "//#lint:biome",
-        "//#lint:prettier"
-      ]
+    "//#lint": {},
+    "//#lint:fix": {},
+    "openspec:validate": {
+      "inputs": ["openspec/**"]
     },
-    "//#lint:biome": {},
-    "//#lint:prettier": {
-      "inputs": ["**/*.md", ".prettierrc.json", ".prettierignore"]
+    "verify": {
+      "dependsOn": ["build", "//#lint", "openspec:validate", "test"]
+    },
+    "verify:fix": {
+      "dependsOn": ["build", "//#lint:fix", "openspec:validate", "test"]
     }
   }
 }

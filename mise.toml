@@ -1,7 +1,5 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
-# mise pins tools and exposes tasks that delegate to the pnpm scripts in package.json.
-
 [settings]
 experimental = true
 lockfile = true
@@ -13,26 +11,46 @@ enter = "mise exec -- lefthook install"
 lefthook = "latest"
 "github:rtk-ai/rtk" = "latest"
 "npm:@colbymchenry/codegraph" = "latest"
-"npm:@fission-ai/openspec" = "latest"
 node = "26.11.1"
-pnpm = "12.10.1"
+pnpm = "12.16.1"
 
 [tasks.build]
 description = "Build all packages"
-run = "pnpm run build"
+run = "mise exec -- pnpm run build"
 
-[tasks.typecheck]
-description = "Typecheck all packages"
-run = "pnpm run typecheck"
-
-[tasks.lint]
-description = "Run all linters (biome and prettier)"
-run = "pnpm run lint"
-
-[tasks.test]
-description = "Run all tests"
-run = "pnpm run test"
+[tasks.deps]
+description = "Install all dependencies"
+usage = 'flag "--frozen-lockfile" help="Fail if the lockfile needs updating"'
+run = "mise exec -- pnpm install ${usage_frozen_lockfile:+--frozen-lockfile}"
 
 [tasks.install]
 description = "Build and symlink agentctl into the local bin dir"
-run = "pnpm run install:local"
+run = "mise exec -- pnpm run install:local"
+
+[tasks.lint]
+description = "Lint all packages"
+run = "mise exec -- pnpm run lint"
+
+[tasks."lint:fix"]
+description = "Lint all packages and fix any fixable issues"
+run = "mise exec -- pnpm run lint:fix"
+
+[tasks."openspec:list"]
+description = "List all OpenSpec proposals"
+run = "mise exec -- pnpm run openspec:list"
+
+[tasks."openspec:validate"]
+description = "Validate all OpenSpec files"
+run = "mise exec -- pnpm run openspec:validate"
+
+[tasks.test]
+description = "Run all tests"
+run = "mise exec -- pnpm run test"
+
+[tasks.verify]
+description = "Run all verifications"
+run = "mise exec -- pnpm run verify"
+
+[tasks."verify:fix"]
+description = "Run all verifications and fix any fixable issues"
+run = "mise exec -- pnpm run verify:fix"
