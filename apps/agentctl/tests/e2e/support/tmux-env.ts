@@ -98,7 +98,7 @@ export class TmuxEnv {
       .withEntrypoint(["sh"])
       .withCommand([
         "-c",
-        "tmux -S /workspace/tmux.sock new-session -d -s _init && echo 'tmux-ready' && tail -f /dev/null",
+        "tmux -S /workspace/tmux.sock new-session -d -s _init && { chmod 777 /workspace/tmux.sock || true; } && echo 'tmux-ready' && tail -f /dev/null",
       ])
       .withBindMounts([{ source: workspacePath, target: "/workspace" }])
       .withWaitStrategy(Wait.forLogMessage("tmux-ready"))
@@ -200,7 +200,12 @@ export class TmuxEnv {
       `exec bash -c 'exec -a ${agent} bash -c "sleep 9999; :"'`,
       "Enter",
     ]);
-    await new Promise((r) => setTimeout(r, 700));
+    // Block until tmux reports the pane running the agent (no fixed sleep).
+    await this.exec([
+      "sh",
+      "-c",
+      `until [ "$(tmux -S /workspace/tmux.sock display-message -p -t ${paneId} '#{pane_current_command}')" = '${agent}' ]; do sleep 0.05; done`,
+    ]);
     return paneId;
   }
 
