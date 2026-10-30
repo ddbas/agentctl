@@ -26,7 +26,7 @@ describe("snapshot coverage", () => {
     "'%s' has an invocation case",
     (_label, path) => {
       const hit = CASES.some(
-        (c) => c.group !== "help" && startsWith(c.args, path),
+        (c) => !c.args.includes("--help") && startsWith(c.args, path),
       );
       expect(hit).toBe(true);
     },
@@ -37,7 +37,9 @@ describe("snapshot coverage", () => {
     (_label, path) => {
       if (path[0] === "help") return;
       expect(
-        CASES.some((c) => c.group === "help" && startsWith(c.args, path)),
+        CASES.some(
+          (c) => c.args.includes("--help") && startsWith(c.args, path),
+        ),
       ).toBe(true);
     },
   );

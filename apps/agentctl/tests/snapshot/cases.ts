@@ -7,20 +7,21 @@ const group = (g: string, cases: Case[]): CliCase[] =>
 
 const pane = { TMUX_PANE: "%1" };
 
-const HELP_TARGETS: string[][] = [
-  ["list"],
-  ["ls"],
-  ["install"],
-  ["uninstall"],
-  ["agent"],
-  ["agent", "event"],
-  ["agent", "event", "SESSION_STARTED"],
-  ["agent", "event", "RUN_STARTED"],
-  ["agent", "event", "RUN_FINISHED"],
-  ["agent", "event", "TOOL_CALL_START"],
-  ["agent", "event", "TOOL_CALL_RESULT"],
-  ["agent", "clear"],
-  ["info"],
+/** `--help` cases live in the snapshot folder of their command. */
+const HELP_TARGETS: [group: string, command: string[]][] = [
+  ["list", ["list"]],
+  ["list", ["ls"]],
+  ["install", ["install"]],
+  ["install", ["uninstall"]],
+  ["agent-event", ["agent"]],
+  ["agent-event", ["agent", "event"]],
+  ["agent-event", ["agent", "event", "SESSION_STARTED"]],
+  ["agent-event", ["agent", "event", "RUN_STARTED"]],
+  ["agent-event", ["agent", "event", "RUN_FINISHED"]],
+  ["agent-event", ["agent", "event", "TOOL_CALL_START"]],
+  ["agent-event", ["agent", "event", "TOOL_CALL_RESULT"]],
+  ["agent-clear", ["agent", "clear"]],
+  ["info", ["info"]],
 ];
 
 const COLUMN_SETS = [
@@ -45,13 +46,11 @@ export const CASES: CliCase[] = [
     { name: "unknown-option", args: ["--bogus"] },
   ]),
 
-  ...group(
-    "help",
-    HELP_TARGETS.map((t) => ({
-      name: t.join("-"),
-      args: [...t, "--help"],
-    })),
-  ),
+  ...HELP_TARGETS.map(([g, command]) => ({
+    group: g,
+    name: `help-${command.join("-")}`,
+    args: [...command, "--help"],
+  })),
 
   ...group("list", [
     { name: "empty", args: ["list"], world: "empty" },
