@@ -1,0 +1,15 @@
+$ agentctl list --sort-by agent -r
+
+--- exit code
+0
+
+--- stdout
+pi	play	1.1	done	
+pi	work	0.1	idle	
+claude	docs	0.1	unknown	
+claude	docs	0.0	unknown	
+claude	play	1.0	blocked	1 tool
+claude	work	0.0	working	2 tools
+
+--- stderr
+(empty)

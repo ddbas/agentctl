@@ -1,0 +1,15 @@
+$ agentctl list -c agent -c status
+
+--- exit code
+0
+
+--- stdout
+claude	blocked
+claude	working
+pi	idle
+pi	done
+claude	unknown
+claude	unknown
+
+--- stderr
+(empty)

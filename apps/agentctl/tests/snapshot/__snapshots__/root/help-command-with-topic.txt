@@ -1,0 +1,10 @@
+$ agentctl help list
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: too many arguments for 'help'. Expected 0 arguments but got 1: list.

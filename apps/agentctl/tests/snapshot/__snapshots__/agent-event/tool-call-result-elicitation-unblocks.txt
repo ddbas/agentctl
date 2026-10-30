@@ -1,0 +1,10 @@
+$ agentctl agent event TOOL_CALL_RESULT --id t1 --type elicitation
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)

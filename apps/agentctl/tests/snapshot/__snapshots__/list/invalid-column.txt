@@ -1,0 +1,10 @@
+$ agentctl list -c agent,bogus
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: option '-c, --columns <COLUMNS>' argument 'agent,bogus' is invalid. invalid value 'bogus'. Allowed choices are agent, session, pane, status, updatedAt, activeTools.

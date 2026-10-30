@@ -1,0 +1,15 @@
+$ agentctl list --columns status,agent
+
+--- exit code
+0
+
+--- stdout
+blocked	claude
+working	claude
+idle	pi
+done	pi
+unknown	claude
+unknown	claude
+
+--- stderr
+(empty)

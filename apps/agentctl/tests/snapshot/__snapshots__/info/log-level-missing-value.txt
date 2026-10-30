@@ -1,0 +1,10 @@
+$ agentctl info --log-level
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: option '--log-level <LEVEL>' argument missing

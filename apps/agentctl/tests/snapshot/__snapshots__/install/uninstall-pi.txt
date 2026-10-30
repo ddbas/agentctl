@@ -1,0 +1,10 @@
+$ agentctl uninstall pi
+
+--- exit code
+0
+
+--- stdout
+Uninstalled agentctl for pi
+
+--- stderr
+(empty)

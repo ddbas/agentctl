@@ -1,0 +1,15 @@
+$ agentctl list --reverse
+
+--- exit code
+0
+
+--- stdout
+claude	docs	0.1	unknown	
+claude	docs	0.0	unknown	
+pi	play	1.1	done	
+pi	work	0.1	idle	
+claude	work	0.0	working	2 tools
+claude	play	1.0	blocked	1 tool
+
+--- stderr
+(empty)

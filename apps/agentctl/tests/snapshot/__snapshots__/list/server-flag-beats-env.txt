@@ -1,0 +1,10 @@
+$ agentctl list --server /tmp/flag.sock
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)

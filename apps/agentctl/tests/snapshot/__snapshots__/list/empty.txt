@@ -1,0 +1,10 @@
+$ agentctl list
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)

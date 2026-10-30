@@ -1,0 +1,10 @@
+$ agentctl info
+
+--- exit code
+1
+
+--- stdout
+(empty)
+
+--- stderr
+error: failed to resolve log directory

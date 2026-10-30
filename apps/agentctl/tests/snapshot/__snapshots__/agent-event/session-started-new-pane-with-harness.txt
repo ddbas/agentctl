@@ -1,0 +1,10 @@
+$ agentctl agent event --harness claude SESSION_STARTED --id s1 --pane %8
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)

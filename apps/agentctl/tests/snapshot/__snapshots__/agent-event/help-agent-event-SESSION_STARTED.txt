@@ -1,0 +1,18 @@
+$ agentctl agent event SESSION_STARTED --help
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent event SESSION_STARTED [options]
+
+A harness session began (or resumed / was cleared). Resets the pane's status to
+`idle` from any prior status
+
+Options:
+  --id <ID>   Unique id for this session (used to correlate events.jsonl
+              entries)
+  -h, --help  Print help
+
+--- stderr
+(empty)

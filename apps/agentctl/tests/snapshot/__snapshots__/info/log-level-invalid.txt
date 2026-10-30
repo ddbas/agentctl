@@ -1,0 +1,10 @@
+$ agentctl --log-level bogus info
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: option '--log-level <LEVEL>' argument 'bogus' is invalid. Allowed choices are trace, debug, info, warn, error.

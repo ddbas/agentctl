@@ -1,0 +1,10 @@
+$ agentctl bogus
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: too many arguments. Expected 0 arguments but got 1: bogus.

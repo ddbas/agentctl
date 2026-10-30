@@ -1,0 +1,15 @@
+$ agentctl list --columns activeTools,status
+
+--- exit code
+0
+
+--- stdout
+1 tool	blocked
+2 tools	working
+	idle
+	done
+	unknown
+	unknown
+
+--- stderr
+(empty)

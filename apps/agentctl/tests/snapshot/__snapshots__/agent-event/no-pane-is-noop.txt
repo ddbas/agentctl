@@ -1,0 +1,10 @@
+$ agentctl agent event RUN_STARTED --id r1
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)

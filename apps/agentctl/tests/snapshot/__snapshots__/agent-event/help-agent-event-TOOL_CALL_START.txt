@@ -1,0 +1,18 @@
+$ agentctl agent event TOOL_CALL_START --help
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent event TOOL_CALL_START [options]
+
+A tool call started
+
+Options:
+  --id <ID>      Unique id for this tool call
+  --type <TYPE>  Payload type. `elicitation` drives the agent into `blocked`
+                 (choices: "custom", "elicitation")
+  -h, --help     Print help
+
+--- stderr
+(empty)

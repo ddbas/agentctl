@@ -1,0 +1,10 @@
+$ agentctl list -s
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: option '-s, --server <PATH>' argument missing

@@ -1,0 +1,15 @@
+$ agentctl list -s /tmp/s --sort-by status -r -c pane,status
+
+--- exit code
+0
+
+--- stdout
+0.1	unknown
+0.0	unknown
+0.1	idle
+0.0	working
+1.1	done
+1.0	blocked
+
+--- stderr
+(empty)

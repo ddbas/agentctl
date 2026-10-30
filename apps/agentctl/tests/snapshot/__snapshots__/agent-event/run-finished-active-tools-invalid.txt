@@ -1,0 +1,10 @@
+$ agentctl agent event RUN_FINISHED --id r1 --active-tools abc
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: option '--active-tools <N>' argument 'abc' is invalid. 'abc' is not a valid number

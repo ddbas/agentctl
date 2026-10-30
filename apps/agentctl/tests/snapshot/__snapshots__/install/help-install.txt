@@ -1,0 +1,21 @@
+$ agentctl install --help
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl install [options] <HARNESS>
+
+Install agentctl on a harness.
+
+Writes the necessary integration files for the chosen harness so that `agentctl
+list` shows real-time agent state without polling.
+
+Arguments:
+  HARNESS     Harness to install agentctl on (choices: "pi", "claude")
+
+Options:
+  -h, --help  Print help
+
+--- stderr
+(empty)

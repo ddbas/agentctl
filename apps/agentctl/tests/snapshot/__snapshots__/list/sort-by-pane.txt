@@ -1,0 +1,15 @@
+$ agentctl list --sort-by pane
+
+--- exit code
+0
+
+--- stdout
+claude	work	0.0	working	2 tools
+claude	docs	0.0	unknown	
+pi	work	0.1	idle	
+claude	docs	0.1	unknown	
+claude	play	1.0	blocked	1 tool
+pi	play	1.1	done	
+
+--- stderr
+(empty)

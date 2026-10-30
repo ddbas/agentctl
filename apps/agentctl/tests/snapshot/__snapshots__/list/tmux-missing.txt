@@ -1,0 +1,10 @@
+$ agentctl list
+
+--- exit code
+1
+
+--- stdout
+(empty)
+
+--- stderr
+error: tmux not found — is tmux installed and on PATH?

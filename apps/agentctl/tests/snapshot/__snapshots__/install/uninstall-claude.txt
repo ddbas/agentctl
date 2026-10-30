@@ -1,0 +1,10 @@
+$ agentctl uninstall claude
+
+--- exit code
+0
+
+--- stdout
+Uninstalled agentctl for claude
+
+--- stderr
+(empty)

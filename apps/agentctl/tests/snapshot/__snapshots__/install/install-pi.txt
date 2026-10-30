@@ -1,0 +1,10 @@
+$ agentctl install pi
+
+--- exit code
+0
+
+--- stdout
+Installed agentctl for pi
+
+--- stderr
+(empty)

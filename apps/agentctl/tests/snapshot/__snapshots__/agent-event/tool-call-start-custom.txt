@@ -1,0 +1,10 @@
+$ agentctl agent event TOOL_CALL_START --id t1 --type custom
+
+--- exit code
+0
+
+--- stdout
+(empty)
+
+--- stderr
+(empty)

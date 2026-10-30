@@ -1,0 +1,10 @@
+$ agentctl --bogus
+
+--- exit code
+2
+
+--- stdout
+(empty)
+
+--- stderr
+error: unknown option '--bogus'

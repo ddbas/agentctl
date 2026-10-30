@@ -1,0 +1,20 @@
+$ agentctl agent clear --help
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl agent clear [options]
+
+Whole-session cleanup for the current agent pane.
+
+Removes the status file and any other per-agent artifacts recorded for the pane.
+Exits 0 silently when `$TMUX_PANE` is not set and `--pane` is not supplied, or
+when no state file exists for the pane.
+
+Options:
+  --pane <PANE_ID>  Override the pane ID instead of reading `$TMUX_PANE`
+  -h, --help        Print help
+
+--- stderr
+(empty)

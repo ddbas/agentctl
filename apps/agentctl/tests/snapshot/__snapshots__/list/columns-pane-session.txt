@@ -1,0 +1,15 @@
+$ agentctl list --columns pane,session
+
+--- exit code
+0
+
+--- stdout
+1.0	play
+0.0	work
+0.1	work
+1.1	play
+0.0	docs
+0.1	docs
+
+--- stderr
+(empty)

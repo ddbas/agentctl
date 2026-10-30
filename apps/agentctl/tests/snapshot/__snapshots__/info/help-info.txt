@@ -1,0 +1,18 @@
+$ agentctl info --help
+
+--- exit code
+0
+
+--- stdout
+Usage: agentctl info [options]
+
+Print agentctl's runtime paths and metadata.
+
+Prints resolved paths (log directory, current log file) and metadata (version,
+effective log level) as `key: value` lines. Performs no filesystem writes.
+
+Options:
+  -h, --help  Print help
+
+--- stderr
+(empty)
