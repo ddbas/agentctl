@@ -21,9 +21,14 @@ pnpm = "12.10.1"
 description = "Build all packages"
 run = "pnpm run build"
 
-[tasks.typecheck]
-description = "Typecheck all packages"
-run = "pnpm run typecheck"
+[tasks.deps]
+description = "Install all dependencies"
+usage = 'flag "--frozen-lockfile" help="Fail if the lockfile needs updating"'
+run = "pnpm install ${usage_frozen_lockfile:+--frozen-lockfile}"
+
+[tasks.install]
+description = "Build and symlink agentctl into the local bin dir"
+run = "pnpm run install:local"
 
 [tasks.lint]
 description = "Run all linters (biome and prettier)"
@@ -33,6 +38,6 @@ run = "pnpm run lint"
 description = "Run all tests"
 run = "pnpm run test"
 
-[tasks.install]
-description = "Build and symlink agentctl into the local bin dir"
-run = "pnpm run install:local"
+[tasks.typecheck]
+description = "Typecheck all packages"
+run = "pnpm run typecheck"
