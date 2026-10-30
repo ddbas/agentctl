@@ -1,5 +1,4 @@
 $ agentctl list -s /tmp/s --sort-by status -r -c pane,status
-world: mixed
 
 --- exit code
 0

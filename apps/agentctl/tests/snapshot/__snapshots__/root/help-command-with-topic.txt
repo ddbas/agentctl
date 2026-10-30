@@ -1,5 +1,4 @@
 $ agentctl help list
-world: empty
 
 --- exit code
 2

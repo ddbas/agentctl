@@ -1,5 +1,4 @@
 $ agentctl uninstall
-world: empty
 
 --- exit code
 2

@@ -1,5 +1,4 @@
 $ agentctl list
-world: tmuxMissing
 
 --- exit code
 1

@@ -1,5 +1,4 @@
 $ agentctl install claude
-world: empty
 
 --- exit code
 0

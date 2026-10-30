@@ -1,5 +1,4 @@
 $ agentctl info
-world: noLogDir
 
 --- exit code
 1

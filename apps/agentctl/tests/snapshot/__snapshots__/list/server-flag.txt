@@ -1,5 +1,4 @@
 $ agentctl list -s /tmp/tmux.sock
-world: empty
 
 --- exit code
 0

@@ -1,5 +1,4 @@
 $ agentctl agent clear --pane %99
-world: working
 
 --- exit code
 0

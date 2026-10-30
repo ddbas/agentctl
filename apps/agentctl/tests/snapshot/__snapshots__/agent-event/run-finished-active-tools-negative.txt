@@ -1,5 +1,4 @@
 $ agentctl agent event RUN_FINISHED --id r1 --active-tools -1
-world: empty env: TMUX_PANE=%1
 
 --- exit code
 2

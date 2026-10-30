@@ -1,5 +1,4 @@
 $ agentctl install --help
-world: empty
 
 --- exit code
 0

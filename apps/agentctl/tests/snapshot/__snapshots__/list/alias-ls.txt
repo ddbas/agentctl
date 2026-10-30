@@ -1,5 +1,4 @@
 $ agentctl ls
-world: mixed
 
 --- exit code
 0

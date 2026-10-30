@@ -1,5 +1,4 @@
 $ agentctl list --reverse
-world: mixed
 
 --- exit code
 0

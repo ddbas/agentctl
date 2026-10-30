@@ -1,5 +1,4 @@
 $ agentctl list --columns activeTools,status
-world: mixed
 
 --- exit code
 0

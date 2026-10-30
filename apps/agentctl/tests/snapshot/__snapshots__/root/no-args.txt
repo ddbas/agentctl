@@ -1,5 +1,4 @@
 $ agentctl
-world: empty
 
 --- exit code
 0

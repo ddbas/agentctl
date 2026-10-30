@@ -1,5 +1,4 @@
 $ agentctl list
-world: mixed (tty)
 
 --- exit code
 0

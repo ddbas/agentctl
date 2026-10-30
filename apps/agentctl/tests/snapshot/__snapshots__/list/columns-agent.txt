@@ -1,5 +1,4 @@
 $ agentctl list --columns agent
-world: mixed
 
 --- exit code
 0

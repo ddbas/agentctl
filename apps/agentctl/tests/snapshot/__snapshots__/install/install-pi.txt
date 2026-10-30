@@ -1,5 +1,4 @@
 $ agentctl install pi
-world: empty
 
 --- exit code
 0

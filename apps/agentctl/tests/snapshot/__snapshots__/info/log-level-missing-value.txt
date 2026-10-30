@@ -1,5 +1,4 @@
 $ agentctl info --log-level
-world: empty
 
 --- exit code
 2

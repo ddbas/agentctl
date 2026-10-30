@@ -1,5 +1,4 @@
 $ agentctl agent event BOGUS --id x
-world: empty
 
 --- exit code
 2

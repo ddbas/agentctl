@@ -1,5 +1,4 @@
 $ agentctl agent event TOOL_CALL_RESULT --id t1
-world: working env: TMUX_PANE=%1
 
 --- exit code
 0

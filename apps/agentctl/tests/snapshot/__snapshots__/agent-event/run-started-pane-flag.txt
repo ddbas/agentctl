@@ -1,5 +1,4 @@
 $ agentctl agent event --pane %1 RUN_STARTED --id r1
-world: working
 
 --- exit code
 0

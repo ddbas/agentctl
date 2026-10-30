@@ -1,5 +1,4 @@
 $ agentctl agent clear
-world: working env: TMUX_PANE=%1
 
 --- exit code
 0

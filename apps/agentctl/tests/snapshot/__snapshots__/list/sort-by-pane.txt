@@ -1,5 +1,4 @@
 $ agentctl list --sort-by pane
-world: mixed
 
 --- exit code
 0

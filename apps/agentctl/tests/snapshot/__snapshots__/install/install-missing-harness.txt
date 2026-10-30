@@ -1,5 +1,4 @@
 $ agentctl install
-world: empty
 
 --- exit code
 2

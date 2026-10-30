@@ -1,5 +1,4 @@
 $ agentctl agent event TOOL_CALL_START --id t1 --type bogus
-world: empty env: TMUX_PANE=%1
 
 --- exit code
 2

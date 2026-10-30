@@ -1,5 +1,4 @@
 $ agentctl list -c agent,bogus
-world: empty
 
 --- exit code
 2

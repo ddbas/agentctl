@@ -1,5 +1,4 @@
 $ agentctl agent event --harness claude SESSION_STARTED --id s1 --pane %8
-world: empty
 
 --- exit code
 0

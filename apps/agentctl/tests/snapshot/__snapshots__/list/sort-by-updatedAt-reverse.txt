@@ -1,5 +1,4 @@
 $ agentctl list --sort-by updatedAt -r
-world: mixed
 
 --- exit code
 0

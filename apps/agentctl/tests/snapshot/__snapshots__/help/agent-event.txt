@@ -1,5 +1,4 @@
 $ agentctl agent event --help
-world: empty
 
 --- exit code
 0

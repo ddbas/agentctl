@@ -1,5 +1,4 @@
 $ agentctl agent event TOOL_CALL_RESULT --help
-world: empty
 
 --- exit code
 0

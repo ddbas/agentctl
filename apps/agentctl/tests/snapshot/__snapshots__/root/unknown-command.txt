@@ -1,5 +1,4 @@
 $ agentctl bogus
-world: empty
 
 --- exit code
 2

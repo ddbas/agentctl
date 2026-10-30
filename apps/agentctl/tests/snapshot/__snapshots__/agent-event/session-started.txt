@@ -1,5 +1,4 @@
 $ agentctl agent event SESSION_STARTED --id s1
-world: working env: TMUX_PANE=%1
 
 --- exit code
 0

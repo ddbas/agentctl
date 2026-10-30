@@ -1,5 +1,4 @@
 $ agentctl info --log-level debug
-world: empty
 
 --- exit code
 0

@@ -1,5 +1,4 @@
 $ agentctl list --columns pane,session
-world: mixed
 
 --- exit code
 0

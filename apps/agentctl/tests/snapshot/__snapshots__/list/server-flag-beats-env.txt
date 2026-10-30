@@ -1,5 +1,4 @@
 $ agentctl list --server /tmp/flag.sock
-world: empty env: AGENTCTL_TMUX_SOCKET=/tmp/env.sock
 
 --- exit code
 0

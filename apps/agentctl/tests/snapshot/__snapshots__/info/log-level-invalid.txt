@@ -1,5 +1,4 @@
 $ agentctl --log-level bogus info
-world: empty
 
 --- exit code
 2

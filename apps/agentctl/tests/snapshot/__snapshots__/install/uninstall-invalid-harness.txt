@@ -1,5 +1,4 @@
 $ agentctl uninstall bogus
-world: empty
 
 --- exit code
 2

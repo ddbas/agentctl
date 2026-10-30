@@ -72,10 +72,8 @@ export async function runCli(c: CliCase): Promise<CliResult> {
 export function renderSnapshot(c: CliCase, r: CliResult): string {
   const section = (title: string, body: string) =>
     `--- ${title}\n${body === "" ? "(empty)\n" : body.endsWith("\n") ? body : `${body}\n`}`;
-  const env = Object.entries(c.env ?? {}).map(([k, v]) => `${k}=${v}`);
   return [
     `$ agentctl ${c.args.join(" ")}`.trimEnd(),
-    `world: ${c.world ?? "empty"}${c.tty ? " (tty)" : ""}${env.length ? ` env: ${env.join(" ")}` : ""}`,
     "",
     section("exit code", String(r.exitCode)),
     section("stdout", r.stdout),
